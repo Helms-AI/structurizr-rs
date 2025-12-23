@@ -232,7 +232,6 @@ workspace "Enterprise Healthcare System" "A comprehensive hospital information s
             relationship "Relationship" {
                 color "#707070"
                 thickness 2
-                routing Orthogonal
             }
         }
     }

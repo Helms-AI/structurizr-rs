@@ -61,10 +61,6 @@ workspace "E-Commerce System" "A simple e-commerce system demonstrating dynamic 
             element "Database" {
                 shape Cylinder
             }
-            relationship "Relationship" {
-                color "#707070"
-                routing Orthogonal
-            }
         }
     }
 }

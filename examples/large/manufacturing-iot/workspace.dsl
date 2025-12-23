@@ -276,10 +276,6 @@ workspace "Smart Manufacturing IoT Platform" "Industry 4.0 Smart Factory with co
             element "Database" {
                 shape Cylinder
             }
-            relationship "Relationship" {
-                color "#707070"
-                routing Orthogonal
-            }
         }
     }
 }

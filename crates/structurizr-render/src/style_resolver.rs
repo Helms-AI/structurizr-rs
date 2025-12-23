@@ -185,7 +185,7 @@ impl Default for ResolvedRelationshipStyle {
             thickness: defaults::DEFAULT_RELATIONSHIP_THICKNESS,
             color: defaults::RELATIONSHIP_COLOR.to_string(),
             style: LineStyle::Solid,
-            routing: Routing::Direct,
+            routing: Routing::Orthogonal,
             font_size: 12,
             opacity: 100,
             dashed: false,

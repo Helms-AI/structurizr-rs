@@ -59,7 +59,6 @@ workspace "Orthogonal Routing Test" "Testing orthogonal edge routing with minima
                 color "#ffffff"
             }
             relationship "Relationship" {
-                routing Orthogonal
                 color "#707070"
             }
         }
