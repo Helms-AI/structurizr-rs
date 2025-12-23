@@ -1,0 +1,76 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1500" width="2000" height="1500">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#707070" />
+    </marker>
+  </defs>
+  <rect width="2000" height="1500" fill="#ffffff"/>
+  <line x1="325" y1="250" x2="-50" y2="850" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="138" y="540" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Visits bigbank.com using</text>
+  <text x="138" y="555" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#707070">[HTTPS]</text>
+  <line x1="325" y1="250" x2="325" y2="1450" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="325" y="840" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Views account and makes payments using</text>
+  <line x1="325" y1="250" x2="700" y2="850" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="512" y="540" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Views account and makes payments using</text>
+  <line x1="-50" y1="850" x2="325" y2="1450" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="138" y="1140" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Delivers to the customer&apos;s browser</text>
+  <line x1="325" y1="1450" x2="325" y2="2050" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="325" y="1740" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Makes API calls to</text>
+  <text x="325" y="1755" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#707070">[JSON/HTTPS]</text>
+  <line x1="700" y1="850" x2="325" y2="2050" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="512" y="1440" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Makes API calls to</text>
+  <text x="512" y="1455" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#707070">[JSON/HTTPS]</text>
+  <line x1="325" y1="2050" x2="-425" y2="2650" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="-50" y="2340" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Reads from and writes to</text>
+  <text x="-50" y="2355" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#707070">[SQL/TCP]</text>
+  <line x1="325" y1="2050" x2="325" y2="2650" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="325" y="2340" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Gets account info from</text>
+  <text x="325" y="2355" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#707070">[XML/HTTPS]</text>
+  <line x1="325" y1="2050" x2="1075" y2="2650" stroke="#707070" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <text x="700" y="2340" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#707070">Sends email using</text>
+  <text x="700" y="2355" text-anchor="middle" font-family="Arial, sans-serif" font-size="10" fill="#707070">[SMTP]</text>
+  <circle cx="325" cy="140" r="30" fill="#08427b"/>
+  <rect x="150" y="180" width="350" height="200" rx="10" fill="#08427b"/>
+  <text x="325" y="320" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Personal Banking Customer</text>
+  <text x="325" y="338" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Person]</text>
+  <text x="325" y="358" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">A customer of the bank with personal</text>
+  <text x="325" y="374" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">accounts</text>
+  <rect x="-275" y="700" width="450" height="300" rx="5" fill="#438dd5"/>
+  <text x="-50" y="740" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Web Application</text>
+  <text x="-50" y="758" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Container]</text>
+  <text x="-50" y="774" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Java/Spring MVC]</text>
+  <text x="-50" y="792" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Delivers static content and the single</text>
+  <text x="-50" y="808" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">page application</text>
+  <rect x="100" y="1300" width="450" height="300" rx="5" fill="#438dd5"/>
+  <text x="325" y="1340" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Single-Page Application</text>
+  <text x="325" y="1358" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Container]</text>
+  <text x="325" y="1374" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[JavaScript/React]</text>
+  <text x="325" y="1392" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Provides banking functionality via</text>
+  <text x="325" y="1408" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">browser</text>
+  <rect x="475" y="700" width="450" height="300" rx="5" fill="#438dd5"/>
+  <text x="700" y="740" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Mobile App</text>
+  <text x="700" y="758" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Container]</text>
+  <text x="700" y="774" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[React Native]</text>
+  <text x="700" y="792" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Provides banking functionality via</text>
+  <text x="700" y="808" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">mobile</text>
+  <rect x="100" y="1900" width="450" height="300" rx="5" fill="#438dd5"/>
+  <text x="325" y="1940" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">API Application</text>
+  <text x="325" y="1958" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Container]</text>
+  <text x="325" y="1974" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Java/Spring Boot]</text>
+  <text x="325" y="1992" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Provides internet banking via JSON/HTTPS</text>
+  <text x="325" y="2008" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">API</text>
+  <rect x="-650" y="2500" width="450" height="300" rx="5" fill="#438dd5"/>
+  <text x="-425" y="2540" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Database</text>
+  <text x="-425" y="2558" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Container]</text>
+  <text x="-425" y="2574" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[PostgreSQL]</text>
+  <text x="-425" y="2592" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Stores user registration, auth, and</text>
+  <text x="-425" y="2608" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">access logs</text>
+  <rect x="100" y="2500" width="450" height="300" rx="5" fill="#999999"/>
+  <text x="325" y="2540" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Mainframe Banking System</text>
+  <text x="325" y="2558" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[External System]</text>
+  <text x="325" y="2578" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Stores all core banking information</text>
+  <rect x="850" y="2500" width="450" height="300" rx="5" fill="#999999"/>
+  <text x="1075" y="2540" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">E-mail System</text>
+  <text x="1075" y="2558" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[External System]</text>
+  <text x="1075" y="2578" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Internal Microsoft Exchange email system</text>
+</svg>

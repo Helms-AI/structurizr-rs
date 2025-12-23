@@ -1,0 +1,276 @@
+{
+  "name": "Big Bank plc",
+  "description": "An example C4 model for a fictional internet banking system",
+  "last_modified_date": "2025-12-22T16:10:22.428143Z",
+  "last_modified_agent": "structurizr-rs",
+  "model": {
+    "people": [
+      {
+        "id": "e10942f8-34b7-416a-b3e6-95cd60e46882",
+        "name": "Personal Banking Customer",
+        "description": "A customer of the bank with personal accounts",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      }
+    ],
+    "software_systems": [
+      {
+        "id": "381b1739-1778-4995-bd10-aa7938ffa9f6",
+        "name": "Mainframe Banking System",
+        "description": "Stores all core banking information",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "39c2545f-228a-4f77-94d0-86ee0c5f65af",
+        "name": "E-mail System",
+        "description": "Internal Microsoft Exchange email system",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "acf72645-6a8b-47a9-91ad-f92fc6d13ef3",
+        "name": "Internet Banking System",
+        "description": "Allows customers to view account info and make payments",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "b604af60-4feb-4016-befd-212b9767ce8a",
+            "name": "Web Application",
+            "description": "Delivers static content and the single page application",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java/Spring MVC"
+          },
+          {
+            "id": "81bee794-b70e-4368-89e7-97d78e73d089",
+            "name": "Single-Page Application",
+            "description": "Provides banking functionality via browser",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "JavaScript/React"
+          },
+          {
+            "id": "625ff24a-2e18-47ba-bf4f-a86fa72afc00",
+            "name": "Mobile App",
+            "description": "Provides banking functionality via mobile",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "React Native"
+          },
+          {
+            "id": "93556732-4ecf-409e-81a1-1d722a7df854",
+            "name": "API Application",
+            "description": "Provides internet banking via JSON/HTTPS API",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java/Spring Boot"
+          },
+          {
+            "id": "b0ba9483-bfc3-47f9-9d92-15c852eeeb49",
+            "name": "Database",
+            "description": "Stores user registration, auth, and access logs",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "id": "790d1f46-f59e-4be9-aaaa-2bc8f65858ea",
+        "source_id": "e10942f8-34b7-416a-b3e6-95cd60e46882",
+        "destination_id": "b604af60-4feb-4016-befd-212b9767ce8a",
+        "description": "Visits bigbank.com using",
+        "technology": "HTTPS",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "2d37fc47-5238-4961-a029-54a6ac0b9c7e",
+        "source_id": "e10942f8-34b7-416a-b3e6-95cd60e46882",
+        "destination_id": "81bee794-b70e-4368-89e7-97d78e73d089",
+        "description": "Views account and makes payments using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "417a14e5-a319-4d13-8040-40a4e25d1433",
+        "source_id": "e10942f8-34b7-416a-b3e6-95cd60e46882",
+        "destination_id": "625ff24a-2e18-47ba-bf4f-a86fa72afc00",
+        "description": "Views account and makes payments using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "0af586a8-e81b-459f-a5f2-c1412b5e5239",
+        "source_id": "b604af60-4feb-4016-befd-212b9767ce8a",
+        "destination_id": "81bee794-b70e-4368-89e7-97d78e73d089",
+        "description": "Delivers to the customer's browser",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "c4992fb6-1713-4904-82f4-befe5d3dbd0a",
+        "source_id": "81bee794-b70e-4368-89e7-97d78e73d089",
+        "destination_id": "93556732-4ecf-409e-81a1-1d722a7df854",
+        "description": "Makes API calls to",
+        "technology": "JSON/HTTPS",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "d3446dd2-d8f6-48d5-b64b-cbe4ac346f7b",
+        "source_id": "625ff24a-2e18-47ba-bf4f-a86fa72afc00",
+        "destination_id": "93556732-4ecf-409e-81a1-1d722a7df854",
+        "description": "Makes API calls to",
+        "technology": "JSON/HTTPS",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "a1fc6281-6cae-40dc-ac1c-abcce67551a5",
+        "source_id": "93556732-4ecf-409e-81a1-1d722a7df854",
+        "destination_id": "b0ba9483-bfc3-47f9-9d92-15c852eeeb49",
+        "description": "Reads from and writes to",
+        "technology": "SQL/TCP",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "e835d361-256f-4fca-9e1d-578a9520766a",
+        "source_id": "93556732-4ecf-409e-81a1-1d722a7df854",
+        "destination_id": "381b1739-1778-4995-bd10-aa7938ffa9f6",
+        "description": "Gets account info from",
+        "technology": "XML/HTTPS",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "01105653-0baf-4baf-aa91-01152f3ac540",
+        "source_id": "93556732-4ecf-409e-81a1-1d722a7df854",
+        "destination_id": "39c2545f-228a-4f77-94d0-86ee0c5f65af",
+        "description": "Sends email using",
+        "technology": "SMTP",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      }
+    ]
+  },
+  "views": {
+    "system_landscape_views": [
+      {
+        "key": "SystemLandscape",
+        "title": "Overview of the banking landscape",
+        "auto_layout": {
+          "direction": "TopBottom",
+          "rank_separation": 300,
+          "node_separation": 300
+        },
+        "enterprise_boundary_visible": true
+      }
+    ],
+    "system_context_views": [
+      {
+        "key": "SystemContext",
+        "title": "System Context for Internet Banking",
+        "auto_layout": {
+          "direction": "TopBottom",
+          "rank_separation": 300,
+          "node_separation": 300
+        },
+        "software_system_id": "acf72645-6a8b-47a9-91ad-f92fc6d13ef3",
+        "enterprise_boundary_visible": true
+      }
+    ],
+    "container_views": [
+      {
+        "key": "Containers",
+        "title": "Container diagram for Internet Banking",
+        "auto_layout": {
+          "direction": "TopBottom",
+          "rank_separation": 300,
+          "node_separation": 300
+        },
+        "software_system_id": "acf72645-6a8b-47a9-91ad-f92fc6d13ef3",
+        "external_software_system_boundary_visible": true
+      }
+    ]
+  },
+  "documentation": {},
+  "configuration": {
+    "styles": {
+      "elements": [
+        {
+          "tag": "Person",
+          "shape": "Person",
+          "background": "#08427b",
+          "color": "#ffffff"
+        },
+        {
+          "tag": "Software System",
+          "background": "#1168bd",
+          "color": "#ffffff"
+        },
+        {
+          "tag": "External",
+          "background": "#999999",
+          "color": "#ffffff"
+        },
+        {
+          "tag": "Container",
+          "background": "#438dd5",
+          "color": "#ffffff"
+        }
+      ],
+      "relationships": [
+        {
+          "tag": "Relationship",
+          "color": "#707070"
+        }
+      ]
+    }
+  }
+}

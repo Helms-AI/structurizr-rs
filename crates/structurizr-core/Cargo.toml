@@ -1,0 +1,18 @@
+[package]
+name = "structurizr-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core C4 model types and workspace management for Structurizr"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+uuid.workspace = true
+chrono.workspace = true
+ureq = "2.10"
+lazy_static = "1.5"
+
+[dev-dependencies]
+pretty_assertions.workspace = true

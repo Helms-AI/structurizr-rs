@@ -1,0 +1,28 @@
+[package]
+name = "structurizr-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Web server for Structurizr Lite"
+
+[dependencies]
+structurizr-core.workspace = true
+structurizr-dsl.workspace = true
+structurizr-render.workspace = true
+structurizr-export.workspace = true
+axum.workspace = true
+tokio.workspace = true
+tower.workspace = true
+tower-http.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+notify.workspace = true
+tantivy.workspace = true
+uuid.workspace = true
+regex-lite.workspace = true
+chrono.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true

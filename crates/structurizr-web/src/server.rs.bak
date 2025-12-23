@@ -1,0 +1,138 @@
+//! Web server implementation.
+
+use axum::{
+    routing::{get, post, put},
+    Router,
+};
+use tower_http::cors::CorsLayer;
+use tower_http::trace::TraceLayer;
+use tracing::info;
+
+use crate::editor;
+use crate::error::Result;
+use crate::handlers;
+use crate::state::{AppState, Config};
+
+/// Structurizr web server.
+pub struct Server {
+    config: Config,
+}
+
+impl Server {
+    /// Create a new server with the given configuration.
+    pub fn new(config: Config) -> Self {
+        Self { config }
+    }
+
+    /// Create a server with default configuration.
+    pub fn with_data_dir(data_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self::new(Config::default().with_data_dir(data_dir))
+    }
+
+    /// Build the router.
+    fn build_router(state: AppState) -> Router {
+        Router::new()
+            // Pages
+            .route("/", get(handlers::index))
+            .route("/view/:key", get(handlers::view_diagram))
+            .route("/edit/:key", get(handlers::edit_diagram))
+            .route("/docs", get(handlers::documentation))
+            .route("/search", get(handlers::search_page))
+            .route("/tree", get(handlers::tree_view))
+            .route("/presentation", get(handlers::presentation_mode))
+            .route("/explore", get(handlers::explore_view))
+
+            // API endpoints
+            .route("/api/workspace", get(handlers::get_workspace))
+            .route("/api/save", post(editor::save))
+            .route("/api/search", get(handlers::search_api))
+            .route("/health", get(handlers::health))
+
+            // Editor API endpoints
+            .route("/api/view/:view_key/positions", get(editor::get_positions))
+            .route(
+                "/api/view/:view_key/positions",
+                put(editor::batch_update_positions),
+            )
+            .route(
+                "/api/view/:view_key/element/:element_id/position",
+                put(editor::update_position),
+            )
+
+            // WebSocket endpoint for real-time updates
+            .route("/ws/edit/:key", get(editor::editor_ws))
+
+            // Export endpoints
+            .route("/export/json", get(handlers::export_json))
+            .route("/view/:key/svg", get(handlers::render_svg))
+            .route("/view/:key/plantuml", get(handlers::export_plantuml))
+            .route("/view/:key/mermaid", get(handlers::export_mermaid))
+            .route("/view/:key/dot", get(handlers::export_dot))
+            .route("/view/:key/d2", get(handlers::export_d2))
+
+            // Middleware
+            .layer(TraceLayer::new_for_http())
+            .layer(CorsLayer::permissive())
+            .with_state(state)
+    }
+
+    /// Run the server.
+    pub async fn run(self) -> Result<()> {
+        let state = AppState::new(self.config.clone());
+
+        // Load workspace
+        info!("Loading workspace from {:?}", self.config.data_dir);
+        if let Err(e) = state.load_workspace().await {
+            tracing::warn!("Failed to load workspace: {}. Starting with empty workspace.", e);
+        }
+
+        // Start file watcher for auto-reload
+        if let Err(e) = state.start_watcher().await {
+            tracing::warn!("Failed to start file watcher: {}. Auto-reload disabled.", e);
+        } else {
+            info!("File watcher started - workspace will auto-reload on changes");
+        }
+
+        let app = Self::build_router(state);
+        let addr = self.config.address();
+
+        info!("Starting Structurizr server at http://{}", addr);
+
+        let listener = tokio::net::TcpListener::bind(&addr).await?;
+        axum::serve(listener, app).await?;
+
+        Ok(())
+    }
+
+    /// Run the server on a specific port.
+    pub async fn run_on_port(data_dir: impl Into<std::path::PathBuf>, port: u16) -> Result<()> {
+        let config = Config::default()
+            .with_data_dir(data_dir)
+            .with_port(port);
+
+        Server::new(config).run().await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_config_defaults() {
+        let config = Config::default();
+        assert_eq!(config.port, 8080);
+        assert_eq!(config.host, "127.0.0.1");
+    }
+
+    #[test]
+    fn test_config_builder() {
+        let config = Config::default()
+            .with_port(3000)
+            .with_host("0.0.0.0");
+
+        assert_eq!(config.port, 3000);
+        assert_eq!(config.host, "0.0.0.0");
+        assert_eq!(config.address(), "0.0.0.0:3000");
+    }
+}

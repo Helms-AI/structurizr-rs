@@ -1,0 +1,13 @@
+[package]
+name = "structurizr-render"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "SVG diagram rendering for Structurizr workspaces"
+
+[dependencies]
+structurizr-core.workspace = true
+thiserror.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true

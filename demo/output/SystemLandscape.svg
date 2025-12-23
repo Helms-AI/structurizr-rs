@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 2000 1500" width="2000" height="1500">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#707070" />
+    </marker>
+  </defs>
+  <rect width="2000" height="1500" fill="#ffffff"/>
+  <circle cx="-800" cy="140" r="30" fill="#08427b"/>
+  <rect x="-975" y="180" width="350" height="200" rx="10" fill="#08427b"/>
+  <text x="-800" y="320" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Personal Banking Customer</text>
+  <text x="-800" y="338" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Person]</text>
+  <text x="-800" y="358" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">A customer of the bank with personal</text>
+  <text x="-800" y="374" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">accounts</text>
+  <rect x="-275" y="100" width="450" height="300" rx="5" fill="#1168bd"/>
+  <text x="-50" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Mainframe Banking System</text>
+  <text x="-50" y="158" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Software System]</text>
+  <text x="-50" y="178" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Stores all core banking information</text>
+  <rect x="475" y="100" width="450" height="300" rx="5" fill="#1168bd"/>
+  <text x="700" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">E-mail System</text>
+  <text x="700" y="158" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Software System]</text>
+  <text x="700" y="178" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Internal Microsoft Exchange email system</text>
+  <rect x="1225" y="100" width="450" height="300" rx="5" fill="#1168bd"/>
+  <text x="1450" y="140" text-anchor="middle" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#ffffff">Internet Banking System</text>
+  <text x="1450" y="158" text-anchor="middle" font-family="Arial, sans-serif" font-size="11" fill="#ffffff">[Software System]</text>
+  <text x="1450" y="178" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">Allows customers to view account info</text>
+  <text x="1450" y="194" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="#ffffff">and make payments</text>
+</svg>

@@ -1,0 +1,21 @@
+# Build artifacts
+/target/
+**/*.rs.bk
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary/throwaway files (Claude Code process outputs)
+/tmp/
+
+# Local configuration
+.env
+.env.local
