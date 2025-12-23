@@ -581,34 +581,23 @@ impl SvgRenderer {
         let mut element_ids: Vec<String> = Vec::new();
         let mut elements_info: Vec<ElementInfo> = Vec::new();
 
-        // Find the container and its parent system
+        // Find the container
         let mut target_container = None;
-        let mut parent_system = None;
 
         for system in &model.software_systems {
             for container in &system.containers {
                 if container.id() == view.container_id {
                     target_container = Some(container);
-                    parent_system = Some(system);
                     break;
                 }
             }
+            if target_container.is_some() {
+                break;
+            }
         }
 
-        // Add people
-        for person in &model.people {
-            element_ids.push(person.id().to_string());
-            elements_info.push(ElementInfo {
-                id: person.id(),
-                name: person.name().to_string(),
-                description: person.properties.description.clone(),
-                element_type: ElementType::Person,
-                technology: None,
-                tags: person.properties.tags.clone(),
-            });
-        }
-
-        // Add components from the target container
+        // Add ONLY components from the target container
+        // This gives a focused C3 view showing just the internal structure
         if let Some(container) = target_container {
             for component in &container.components {
                 element_ids.push(component.id().to_string());
@@ -619,38 +608,6 @@ impl SvgRenderer {
                     element_type: ElementType::Component,
                     technology: component.technology.clone(),
                     tags: component.properties.tags.clone(),
-                });
-            }
-        }
-
-        // Add other containers from the same system
-        if let Some(system) = parent_system {
-            for container in &system.containers {
-                if container.id() != view.container_id {
-                    element_ids.push(container.id().to_string());
-                    elements_info.push(ElementInfo {
-                        id: container.id(),
-                        name: container.name().to_string(),
-                        description: container.properties.description.clone(),
-                        element_type: ElementType::Container,
-                        technology: container.technology.clone(),
-                        tags: container.properties.tags.clone(),
-                    });
-                }
-            }
-        }
-
-        // Add external systems
-        for system in &model.software_systems {
-            if parent_system.map(|p| p.id() != system.id()).unwrap_or(true) {
-                element_ids.push(system.id().to_string());
-                elements_info.push(ElementInfo {
-                    id: system.id(),
-                    name: system.name().to_string(),
-                    description: system.properties.description.clone(),
-                    element_type: ElementType::ExternalSystem,
-                    technology: None,
-                    tags: system.properties.tags.clone(),
                 });
             }
         }

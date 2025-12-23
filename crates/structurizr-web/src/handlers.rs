@@ -7,6 +7,8 @@ use axum::{
     Json,
 };
 
+use structurizr_core::model::ElementId;
+use structurizr_core::navigation::NavigationIndex;
 use structurizr_core::view::SystemLandscapeView;
 use structurizr_core::Workspace;
 use structurizr_export::{D2Exporter, DotExporter, JsonExporter, MermaidExporter, PlantUmlExporter};
@@ -145,61 +147,175 @@ pub async fn view_diagram(
 
     let svg_url = format!("/view/{}/svg", view_key);
     let model = workspace.model();
+    let views = workspace.views();
 
-    // Collect elements and compute layout to get positions
+    // Build navigation index for drill-down support
+    let nav_index = NavigationIndex::build(views);
+
+    // Build breadcrumbs for this view
+    let breadcrumbs = nav_index.build_breadcrumbs(&view_key);
+    let breadcrumbs_json = serde_json::to_string(&breadcrumbs).unwrap_or_else(|_| "[]".to_string());
+
+    // Get current view info
+    let current_view_title = nav_index.get_view_title(&view_key)
+        .cloned()
+        .unwrap_or_else(|| view_key.clone());
+
+    // Collect elements based on view type - MUST match SVG renderer element collection
+    // Tuple: (id_string, element_id, name, type, description, technology)
     let mut element_ids: Vec<String> = Vec::new();
-    let mut element_data: Vec<(String, String, String, Option<String>, Option<String>)> = Vec::new(); // (id, name, type, description, technology)
+    let mut element_data: Vec<(String, ElementId, String, String, Option<String>, Option<String>)> = Vec::new();
+    let mut auto_layout_config: Option<&structurizr_core::view::AutoLayout> = None;
 
-    for person in &model.people {
-        element_ids.push(person.id().to_string());
-        element_data.push((
-            person.id().to_string(),
-            person.name().to_string(),
-            "Person".to_string(),
-            person.properties.description.clone(),
-            None,
-        ));
-    }
-
-    for system in &model.software_systems {
-        element_ids.push(system.id().to_string());
-        element_data.push((
-            system.id().to_string(),
-            system.name().to_string(),
-            "Software System".to_string(),
-            system.properties.description.clone(),
-            None,
-        ));
-
-        for container in &system.containers {
-            element_ids.push(container.id().to_string());
+    // Determine view type and collect appropriate elements (matching SVG renderer logic)
+    if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+        // SystemLandscape: People + Software Systems
+        auto_layout_config = view.properties.auto_layout.as_ref();
+        for person in &model.people {
+            element_ids.push(person.id().to_string());
             element_data.push((
-                container.id().to_string(),
-                container.name().to_string(),
-                "Container".to_string(),
-                container.properties.description.clone(),
-                container.technology.clone(),
+                person.id().to_string(),
+                person.id(),
+                person.name().to_string(),
+                "Person".to_string(),
+                person.properties.description.clone(),
+                None,
+            ));
+        }
+        for system in &model.software_systems {
+            element_ids.push(system.id().to_string());
+            element_data.push((
+                system.id().to_string(),
+                system.id(),
+                system.name().to_string(),
+                "Software System".to_string(),
+                system.properties.description.clone(),
+                None,
+            ));
+        }
+    } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
+        // SystemContext: People + Software Systems
+        auto_layout_config = view.properties.auto_layout.as_ref();
+        for person in &model.people {
+            element_ids.push(person.id().to_string());
+            element_data.push((
+                person.id().to_string(),
+                person.id(),
+                person.name().to_string(),
+                "Person".to_string(),
+                person.properties.description.clone(),
+                None,
+            ));
+        }
+        for system in &model.software_systems {
+            element_ids.push(system.id().to_string());
+            element_data.push((
+                system.id().to_string(),
+                system.id(),
+                system.name().to_string(),
+                "Software System".to_string(),
+                system.properties.description.clone(),
+                None,
+            ));
+        }
+    } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
+        // Container: People + Containers from the target software system
+        auto_layout_config = view.properties.auto_layout.as_ref();
+        for person in &model.people {
+            element_ids.push(person.id().to_string());
+            element_data.push((
+                person.id().to_string(),
+                person.id(),
+                person.name().to_string(),
+                "Person".to_string(),
+                person.properties.description.clone(),
+                None,
+            ));
+        }
+        // Find the target software system and add its containers
+        if let Some(system) = model.software_systems.iter().find(|s| s.id() == view.software_system_id) {
+            for container in &system.containers {
+                element_ids.push(container.id().to_string());
+                element_data.push((
+                    container.id().to_string(),
+                    container.id(),
+                    container.name().to_string(),
+                    "Container".to_string(),
+                    container.properties.description.clone(),
+                    container.technology.clone(),
+                ));
+            }
+        }
+    } else if let Some(view) = views.component_views.iter().find(|v| v.properties.key == view_key) {
+        // Component: ONLY Components from the target container (matching SVG renderer)
+        // This gives a focused C3 view showing just the internal structure
+        auto_layout_config = view.properties.auto_layout.as_ref();
+        // Find the target container and add its components
+        for system in &model.software_systems {
+            if let Some(container) = system.containers.iter().find(|c| c.id() == view.container_id) {
+                for component in &container.components {
+                    element_ids.push(component.id().to_string());
+                    element_data.push((
+                        component.id().to_string(),
+                        component.id(),
+                        component.name().to_string(),
+                        "Component".to_string(),
+                        component.properties.description.clone(),
+                        component.technology.clone(),
+                    ));
+                }
+                break;
+            }
+        }
+    } else {
+        // Fallback: include all people and software systems
+        for person in &model.people {
+            element_ids.push(person.id().to_string());
+            element_data.push((
+                person.id().to_string(),
+                person.id(),
+                person.name().to_string(),
+                "Person".to_string(),
+                person.properties.description.clone(),
+                None,
+            ));
+        }
+        for system in &model.software_systems {
+            element_ids.push(system.id().to_string());
+            element_data.push((
+                system.id().to_string(),
+                system.id(),
+                system.name().to_string(),
+                "Software System".to_string(),
+                system.properties.description.clone(),
+                None,
             ));
         }
     }
 
-    // Build edges from relationships
+    // Build edges from relationships (filter to only relevant elements)
+    let element_id_set: std::collections::HashSet<String> = element_ids.iter().cloned().collect();
     let edges: Vec<LayoutEdge> = model
         .relationships
         .iter()
+        .filter(|r| element_id_set.contains(&r.source_id.to_string()) && element_id_set.contains(&r.destination_id.to_string()))
         .map(|r| LayoutEdge {
             source: r.source_id.to_string(),
             target: r.destination_id.to_string(),
         })
         .collect();
 
-    // Compute layout
-    let layout = GridLayout::default();
-    let nodes = layout.layout(&element_ids, &edges);
+    // Compute layout using layout_adaptive (matching SVG renderer)
+    let layout = if let Some(ref auto_layout) = auto_layout_config {
+        GridLayout::from_config(auto_layout)
+    } else {
+        GridLayout::default()
+    };
+    let nodes = layout.layout_adaptive(&element_ids, &edges);
 
-    // Build elements JSON with position data for hit-testing
+    // Build elements JSON with position data for hit-testing and drill-down info
     let mut elements_json = String::from("[");
-    for (i, (id, name, elem_type, desc, tech)) in element_data.iter().enumerate() {
+    for (i, (id, element_id, name, elem_type, desc, tech)) in element_data.iter().enumerate() {
         if i > 0 { elements_json.push(','); }
 
         // Find the corresponding layout node
@@ -208,8 +324,14 @@ pub async fn view_diagram(
             .map(|n| (n.position.x, n.position.y, n.size.width, n.size.height))
             .unwrap_or((0.0, 0.0, 450.0, 300.0));
 
+        // Check if this element can be drilled into
+        let drillable = nav_index.is_drillable(*element_id);
+        let drill_target = nav_index.get_drill_target(*element_id);
+        let target_view = drill_target.map(|t| format!("\"{}\"", escape_json(&t.view_key))).unwrap_or_else(|| "null".to_string());
+        let target_type = drill_target.map(|t| format!("\"{}\"", t.target_type.display_name())).unwrap_or_else(|| "null".to_string());
+
         elements_json.push_str(&format!(
-            r#"{{"id":"{}","name":"{}","type":"{}","description":{},"technology":{},"x":{},"y":{},"width":{},"height":{}}}"#,
+            r#"{{"id":"{}","name":"{}","type":"{}","description":{},"technology":{},"x":{},"y":{},"width":{},"height":{},"drillable":{},"targetView":{},"targetType":{}}}"#,
             escape_json(id),
             escape_json(name),
             escape_json(elem_type),
@@ -219,6 +341,9 @@ pub async fn view_diagram(
             y as i32,
             width as i32,
             height as i32,
+            drillable,
+            target_view,
+            target_type,
         ));
     }
     elements_json.push(']');
@@ -247,17 +372,30 @@ pub async fn view_diagram(
         .tooltip .type {{ color: #888; font-size: 11px; margin-bottom: 8px; }}
         .tooltip .desc {{ line-height: 1.4; }}
         .tooltip .tech {{ color: #6af; margin-top: 6px; font-size: 12px; }}
+        .tooltip .drill-hint {{ color: #4c9; margin-top: 8px; font-size: 11px; font-style: italic; }}
         .minimap {{ position: absolute; bottom: 20px; right: 20px; width: 200px; height: 150px; background: #333; border: 1px solid #555; border-radius: 4px; overflow: hidden; cursor: crosshair; }}
         .minimap-canvas {{ width: 100%; height: 100%; opacity: 0.7; }}
         .minimap .viewport {{ position: absolute; border: 2px solid #0066cc; background: rgba(0,102,204,0.1); cursor: grab; transition: background 0.15s; }}
         .minimap .viewport:hover {{ background: rgba(0,102,204,0.25); }}
         .keyboard-help {{ position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: #666; }}
+        /* Breadcrumb navigation styles */
+        .breadcrumbs {{ display: flex; align-items: center; gap: 6px; font-size: 13px; max-width: 500px; overflow: hidden; }}
+        .breadcrumb {{ display: flex; align-items: center; gap: 4px; color: #aaa; text-decoration: none; padding: 4px 8px; border-radius: 4px; transition: all 0.15s; white-space: nowrap; }}
+        .breadcrumb:hover {{ background: rgba(255,255,255,0.1); color: white; }}
+        .breadcrumb.current {{ color: white; font-weight: 500; }}
+        .breadcrumb-icon {{ background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }}
+        .breadcrumb-separator {{ color: #555; font-size: 11px; }}
+        /* Drill indicator styles */
+        .drill-indicator {{ position: absolute; pointer-events: none; }}
     </style>
 </head>
 <body>
     <div class="toolbar">
-        <a href="/">← Back</a>
-        <span>{}</span>
+        <a href="/">Home</a>
+        <div class="separator"></div>
+        <nav class="breadcrumbs" id="breadcrumbs">
+            <!-- Breadcrumbs will be rendered by JavaScript -->
+        </nav>
         <div class="separator"></div>
         <div class="zoom-controls">
             <button onclick="zoomOut()">−</button>
@@ -279,12 +417,65 @@ pub async fn view_diagram(
         <div class="viewport" id="minimap-viewport"></div>
     </div>
     <div class="keyboard-help">
-        Scroll to zoom • Drag to pan • Double-click to zoom in • Hover elements for info
+        Scroll to zoom • Drag to pan • Double-click to drill down • Hover for info • Esc to go back
     </div>
 
     <script>
         // Element data with positions for hit-testing
         const elements = {};
+
+        // Breadcrumb navigation data
+        const breadcrumbs = {};
+        const currentViewKey = '{}';
+        const currentViewTitle = '{}';
+
+        // View type level indicators
+        const viewTypeLevels = {{
+            'system_landscape': 'C1',
+            'system_context': 'C1',
+            'container': 'C2',
+            'component': 'C3',
+            'dynamic': 'Dyn',
+            'deployment': 'Dep',
+            'filtered': 'Flt',
+            'custom': 'Cst',
+            'image': 'Img'
+        }};
+
+        // Render breadcrumbs
+        function renderBreadcrumbs() {{
+            const container = document.getElementById('breadcrumbs');
+            if (!breadcrumbs || breadcrumbs.length === 0) {{
+                container.innerHTML = `<span class="breadcrumb current"><span class="breadcrumb-icon">V</span><span class="breadcrumb-text">${{currentViewTitle}}</span></span>`;
+                return;
+            }}
+
+            let html = '';
+            breadcrumbs.forEach((crumb, index) => {{
+                if (index > 0) {{
+                    html += '<span class="breadcrumb-separator">›</span>';
+                }}
+
+                const isLast = index === breadcrumbs.length - 1;
+                const level = viewTypeLevels[crumb.view_type] || 'V';
+
+                if (isLast) {{
+                    html += `<span class="breadcrumb current"><span class="breadcrumb-icon">${{level}}</span><span class="breadcrumb-text">${{escapeHtml(crumb.title)}}</span></span>`;
+                }} else {{
+                    html += `<a href="/view/${{crumb.view_key}}" class="breadcrumb"><span class="breadcrumb-icon">${{level}}</span><span class="breadcrumb-text">${{escapeHtml(crumb.title)}}</span></a>`;
+                }}
+            }});
+            container.innerHTML = html;
+        }}
+
+        function escapeHtml(text) {{
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }}
+
+        // Call renderBreadcrumbs on load
+        renderBreadcrumbs();
 
         // Canvas and context
         const canvas = document.getElementById('diagram-canvas');
@@ -304,6 +495,8 @@ pub async fn view_diagram(
         let svgLoaded = false;
         let svgWidth = 0;
         let svgHeight = 0;
+        let svgMinX = 0;  // viewBox X offset
+        let svgMinY = 0;  // viewBox Y offset
 
         // Transform state
         let scale = 1;
@@ -351,10 +544,30 @@ pub async fn view_diagram(
             svgLoaded = true;
             svgWidth = svgImage.naturalWidth;
             svgHeight = svgImage.naturalHeight;
-            console.log('SVG loaded:', svgWidth, 'x', svgHeight);
 
-            // Fit diagram to screen
-            fitToScreen();
+            // Parse viewBox to get coordinate offset
+            // Fetch the SVG and parse the viewBox attribute
+            fetch('{}')
+                .then(r => r.text())
+                .then(svgText => {{
+                    const viewBoxMatch = svgText.match(/viewBox="([^"]+)"/);
+                    if (viewBoxMatch) {{
+                        const parts = viewBoxMatch[1].split(/\s+/).map(Number);
+                        if (parts.length >= 4) {{
+                            svgMinX = parts[0];
+                            svgMinY = parts[1];
+                            console.log('SVG viewBox offset:', svgMinX, svgMinY);
+                        }}
+                    }}
+                    console.log('SVG loaded:', svgWidth, 'x', svgHeight, 'viewBox offset:', svgMinX, svgMinY);
+
+                    // Fit diagram to screen
+                    fitToScreen();
+                }})
+                .catch(() => {{
+                    console.log('SVG loaded:', svgWidth, 'x', svgHeight, '(viewBox parse failed)');
+                    fitToScreen();
+                }});
         }};
         svgImage.onerror = (e) => {{
             console.error('Failed to load SVG:', e);
@@ -402,6 +615,10 @@ pub async fn view_diagram(
             // Reset shadow and draw SVG
             ctx.shadowColor = 'transparent';
             ctx.drawImage(svgImage, 0, 0);
+
+            // Draw drillable indicators on top of SVG
+            renderDrillableIndicators();
+
             ctx.restore();
 
             // Update zoom level display
@@ -409,6 +626,64 @@ pub async fn view_diagram(
 
             // Update minimap
             updateMinimap();
+        }}
+
+        // Draw visual indicators for drillable elements
+        function renderDrillableIndicators() {{
+            for (const el of elements) {{
+                if (!el.drillable) continue;
+
+                // Convert element coords from SVG viewBox space to canvas drawing space
+                const drawX = el.x - svgMinX;
+                const drawY = el.y - svgMinY;
+
+                // Draw a subtle highlight border
+                ctx.strokeStyle = 'rgba(0, 150, 255, 0.6)';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([]);
+                ctx.strokeRect(drawX + 2, drawY + 2, el.width - 4, el.height - 4);
+
+                // Draw expand icon in bottom-right corner
+                const iconSize = 24;
+                const iconX = drawX + el.width - iconSize - 8;
+                const iconY = drawY + el.height - iconSize - 8;
+
+                // Icon background circle
+                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
+                ctx.beginPath();
+                ctx.arc(iconX + iconSize/2, iconY + iconSize/2, iconSize/2, 0, Math.PI * 2);
+                ctx.fill();
+
+                // Plus sign
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2.5;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(iconX + iconSize/2 - 6, iconY + iconSize/2);
+                ctx.lineTo(iconX + iconSize/2 + 6, iconY + iconSize/2);
+                ctx.moveTo(iconX + iconSize/2, iconY + iconSize/2 - 6);
+                ctx.lineTo(iconX + iconSize/2, iconY + iconSize/2 + 6);
+                ctx.stroke();
+
+                // Draw "Click to explore" label above the element
+                ctx.font = 'bold 11px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
+                const labelText = 'Double-click to explore ' + (el.targetType || 'details');
+                const labelWidth = ctx.measureText(labelText).width + 12;
+                const labelX = drawX + el.width/2;
+                const labelY = drawY - 8;
+
+                // Label background
+                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
+                ctx.beginPath();
+                ctx.roundRect(labelX - labelWidth/2, labelY - 14, labelWidth, 18, 4);
+                ctx.fill();
+
+                // Label text
+                ctx.fillStyle = 'white';
+                ctx.fillText(labelText, labelX, labelY - 1);
+            }}
         }}
 
         function updateMinimap() {{
@@ -441,14 +716,15 @@ pub async fn view_diagram(
             minimapViewport.style.top = Math.max(0, Math.min(viewportY, minimapCanvas.height - 10)) + 'px';
         }}
 
-        // Convert screen coordinates to diagram coordinates
+        // Convert screen coordinates to diagram coordinates (SVG viewBox space)
         function screenToDiagram(screenX, screenY) {{
             const rect = canvas.getBoundingClientRect();
             const canvasX = screenX - rect.left;
             const canvasY = screenY - rect.top;
+            // Add svgMinX/svgMinY to convert from canvas space (0,0) to SVG viewBox space (which may be negative)
             return {{
-                x: (canvasX - offsetX) / scale,
-                y: (canvasY - offsetY) / scale
+                x: (canvasX - offsetX) / scale + svgMinX,
+                y: (canvasY - offsetY) / scale + svgMinY
             }};
         }}
 
@@ -472,6 +748,9 @@ pub async fn view_diagram(
                 }}
                 if (element.technology) {{
                     html += `<div class="tech">${{element.technology}}</div>`;
+                }}
+                if (element.drillable && element.targetType) {{
+                    html += `<div class="drill-hint">Double-click to view ${{element.targetType.toLowerCase()}}s</div>`;
                 }}
                 tooltip.innerHTML = html;
                 tooltip.style.left = (screenX + 15) + 'px';
@@ -559,7 +838,14 @@ pub async fn view_diagram(
                 if (element !== hoveredElement) {{
                     hoveredElement = element;
                     showTooltip(element, e.clientX, e.clientY);
-                    canvas.style.cursor = element ? 'pointer' : 'grab';
+                    // Use zoom-in cursor for drillable elements
+                    if (element && element.drillable) {{
+                        canvas.style.cursor = 'zoom-in';
+                    }} else if (element) {{
+                        canvas.style.cursor = 'pointer';
+                    }} else {{
+                        canvas.style.cursor = 'grab';
+                    }}
                 }} else if (element) {{
                     // Update tooltip position
                     tooltip.style.left = (e.clientX + 15) + 'px';
@@ -576,13 +862,93 @@ pub async fn view_diagram(
             }}
         }});
 
-        // Double-click zoom
+        // Double-click for drill-down navigation
         canvas.addEventListener('dblclick', (e) => {{
+            e.preventDefault();
+            e.stopPropagation();
+
+            // Reset panning state to ensure clean coordinate calculation
+            isPanning = false;
+            canvas.classList.remove('dragging');
+
             const rect = canvas.getBoundingClientRect();
             const mouseX = e.clientX - rect.left;
             const mouseY = e.clientY - rect.top;
-            setZoom(e.shiftKey ? scale / 2 : scale * 2, mouseX, mouseY);
+            const diagramPos = screenToDiagram(e.clientX, e.clientY);
+            const element = getElementAtPoint(diagramPos.x, diagramPos.y);
+
+            console.log('Double-click at diagram pos:', diagramPos);
+            console.log('Element found:', element);
+            if (element) {{
+                console.log('Element drillable:', element.drillable, 'targetView:', element.targetView);
+            }}
+
+            if (element && element.drillable && element.targetView) {{
+                // Animate zoom to element, then navigate
+                console.log('Initiating drill-down to:', element.targetView);
+                initiateDrillDown(element);
+                return; // Don't zoom
+            }} else {{
+                // No drillable element - zoom as before
+                console.log('No drillable element, zooming instead');
+                setZoom(e.shiftKey ? scale / 2 : scale * 2, mouseX, mouseY);
+            }}
         }});
+
+        // Drill-down animation and navigation
+        function initiateDrillDown(element) {{
+            const centerX = element.x + element.width / 2;
+            const centerY = element.y + element.height / 2;
+
+            // Animate zoom into the element
+            animateZoomTo(centerX, centerY, 2.5, 400, () => {{
+                // Fade out and navigate
+                canvas.style.transition = 'opacity 0.2s ease-out';
+                canvas.style.opacity = '0';
+
+                setTimeout(() => {{
+                    // Navigate to target view
+                    window.location.href = '/view/' + element.targetView;
+                }}, 200);
+            }});
+        }}
+
+        // Animated zoom to a point
+        function animateZoomTo(targetX, targetY, targetScale, duration, callback) {{
+            const startScale = scale;
+            const startOffsetX = offsetX;
+            const startOffsetY = offsetY;
+
+            // Calculate end offsets to center on target
+            const endOffsetX = canvas.width / 2 - targetX * targetScale;
+            const endOffsetY = canvas.height / 2 - targetY * targetScale;
+
+            const startTime = performance.now();
+
+            function animate(currentTime) {{
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+
+                // Ease-in-out-cubic
+                const eased = progress < 0.5
+                    ? 4 * progress * progress * progress
+                    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+                scale = startScale + (targetScale - startScale) * eased;
+                offsetX = startOffsetX + (endOffsetX - startOffsetX) * eased;
+                offsetY = startOffsetY + (endOffsetY - startOffsetY) * eased;
+
+                render();
+
+                if (progress < 1) {{
+                    requestAnimationFrame(animate);
+                }} else if (callback) {{
+                    callback();
+                }}
+            }}
+
+            requestAnimationFrame(animate);
+        }}
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {{
@@ -590,6 +956,15 @@ pub async fn view_diagram(
             if (e.key === '-') zoomOut();
             if (e.key === '0') resetZoom();
             if (e.key === 'f' || e.key === 'F') fitToScreen();
+            if (e.key === 'Escape') {{
+                // Navigate to parent view if breadcrumbs exist
+                if (breadcrumbs && breadcrumbs.length > 1) {{
+                    const parentCrumb = breadcrumbs[breadcrumbs.length - 2];
+                    if (parentCrumb) {{
+                        window.location.href = '/view/' + parentCrumb.view_key;
+                    }}
+                }}
+            }}
         }});
 
         // Minimap interaction
@@ -661,13 +1036,16 @@ pub async fn view_diagram(
     </script>
 </body>
 </html>"##,
-        view_key,
-        view_key,
-        view_key,
-        svg_url,
-        view_key,
-        elements_json,
-        svg_url
+        view_key,           // title
+        view_key,           // edit link
+        svg_url,            // download href
+        view_key,           // download filename
+        elements_json,      // elements const
+        breadcrumbs_json,   // breadcrumbs const
+        view_key,           // currentViewKey
+        escape_json(&current_view_title), // currentViewTitle
+        svg_url,            // fetch for viewBox parsing
+        svg_url             // svgImage.src
     );
 
     Ok(Html(html))
@@ -1082,6 +1460,8 @@ pub async fn render_svg(
         renderer.render_system_context(&filtered_workspace, view)?
     } else if let Some(view) = filtered_workspace.views().container_views.iter().find(|v| v.properties.key == view_key) {
         renderer.render_container(&filtered_workspace, view)?
+    } else if let Some(view) = filtered_workspace.views().component_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_component(&filtered_workspace, view)?
     } else {
         // Default: render a system landscape view
         let view = SystemLandscapeView::new(&view_key);

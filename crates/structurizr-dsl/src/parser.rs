@@ -1495,6 +1495,23 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
             }
         }
 
+        // Process component views
+        for view in views_node.component {
+            if let Some(&container_id) = identifiers.get(&view.container) {
+                let mut v = ComponentView::new(
+                    view.properties.key.unwrap_or_else(|| format!("Component-{}", view.container)),
+                    container_id,
+                );
+                if let Some(title) = view.properties.title {
+                    v.properties = v.properties.with_title(title);
+                }
+                if let Some(auto_layout) = view.properties.auto_layout {
+                    v.properties = v.properties.with_auto_layout(convert_auto_layout(auto_layout));
+                }
+                workspace.views_mut().add_component_view(v);
+            }
+        }
+
         // Process styles
         if let Some(styles_node) = views_node.styles {
             for elem_style in styles_node.elements {

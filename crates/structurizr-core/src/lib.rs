@@ -5,6 +5,7 @@
 
 pub mod error;
 pub mod model;
+pub mod navigation;
 pub mod prelude;
 pub mod style;
 pub mod theme;
@@ -22,6 +23,7 @@ pub use model::{
 };
 pub use style::{Border, ElementStyle, RelationshipStyle, Shape, Styles};
 pub use theme::{apply_themes, clear_theme_cache, fetch_theme, Theme};
+pub use navigation::{BreadcrumbEntry, DrillDownTarget, NavigationIndex, ViewType};
 pub use view::{
     AutoLayout, ComponentView, ContainerView, DeploymentView, DynamicView, FilteredView,
     SystemContextView, SystemLandscapeView, ViewProperties, Views,
