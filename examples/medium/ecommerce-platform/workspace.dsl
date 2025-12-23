@@ -153,6 +153,7 @@ workspace "E-commerce Platform" "Online retail platform with microservices" {
             }
             relationship "Relationship" {
                 color "#707070"
+                routing Orthogonal
             }
         }
     }

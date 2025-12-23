@@ -1,6 +1,15 @@
 //! Auto-layout algorithms for diagram elements.
+//!
+//! This module provides layout algorithms for positioning diagram elements:
+//! - `GridLayout`: Simple grid-based layout (original algorithm)
+//! - `sugiyama_layout`: Advanced Sugiyama-style layout with crossing minimization
+//!
+//! For orthogonal edge routing, see the `routing` module.
 
 use structurizr_core::view::{AutoLayout, AutoLayoutDirection};
+
+// Import advanced layout implementation
+use crate::sugiyama as advanced;
 
 /// Position of an element in the layout.
 #[derive(Debug, Clone, Copy)]
@@ -22,6 +31,19 @@ impl Default for Size {
             width: 400.0,
             height: 250.0,
         }
+    }
+}
+
+/// A point in 2D space.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Point {
+    pub x: f64,
+    pub y: f64,
+}
+
+impl Point {
+    pub fn new(x: f64, y: f64) -> Self {
+        Self { x, y }
     }
 }
 
@@ -252,6 +274,55 @@ impl GridLayout {
     /// Layout nodes in a simple grid pattern (legacy method, uses fixed spacing).
     pub fn layout(&self, node_ids: &[String], edges: &[LayoutEdge]) -> Vec<LayoutNode> {
         self.layout_with_spacing(node_ids, edges, self.rank_separation, self.node_separation, 50.0)
+    }
+
+    /// Layout nodes using the advanced Sugiyama algorithm with crossing minimization.
+    ///
+    /// This method provides better results for complex diagrams by:
+    /// - Properly handling cycles in the graph
+    /// - Minimizing edge crossings using barycentric heuristic
+    /// - Providing smoother edge routing through dummy nodes
+    ///
+    /// Returns a `SugiyamaResult` containing positioned nodes and edge routes.
+    pub fn layout_sugiyama(
+        &self,
+        node_ids: &[String],
+        node_sizes: &[(String, Size)],
+        edges: &[LayoutEdge],
+    ) -> advanced::SugiyamaResult {
+        let config = advanced::SugiyamaConfig {
+            direction: self.direction,
+            rank_separation: self.rank_separation,
+            node_separation: self.node_separation,
+            default_width: self.default_width,
+            default_height: self.default_height,
+            ..Default::default()
+        };
+
+        // Convert to advanced layout edge type
+        let advanced_edges: Vec<advanced::LayoutEdge> = edges
+            .iter()
+            .map(|e| advanced::LayoutEdge {
+                source: e.source.clone(),
+                target: e.target.clone(),
+            })
+            .collect();
+
+        // Convert sizes to advanced type
+        let advanced_sizes: Vec<(String, advanced::Size)> = node_sizes
+            .iter()
+            .map(|(id, s)| {
+                (
+                    id.clone(),
+                    advanced::Size {
+                        width: s.width,
+                        height: s.height,
+                    },
+                )
+            })
+            .collect();
+
+        advanced::sugiyama_layout(node_ids, &advanced_sizes, &advanced_edges, &config)
     }
 
     fn compute_ranks(&self, node_ids: &[String], edges: &[LayoutEdge]) -> Vec<usize> {

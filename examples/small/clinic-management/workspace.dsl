@@ -90,6 +90,7 @@ workspace "Clinic Management System" "Patient management for small medical clini
             }
             relationship "Relationship" {
                 color "#707070"
+                routing Orthogonal
             }
         }
     }

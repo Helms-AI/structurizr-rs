@@ -78,6 +78,7 @@ workspace "Startup SaaS Analytics" "B2B analytics platform for product insights"
             }
             relationship "Relationship" {
                 color "#707070"
+                routing Orthogonal
             }
         }
     }

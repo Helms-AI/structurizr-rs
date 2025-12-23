@@ -68,6 +68,10 @@ workspace "Test Validation" "A workspace to test validation" {
                 background "#438dd5"
                 color "#ffffff"
             }
+            relationship "Relationship" {
+                color "#707070"
+                routing Orthogonal
+            }
         }
     }
 }

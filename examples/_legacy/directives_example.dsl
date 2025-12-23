@@ -72,6 +72,10 @@ workspace "Directive Features Demo" "Demonstrates all DSL directive capabilities
                 background "#438dd5"
                 color "#ffffff"
             }
+            relationship "Relationship" {
+                color "#707070"
+                routing Orthogonal
+            }
         }
     }
 }

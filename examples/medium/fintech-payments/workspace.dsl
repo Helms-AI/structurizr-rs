@@ -142,6 +142,7 @@ workspace "FinTech Payment Platform" "A comprehensive payment processing platfor
             }
             relationship "Relationship" {
                 color "#707070"
+                routing Orthogonal
             }
         }
     }

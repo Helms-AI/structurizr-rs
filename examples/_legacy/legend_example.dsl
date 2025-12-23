@@ -57,6 +57,10 @@ workspace "Legend Example" "Example workspace demonstrating the legend feature" 
             relationship "Async" {
                 style Dashed
             }
+            relationship "Relationship" {
+                color "#707070"
+                routing Orthogonal
+            }
         }
     }
 }

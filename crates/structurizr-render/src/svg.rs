@@ -10,8 +10,11 @@ use structurizr_core::Workspace;
 
 use crate::error::Result;
 use crate::layout::{GridLayout, LayoutEdge, LayoutNode};
+use crate::routing::orthogonal::{OrthogonalConfig, OrthogonalRouter};
+use crate::routing::EdgePath;
 use crate::shapes::{render_shape, Bounds};
 use crate::style_resolver::{ElementKind, StyleResolver};
+use structurizr_core::style::Routing;
 
 /// Tracks the bounding box of all content in the SVG.
 /// Used to calculate dynamic viewBox dimensions.
@@ -1429,7 +1432,7 @@ impl SvgRenderer {
 
         // Add padding and ensure minimum size
         let padding = self.padding as f64;
-        let bounds = if bounds.is_valid() {
+        let mut bounds = if bounds.is_valid() {
             bounds.with_padding(padding)
         } else {
             // Fallback to default dimensions if no nodes
@@ -1494,7 +1497,13 @@ impl SvgRenderer {
 
         let mut rel_lines: Vec<RelLineData> = Vec::new();
 
-        // First pass: collect relationship data and render lines
+        // Create orthogonal router for use when needed
+        let orthogonal_config = OrthogonalConfig::for_direction(
+            structurizr_core::view::AutoLayoutDirection::TopBottom
+        );
+        let orthogonal_router = OrthogonalRouter::new(orthogonal_config);
+
+        // First pass: collect relationship data and render lines/paths
         for rel in relationships {
             let source_id = rel.source_id.to_string();
             let target_id = rel.destination_id.to_string();
@@ -1505,47 +1514,107 @@ impl SvgRenderer {
                 // Resolve relationship style
                 let rel_style = style_resolver.resolve_relationship(&rel.tags);
 
-                // Calculate center points
-                let src_cx = source_node.position.x + source_node.size.width / 2.0;
-                let src_cy = source_node.position.y + source_node.size.height / 2.0;
-                let tgt_cx = target_node.position.x + target_node.size.width / 2.0;
-                let tgt_cy = target_node.position.y + target_node.size.height / 2.0;
+                // Check if orthogonal routing is requested
+                let use_orthogonal = matches!(rel_style.routing, Routing::Orthogonal);
 
-                // Calculate intersection points with element boundaries
-                // Line starts at source boundary, ends at target boundary
-                let (x1, y1) = line_rect_intersection(
-                    tgt_cx, tgt_cy, src_cx, src_cy,
-                    source_node.position.x, source_node.position.y,
-                    source_node.size.width, source_node.size.height,
-                );
-                let (x2, y2) = line_rect_intersection(
-                    src_cx, src_cy, tgt_cx, tgt_cy,
-                    target_node.position.x, target_node.position.y,
-                    target_node.size.width, target_node.size.height,
-                );
+                let (x1, y1, x2, y2) = if use_orthogonal {
+                    // Orthogonal routing - use the router
+                    let path = orthogonal_router.route_edge(source_node, target_node, 0, 1, 0, 1);
 
-                // Build line attributes
-                let mut line_attrs = format!(
-                    r#"x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="{}""#,
-                    x1, y1, x2, y2, rel_style.color, rel_style.thickness
-                );
+                    // Get waypoints from the path
+                    if let EdgePath::Orthogonal { waypoints } = &path {
+                        // Build SVG path data
+                        let path_data = path.to_svg_path();
 
-                // Add dash pattern if needed
-                if let Some(dasharray) = rel_style.stroke_dasharray() {
-                    line_attrs.push_str(&format!(r#" stroke-dasharray="{}""#, dasharray));
-                }
+                        // Build path attributes
+                        let mut path_attrs = format!(
+                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}""#,
+                            path_data, rel_style.color, rel_style.thickness
+                        );
 
-                // Add opacity if not 100%
-                if rel_style.opacity < 100 {
-                    line_attrs.push_str(&format!(r#" opacity="{}""#, rel_style.opacity as f64 / 100.0));
-                }
+                        // Add dash pattern if needed
+                        if let Some(dasharray) = rel_style.stroke_dasharray() {
+                            path_attrs.push_str(&format!(r#" stroke-dasharray="{}""#, dasharray));
+                        }
 
-                // Draw line with arrow marker
-                svg.push_str(&format!(
-                    r##"  <line {} marker-end="url(#arrowhead)"/>"##,
-                    line_attrs
-                ));
-                svg.push('\n');
+                        // Add opacity if not 100%
+                        if rel_style.opacity < 100 {
+                            path_attrs.push_str(&format!(r#" opacity="{}""#, rel_style.opacity as f64 / 100.0));
+                        }
+
+                        // Draw path with arrow marker
+                        svg.push_str(&format!(
+                            r##"  <path {} marker-end="url(#arrowhead)"/>"##,
+                            path_attrs
+                        ));
+                        svg.push('\n');
+
+                        // Get label position from path (reserved for future label positioning)
+                        let (_label_x, _label_y, _angle) = path.label_position();
+
+                        // Use first and last waypoints for label data
+                        let start = waypoints.first().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
+                        let end = waypoints.last().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
+
+                        // Expand bounds to include all waypoints
+                        for wp in waypoints {
+                            bounds.expand_point(wp.x, wp.y);
+                        }
+
+                        (start.0, start.1, end.0, end.1)
+                    } else {
+                        // Fallback to direct if somehow we got a different path type
+                        let src_cx = source_node.position.x + source_node.size.width / 2.0;
+                        let src_cy = source_node.position.y + source_node.size.height / 2.0;
+                        let tgt_cx = target_node.position.x + target_node.size.width / 2.0;
+                        let tgt_cy = target_node.position.y + target_node.size.height / 2.0;
+                        (src_cx, src_cy, tgt_cx, tgt_cy)
+                    }
+                } else {
+                    // Direct routing (default) - original logic
+                    // Calculate center points
+                    let src_cx = source_node.position.x + source_node.size.width / 2.0;
+                    let src_cy = source_node.position.y + source_node.size.height / 2.0;
+                    let tgt_cx = target_node.position.x + target_node.size.width / 2.0;
+                    let tgt_cy = target_node.position.y + target_node.size.height / 2.0;
+
+                    // Calculate intersection points with element boundaries
+                    let (x1, y1) = line_rect_intersection(
+                        tgt_cx, tgt_cy, src_cx, src_cy,
+                        source_node.position.x, source_node.position.y,
+                        source_node.size.width, source_node.size.height,
+                    );
+                    let (x2, y2) = line_rect_intersection(
+                        src_cx, src_cy, tgt_cx, tgt_cy,
+                        target_node.position.x, target_node.position.y,
+                        target_node.size.width, target_node.size.height,
+                    );
+
+                    // Build line attributes
+                    let mut line_attrs = format!(
+                        r#"x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="{}""#,
+                        x1, y1, x2, y2, rel_style.color, rel_style.thickness
+                    );
+
+                    // Add dash pattern if needed
+                    if let Some(dasharray) = rel_style.stroke_dasharray() {
+                        line_attrs.push_str(&format!(r#" stroke-dasharray="{}""#, dasharray));
+                    }
+
+                    // Add opacity if not 100%
+                    if rel_style.opacity < 100 {
+                        line_attrs.push_str(&format!(r#" opacity="{}""#, rel_style.opacity as f64 / 100.0));
+                    }
+
+                    // Draw line with arrow marker
+                    svg.push_str(&format!(
+                        r##"  <line {} marker-end="url(#arrowhead)"/>"##,
+                        line_attrs
+                    ));
+                    svg.push('\n');
+
+                    (x1, y1, x2, y2)
+                };
 
                 // Store data for label rendering
                 rel_lines.push(RelLineData {
