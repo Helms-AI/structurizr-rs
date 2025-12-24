@@ -1868,6 +1868,10 @@ pub async fn render_svg(
         renderer.render_container(&filtered_workspace, view)?
     } else if let Some(view) = filtered_workspace.views().component_views.iter().find(|v| v.properties.key == view_key) {
         renderer.render_component(&filtered_workspace, view)?
+    } else if let Some(view) = filtered_workspace.views().dynamic_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_dynamic(&filtered_workspace, view)?
+    } else if let Some(view) = filtered_workspace.views().deployment_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_deployment(&filtered_workspace, view)?
     } else {
         // Default: render a system landscape view
         let view = SystemLandscapeView::new(&view_key);
@@ -3474,6 +3478,7 @@ pub async fn view_dynamic_animated(
             align-items: center;
             gap: 20px;
             border-bottom: 1px solid #444;
+            height: 50px;
         }}
         .toolbar a {{ color: white; text-decoration: none; }}
         .toolbar a:hover {{ text-decoration: underline; }}
@@ -3505,7 +3510,6 @@ pub async fn view_dynamic_animated(
         }}
         .btn.primary {{ background: #0066cc; }}
         .btn.primary:hover {{ background: #0052a3; }}
-        .btn.primary:disabled {{ background: #003d7a; }}
 
         .step-info {{
             font-size: 14px;
@@ -3537,31 +3541,33 @@ pub async fn view_dynamic_animated(
             overflow: hidden;
             position: relative;
             background: #2a2a2a;
-            display: flex;
-            align-items: center;
-            justify-content: center;
         }}
 
-        #svg-container {{
-            position: relative;
+        #svg-wrapper {{
+            position: absolute;
+            transform-origin: 0 0;
             background: white;
             box-shadow: 0 4px 20px rgba(0,0,0,0.4);
         }}
 
-        /* Animation classes */
-        .step-arrow {{
-            opacity: 0;
-            transition: opacity 0.5s ease-in-out;
-        }}
-        .step-arrow.visible {{
-            opacity: 1;
+        #svg-wrapper svg {{
+            display: block;
         }}
 
-        .step-element {{
-            transition: filter 0.3s ease-in-out;
+        /* Arrow animation */
+        .arrow-line {{
+            opacity: 0;
+            transition: opacity 0.4s ease-in-out;
         }}
-        .step-element.active {{
-            filter: drop-shadow(0 0 10px #0066cc) brightness(1.2);
+        .arrow-line.visible {{
+            opacity: 1;
+        }}
+        .arrow-text {{
+            opacity: 0;
+            transition: opacity 0.4s ease-in-out;
+        }}
+        .arrow-text.visible {{
+            opacity: 1;
         }}
 
         .step-overlay {{
@@ -3569,15 +3575,16 @@ pub async fn view_dynamic_animated(
             bottom: 30px;
             left: 50%;
             transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.85);
+            background: rgba(0, 0, 0, 0.9);
             color: white;
-            padding: 20px 30px;
+            padding: 16px 24px;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.3);
             max-width: 600px;
             opacity: 0;
             transition: opacity 0.3s ease-in-out;
             pointer-events: none;
+            z-index: 100;
         }}
         .step-overlay.visible {{
             opacity: 1;
@@ -3586,10 +3593,10 @@ pub async fn view_dynamic_animated(
             font-size: 12px;
             color: #0066cc;
             font-weight: 600;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
         }}
         .step-overlay .step-desc {{
-            font-size: 16px;
+            font-size: 15px;
             line-height: 1.4;
         }}
 
@@ -3599,6 +3606,16 @@ pub async fn view_dynamic_animated(
             left: 20px;
             font-size: 11px;
             color: #666;
+            z-index: 50;
+        }}
+
+        .loading {{
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            color: #666;
+            font-size: 16px;
         }}
     </style>
 </head>
@@ -3632,8 +3649,9 @@ pub async fn view_dynamic_animated(
         <a href="/view/{}">View Static</a>
     </div>
 
-    <div class="diagram-container">
-        <div id="svg-container"></div>
+    <div class="diagram-container" id="diagram-container">
+        <div class="loading" id="loading">Loading diagram...</div>
+        <div id="svg-wrapper"></div>
         <div class="step-overlay" id="step-overlay">
             <div class="step-number" id="overlay-number">Step 1</div>
             <div class="step-desc" id="overlay-desc">Step description</div>
@@ -3641,7 +3659,7 @@ pub async fn view_dynamic_animated(
     </div>
 
     <div class="keyboard-help">
-        Space to play/pause • ← → to step • R to reset • 1-9 to jump to step
+        Space to play/pause • ← → to step • R to reset • 1-9 to jump to step • Scroll to zoom • Drag to pan
     </div>
 
     <script>
@@ -3651,57 +3669,106 @@ pub async fn view_dynamic_animated(
         let currentStep = 0;
         let isPlaying = false;
         let playInterval = null;
-        let playSpeed = 2000; // milliseconds
+        let playSpeed = 2000;
 
-        // Elements
-        let svgElements = [];
-        let arrowElements = [];
+        // SVG state
+        let svgWidth = 0;
+        let svgHeight = 0;
+        let scale = 1;
+        let offsetX = 0;
+        let offsetY = 0;
 
-        // Load SVG and initialize
+        // Arrow elements
+        let arrowLines = [];
+        let arrowTexts = [];
+
+        // Pan state
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+        let panStartOffsetX = 0;
+        let panStartOffsetY = 0;
+
+        const container = document.getElementById('diagram-container');
+        const wrapper = document.getElementById('svg-wrapper');
+
+        // Load and display SVG
         async function loadSVG() {{
             try {{
                 const response = await fetch('{}');
                 const svgText = await response.text();
-                const container = document.getElementById('svg-container');
-                container.innerHTML = svgText;
 
-                // Wait for SVG to be inserted
-                await new Promise(resolve => setTimeout(resolve, 100));
+                wrapper.innerHTML = svgText;
+                document.getElementById('loading').style.display = 'none';
 
-                const svg = container.querySelector('svg');
+                const svg = wrapper.querySelector('svg');
                 if (!svg) {{
-                    console.error('SVG not found in response');
+                    console.error('SVG not found');
                     return;
                 }}
 
-                // Find and tag all arrows (lines with markers)
+                // Get SVG dimensions
+                svgWidth = parseFloat(svg.getAttribute('width')) || 800;
+                svgHeight = parseFloat(svg.getAttribute('height')) || 600;
+
+                // Ensure viewBox is set
+                if (!svg.getAttribute('viewBox')) {{
+                    svg.setAttribute('viewBox', `0 0 ${{svgWidth}} ${{svgHeight}}`);
+                }}
+
+                // Find all arrow lines and their labels
                 const lines = svg.querySelectorAll('line[marker-end]');
-                arrowElements = Array.from(lines);
+                arrowLines = Array.from(lines);
 
-                // Hide all arrows initially
-                arrowElements.forEach((arrow, idx) => {{
-                    arrow.classList.add('step-arrow');
-                    arrow.style.opacity = '0';
-                    arrow.dataset.stepIndex = idx;
+                // Find text elements that are arrow labels (near arrows, contain step numbers)
+                const texts = svg.querySelectorAll('text');
+                arrowTexts = Array.from(texts).filter(t => {{
+                    const content = t.textContent || '';
+                    return /^\d+\./.test(content); // Labels starting with "1.", "2.", etc.
                 }});
 
-                // Tag elements by finding their closest g or rect containers
-                // This is a simplified approach - in production you'd want more precise element tracking
-                const rects = svg.querySelectorAll('rect:not([id*="marker"])');
-                svgElements = Array.from(rects).filter(r => {{
-                    const width = parseFloat(r.getAttribute('width') || '0');
-                    const height = parseFloat(r.getAttribute('height') || '0');
-                    return width > 50 && height > 50; // Filter out small decorative rects
+                // Tag arrows and texts for animation
+                arrowLines.forEach((line, idx) => {{
+                    line.classList.add('arrow-line');
+                    line.dataset.stepIndex = idx;
                 }});
 
-                svgElements.forEach(el => {{
-                    el.classList.add('step-element');
+                arrowTexts.forEach((text, idx) => {{
+                    text.classList.add('arrow-text');
+                    text.dataset.stepIndex = idx;
                 }});
 
+                // Fit to screen
+                fitToScreen();
+
+                // Initial display
                 updateDisplay();
+
             }} catch (err) {{
                 console.error('Error loading SVG:', err);
+                document.getElementById('loading').textContent = 'Failed to load diagram';
             }}
+        }}
+
+        function fitToScreen() {{
+            const padding = 40;
+            const containerWidth = container.clientWidth;
+            const containerHeight = container.clientHeight;
+
+            const scaleX = (containerWidth - padding * 2) / svgWidth;
+            const scaleY = (containerHeight - padding * 2) / svgHeight;
+            scale = Math.min(scaleX, scaleY, 1.5); // Cap at 1.5x
+
+            offsetX = (containerWidth - svgWidth * scale) / 2;
+            offsetY = (containerHeight - svgHeight * scale) / 2;
+
+            applyTransform();
+        }}
+
+        function applyTransform() {{
+            wrapper.style.transform = `translate(${{offsetX}}px, ${{offsetY}}px) scale(${{scale}})`;
+            wrapper.style.width = svgWidth + 'px';
+            wrapper.style.height = svgHeight + 'px';
         }}
 
         function updateDisplay() {{
@@ -3713,19 +3780,20 @@ pub async fn view_dynamic_animated(
             document.getElementById('btn-next').disabled = currentStep >= totalSteps;
 
             // Show/hide arrows based on current step
-            arrowElements.forEach((arrow, idx) => {{
+            arrowLines.forEach((line, idx) => {{
                 if (idx < currentStep) {{
-                    arrow.style.opacity = '1';
-                    arrow.classList.add('visible');
+                    line.classList.add('visible');
                 }} else {{
-                    arrow.style.opacity = '0';
-                    arrow.classList.remove('visible');
+                    line.classList.remove('visible');
                 }}
             }});
 
-            // Highlight active elements
-            svgElements.forEach(el => {{
-                el.classList.remove('active');
+            arrowTexts.forEach((text, idx) => {{
+                if (idx < currentStep) {{
+                    text.classList.add('visible');
+                }} else {{
+                    text.classList.remove('visible');
+                }}
             }});
 
             // Show step overlay
@@ -3735,11 +3803,6 @@ pub async fn view_dynamic_animated(
                 document.getElementById('overlay-number').textContent = `Step ${{step.order}}`;
                 document.getElementById('overlay-desc').textContent = step.description || 'No description';
                 overlay.classList.add('visible');
-
-                // Highlight active elements (simplified - would need proper element ID matching)
-                if (currentStep - 1 < svgElements.length) {{
-                    svgElements[Math.min(currentStep - 1, svgElements.length - 1)]?.classList.add('active');
-                }}
             }} else {{
                 overlay.classList.remove('visible');
             }}
@@ -3778,11 +3841,10 @@ pub async fn view_dynamic_animated(
 
         function startPlaying() {{
             if (currentStep >= totalSteps) {{
-                resetAnimation();
+                currentStep = 0;
             }}
             isPlaying = true;
             document.getElementById('btn-play').textContent = '⏸ Pause';
-            document.getElementById('btn-play').classList.add('primary');
 
             playInterval = setInterval(() => {{
                 nextStep();
@@ -3804,13 +3866,57 @@ pub async fn view_dynamic_animated(
         function updateSpeed() {{
             const select = document.getElementById('speed-select');
             playSpeed = parseInt(select.value);
-
-            // Restart playing if currently playing
             if (isPlaying) {{
                 stopPlaying();
                 startPlaying();
             }}
         }}
+
+        // Zoom with scroll wheel
+        container.addEventListener('wheel', (e) => {{
+            e.preventDefault();
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.max(0.1, Math.min(3, scale * delta));
+
+            // Zoom toward mouse position
+            offsetX = mouseX - (mouseX - offsetX) * (newScale / scale);
+            offsetY = mouseY - (mouseY - offsetY) * (newScale / scale);
+            scale = newScale;
+
+            applyTransform();
+        }}, {{ passive: false }});
+
+        // Pan with mouse drag
+        container.addEventListener('mousedown', (e) => {{
+            if (e.button === 0) {{
+                isPanning = true;
+                panStartX = e.clientX;
+                panStartY = e.clientY;
+                panStartOffsetX = offsetX;
+                panStartOffsetY = offsetY;
+                container.style.cursor = 'grabbing';
+            }}
+        }});
+
+        document.addEventListener('mousemove', (e) => {{
+            if (isPanning) {{
+                offsetX = panStartOffsetX + (e.clientX - panStartX);
+                offsetY = panStartOffsetY + (e.clientY - panStartY);
+                applyTransform();
+            }}
+        }});
+
+        document.addEventListener('mouseup', () => {{
+            isPanning = false;
+            container.style.cursor = 'grab';
+        }});
+
+        // Set initial cursor
+        container.style.cursor = 'grab';
 
         // Keyboard shortcuts
         document.addEventListener('keydown', (e) => {{
@@ -3833,11 +3939,14 @@ pub async fn view_dynamic_animated(
                 case 'R':
                     resetAnimation();
                     break;
+                case 'f':
+                case 'F':
+                    fitToScreen();
+                    break;
                 case '0':
                     resetAnimation();
                     break;
                 default:
-                    // Jump to step number (1-9)
                     if (e.key >= '1' && e.key <= '9') {{
                         const stepNum = parseInt(e.key);
                         if (stepNum <= totalSteps) {{
@@ -3848,18 +3957,21 @@ pub async fn view_dynamic_animated(
             }}
         }});
 
+        // Handle window resize
+        window.addEventListener('resize', fitToScreen);
+
         // Initialize
         loadSVG();
     </script>
 </body>
 </html>"##,
-        view_key,
-        view_key,
-        step_count,
-        view_key,
-        svg_url,
-        steps_json,
-        step_count
+        view_key,      // title
+        view_key,      // toolbar span
+        step_count,    // step counter display
+        view_key,      // View Static link
+        steps_json,    // const steps = ...
+        step_count,    // const totalSteps = ...
+        svg_url        // fetch URL
     );
 
     Ok(Html(html))

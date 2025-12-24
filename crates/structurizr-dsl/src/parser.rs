@@ -890,6 +890,8 @@ impl Parser {
 
     fn parse_dynamic_view(&mut self) -> Result<DynamicViewNode> {
         self.skip_newlines_and_comments();
+
+        // Parse optional scope (element identifier or *)
         let scope = if let Some(TokenKind::Identifier(_)) = self.current_kind() {
             Some(self.expect_identifier()?)
         } else if self.check(&TokenKind::Star) {
@@ -899,12 +901,125 @@ impl Parser {
             None
         };
 
-        let properties = self.parse_view_properties()?;
+        // Parse optional key, title, description strings
+        let key = self.maybe_string();
+        let title = self.maybe_string();
+        let description = self.maybe_string();
+
+        let mut props = ViewPropertiesNode {
+            key,
+            title,
+            description,
+            include: Vec::new(),
+            exclude: Vec::new(),
+            auto_layout: None,
+            properties: HashMap::new(),
+            background: None,
+        };
+
+        let mut steps = Vec::new();
+
+        // Parse the block if present
+        self.skip_newlines_and_comments();
+        if self.check(&TokenKind::OpenBrace) {
+            self.advance();
+            self.parse_dynamic_view_body(&mut props, &mut steps)?;
+        }
 
         Ok(DynamicViewNode {
             scope,
-            properties,
-            steps: Vec::new(),
+            properties: props,
+            steps,
+        })
+    }
+
+    /// Parse the body of a dynamic view, handling both view properties and steps.
+    fn parse_dynamic_view_body(
+        &mut self,
+        props: &mut ViewPropertiesNode,
+        steps: &mut Vec<DynamicStepNode>,
+    ) -> Result<()> {
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind().cloned() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::Include) => {
+                    self.advance();
+                    self.skip_newlines_and_comments();
+                    if self.check(&TokenKind::Star) {
+                        self.advance();
+                        props.include.push(IncludeExclude::All);
+                    } else if let Some(TokenKind::String(s)) = self.current_kind().cloned() {
+                        self.advance();
+                        props.include.push(IncludeExclude::Expression(s));
+                    } else if let Some(TokenKind::Identifier(id)) = self.current_kind().cloned() {
+                        self.advance();
+                        props.include.push(IncludeExclude::Identifier(id));
+                    }
+                }
+                Some(TokenKind::Exclude) => {
+                    self.advance();
+                    self.skip_newlines_and_comments();
+                    if let Some(TokenKind::String(s)) = self.current_kind().cloned() {
+                        self.advance();
+                        props.exclude.push(IncludeExclude::Expression(s));
+                    } else if let Some(TokenKind::Identifier(id)) = self.current_kind().cloned() {
+                        self.advance();
+                        props.exclude.push(IncludeExclude::Identifier(id));
+                    }
+                }
+                Some(TokenKind::AutoLayout) => {
+                    self.advance();
+                    props.auto_layout = Some(self.parse_auto_layout()?);
+                }
+                Some(TokenKind::Properties) => {
+                    self.advance();
+                    props.properties.extend(self.parse_properties_block()?);
+                }
+                Some(TokenKind::Identifier(source)) => {
+                    self.advance();
+                    self.skip_newlines_and_comments();
+
+                    if self.check(&TokenKind::Arrow) {
+                        // This is a dynamic step: source -> destination "description"
+                        self.advance();
+                        let step = self.parse_dynamic_step(source)?;
+                        steps.push(step);
+                    } else {
+                        // Handle other identifier-based properties like "background"
+                        match source.to_lowercase().as_str() {
+                            "background" => {
+                                props.background = Some(self.expect_string()?);
+                            }
+                            _ => {
+                                // Unknown identifier, break out
+                                break;
+                            }
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Parse a single dynamic step: destination "description"
+    /// (source was already consumed and is passed in)
+    fn parse_dynamic_step(&mut self, source: String) -> Result<DynamicStepNode> {
+        self.skip_newlines_and_comments();
+        let destination = self.expect_identifier()?;
+        let description = self.maybe_string();
+
+        Ok(DynamicStepNode {
+            source,
+            destination,
+            description,
         })
     }
 
@@ -1548,6 +1663,59 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 }
                 workspace.views_mut().add_component_view(v);
             }
+        }
+
+        // Process dynamic views
+        for view in views_node.dynamic {
+            let mut v = if let Some(ref scope_id) = view.scope {
+                if let Some(&element_id) = identifiers.get(scope_id) {
+                    DynamicView::for_element(
+                        view.properties.key.unwrap_or_else(|| format!("Dynamic-{}", scope_id)),
+                        element_id,
+                    )
+                } else {
+                    // Scope element not found - create unscoped view
+                    DynamicView::new(
+                        view.properties.key.unwrap_or_else(|| "Dynamic".to_string()),
+                    )
+                }
+            } else {
+                DynamicView::new(
+                    view.properties.key.unwrap_or_else(|| "Dynamic".to_string()),
+                )
+            };
+
+            // Apply view properties
+            if let Some(title) = view.properties.title {
+                v.properties = v.properties.with_title(title);
+            }
+            if let Some(description) = view.properties.description {
+                v.properties = v.properties.with_description(description);
+            }
+            if let Some(auto_layout) = view.properties.auto_layout {
+                v.properties = v.properties.with_auto_layout(convert_auto_layout(auto_layout));
+            }
+            if let Some(background) = view.properties.background {
+                v.properties = v.properties.with_background(background);
+            }
+
+            // Convert steps from AST nodes to core types
+            for (order, step) in view.steps.iter().enumerate() {
+                let source_id = identifiers.get(&step.source);
+                let dest_id = identifiers.get(&step.destination);
+
+                if let (Some(&src), Some(&dst)) = (source_id, dest_id) {
+                    v.steps.push(DynamicViewStep {
+                        source_id: src,
+                        destination_id: dst,
+                        description: step.description.clone(),
+                        order: order as u32 + 1, // 1-indexed order
+                    });
+                }
+                // Note: If elements not found, the step is silently skipped.
+            }
+
+            workspace.views_mut().add_dynamic_view(v);
         }
 
         // Process styles
