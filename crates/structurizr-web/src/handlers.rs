@@ -1147,20 +1147,23 @@ pub async fn documentation(
     <title>Documentation - {} - Structurizr</title>
     <style>
         * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }}
-        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; }}
+        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; overflow: hidden; }}
+        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; position: sticky; top: 0; z-index: 100; }}
         .header a {{ color: white; text-decoration: none; }}
         .header h1 {{ margin: 0; font-size: 18px; }}
-        .container {{ display: flex; min-height: calc(100vh - 54px); }}
-        .sidebar {{ width: 280px; background: white; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; }}
+        .container {{ display: flex; height: calc(100vh - 54px); }}
+        .sidebar {{ width: 280px; background: white; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; flex-shrink: 0; height: calc(100vh - 54px); }}
         .sidebar h3 {{ margin: 0 0 10px 0; font-size: 12px; text-transform: uppercase; color: #888; }}
         .sidebar a {{ display: block; padding: 8px 12px; color: #333; text-decoration: none; border-radius: 4px; margin-bottom: 2px; font-size: 14px; }}
         .sidebar a:hover {{ background: #f0f0f0; }}
-        .main {{ flex: 1; padding: 40px; max-width: 900px; }}
+        .sidebar a.active {{ background: #e3f2fd; color: #1976d2; font-weight: 500; }}
+        .main {{ flex: 1; padding: 40px; width: 95%; overflow-y: auto; height: calc(100vh - 54px); }}
         .doc-section {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
         .doc-section h2 {{ margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
-        .content {{ line-height: 1.7; }}
-        .content h1, .content h2, .content h3 {{ margin-top: 1.5em; }}
+        .content {{ line-height: 1.5; }}
+        .content h1, .content h2, .content h3 {{ margin-top: 0.8em; margin-bottom: 0.3em; }}
+        .content p {{ margin: 0.5em 0; }}
+        .content ul, .content ol {{ margin: 0.5em 0; padding-left: 1.5em; }}
         .content pre {{ background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }}
         .content code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: "SF Mono", Monaco, monospace; font-size: 0.9em; }}
         .content pre code {{ background: none; padding: 0; }}
@@ -1199,6 +1202,50 @@ pub async fn documentation(
             {}
         </div>
     </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {{
+        const mainContent = document.querySelector('.main');
+        const sidebarLinks = document.querySelectorAll('.sidebar a');
+        const sections = document.querySelectorAll('.doc-section, .decision');
+
+        function updateActiveLink() {{
+            let currentSection = '';
+            const scrollTop = mainContent.scrollTop;
+            const offset = 100;
+
+            sections.forEach(function(section) {{
+                const sectionTop = section.offsetTop - offset;
+                if (scrollTop >= sectionTop) {{
+                    currentSection = section.id;
+                }}
+            }});
+
+            sidebarLinks.forEach(function(link) {{
+                link.classList.remove('active');
+                if (link.getAttribute('href') === '#' + currentSection) {{
+                    link.classList.add('active');
+                }}
+            }});
+        }}
+
+        mainContent.addEventListener('scroll', updateActiveLink);
+        updateActiveLink();
+
+        sidebarLinks.forEach(function(link) {{
+            link.addEventListener('click', function(e) {{
+                e.preventDefault();
+                const targetId = this.getAttribute('href').slice(1);
+                const target = document.getElementById(targetId);
+                if (target) {{
+                    mainContent.scrollTo({{
+                        top: target.offsetTop - 20,
+                        behavior: 'smooth'
+                    }});
+                }}
+            }});
+        }});
+    }});
+    </script>
 </body>
 </html>"##,
         workspace.name,

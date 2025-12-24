@@ -2,24 +2,39 @@
 //!
 //! This module implements the barycentric heuristic with 2-opt local refinement
 //! to minimize edge crossings in the layered graph.
+//!
+//! The algorithm includes:
+//! 1. Connectivity-based initial ordering (groups related nodes)
+//! 2. Weighted barycentric heuristic (hubs have more influence)
+//! 3. 2-opt local refinement (swap adjacent nodes if it helps)
 
-use super::LayeredGraph;
+use std::collections::HashSet;
+
+use super::{LayeredGraph, SugiyamaConfig};
 
 /// Minimize edge crossings using barycentric heuristic with 2-opt refinement.
 ///
-/// The algorithm alternates between:
-/// 1. Down sweep: Order each layer based on positions of predecessors
-/// 2. Up sweep: Order each layer based on positions of successors
-/// 3. 2-opt: Swap adjacent nodes if it reduces crossings
-pub fn minimize_crossings(graph: &mut LayeredGraph, max_iterations: usize, local_refinement: bool) {
+/// The algorithm:
+/// 1. Initial pass: Order layers by connectivity (group related nodes)
+/// 2. Iterative sweeps:
+///    - Down sweep: Order each layer based on positions of predecessors
+///    - Up sweep: Order each layer based on positions of successors
+///    - 2-opt: Swap adjacent nodes if it reduces crossings
+pub fn minimize_crossings(graph: &mut LayeredGraph, config: &SugiyamaConfig) {
     if graph.layer_count() < 2 {
         return;
+    }
+
+    // Phase 1: Connectivity-based initial ordering
+    // Groups nodes with shared neighbors together before barycentric optimization
+    if config.connectivity_ordering {
+        apply_connectivity_ordering(graph);
     }
 
     let mut best_crossings = count_total_crossings(graph);
     let mut best_order = save_layer_order(graph);
 
-    for _iteration in 0..max_iterations {
+    for _iteration in 0..config.max_iterations {
         let initial_crossings = best_crossings;
 
         // Down sweep (top to bottom)
@@ -33,7 +48,7 @@ pub fn minimize_crossings(graph: &mut LayeredGraph, max_iterations: usize, local
         }
 
         // 2-opt local refinement
-        if local_refinement {
+        if config.local_refinement {
             apply_two_opt(graph);
         }
 
@@ -52,6 +67,121 @@ pub fn minimize_crossings(graph: &mut LayeredGraph, max_iterations: usize, local
 
     // Restore best order found
     restore_layer_order(graph, &best_order);
+}
+
+/// Apply connectivity-based ordering to all layers.
+///
+/// This groups nodes with shared neighbors together, providing a better
+/// starting point for the barycentric optimization.
+fn apply_connectivity_ordering(graph: &mut LayeredGraph) {
+    for layer_idx in 0..graph.layer_count() {
+        order_layer_by_connectivity(graph, layer_idx);
+    }
+}
+
+/// Order nodes in a layer by grouping those with shared neighbors together.
+///
+/// Algorithm:
+/// 1. Calculate shared neighbor count between each pair of nodes
+/// 2. Greedy clustering: start with most-connected node, add closest neighbor
+/// 3. Order clusters and nodes within clusters by connectivity
+fn order_layer_by_connectivity(graph: &mut LayeredGraph, layer_idx: usize) {
+    let layer = &graph.layers[layer_idx];
+    if layer.len() <= 2 {
+        return;
+    }
+
+    let node_indices: Vec<usize> = layer.clone();
+    let n = node_indices.len();
+
+    // Build connectivity matrix: shared_neighbors[i][j] = count of shared neighbors
+    let mut shared_neighbors: Vec<Vec<usize>> = vec![vec![0; n]; n];
+
+    for i in 0..n {
+        let node_i = node_indices[i];
+        let preds_i: HashSet<usize> = graph.predecessors(node_i).into_iter().collect();
+        let succs_i: HashSet<usize> = graph.successors(node_i).into_iter().collect();
+
+        for j in (i + 1)..n {
+            let node_j = node_indices[j];
+            let preds_j: HashSet<usize> = graph.predecessors(node_j).into_iter().collect();
+            let succs_j: HashSet<usize> = graph.successors(node_j).into_iter().collect();
+
+            // Count shared predecessors and successors
+            let shared_preds = preds_i.intersection(&preds_j).count();
+            let shared_succs = succs_i.intersection(&succs_j).count();
+            let total_shared = shared_preds + shared_succs;
+
+            shared_neighbors[i][j] = total_shared;
+            shared_neighbors[j][i] = total_shared;
+        }
+    }
+
+    // Greedy clustering: build ordered list by starting with most-connected node
+    // and repeatedly adding the most-related unassigned node
+    let mut ordered: Vec<usize> = Vec::with_capacity(n);
+    let mut assigned: HashSet<usize> = HashSet::new();
+
+    // Start with the node that has the highest total connectivity
+    let start_idx = (0..n)
+        .max_by_key(|&i| {
+            let node = node_indices[i];
+            graph.incoming_edges(node).len() + graph.outgoing_edges(node).len()
+        })
+        .unwrap_or(0);
+
+    ordered.push(node_indices[start_idx]);
+    assigned.insert(start_idx);
+
+    // Repeatedly add the most-related unassigned node
+    while ordered.len() < n {
+        let mut best_candidate = None;
+        let mut best_score = 0;
+
+        for i in 0..n {
+            if assigned.contains(&i) {
+                continue;
+            }
+
+            // Calculate total shared neighbors with already-ordered nodes
+            let score: usize = assigned
+                .iter()
+                .map(|&j| shared_neighbors[i][j])
+                .sum();
+
+            // Tiebreaker: use connectivity degree
+            let degree = graph.incoming_edges(node_indices[i]).len()
+                + graph.outgoing_edges(node_indices[i]).len();
+
+            // Combine score with degree for tiebreaking (shift score left to prioritize it)
+            let combined = score * 1000 + degree;
+
+            if best_candidate.is_none() || combined > best_score {
+                best_score = combined;
+                best_candidate = Some(i);
+            }
+        }
+
+        if let Some(idx) = best_candidate {
+            ordered.push(node_indices[idx]);
+            assigned.insert(idx);
+        } else {
+            // Fallback: add remaining nodes in original order
+            for i in 0..n {
+                if !assigned.contains(&i) {
+                    ordered.push(node_indices[i]);
+                    assigned.insert(i);
+                }
+            }
+            break;
+        }
+    }
+
+    // Update layer and node positions
+    graph.layers[layer_idx] = ordered;
+    for (pos, &node_idx) in graph.layers[layer_idx].iter().enumerate() {
+        graph.nodes[node_idx].position_in_layer = pos;
+    }
 }
 
 /// Order a single layer using barycenter heuristic.
@@ -96,6 +226,10 @@ fn order_layer_by_barycenter(graph: &mut LayeredGraph, layer_idx: usize, use_pre
 }
 
 /// Calculate barycenter based on predecessor positions.
+///
+/// Uses weighted averaging where nodes with higher connectivity (more edges)
+/// have stronger influence on the barycenter. This helps group related nodes
+/// together by pulling nodes more strongly toward highly-connected neighbors.
 fn calculate_barycenter_from_predecessors(graph: &LayeredGraph, node_idx: usize) -> f64 {
     let predecessors = graph.predecessors(node_idx);
     if predecessors.is_empty() {
@@ -103,27 +237,71 @@ fn calculate_barycenter_from_predecessors(graph: &LayeredGraph, node_idx: usize)
         return graph.nodes[node_idx].position_in_layer as f64;
     }
 
-    let sum: f64 = predecessors
-        .iter()
-        .map(|&pred| graph.nodes[pred].position_in_layer as f64)
-        .sum();
+    let mut weighted_sum = 0.0;
+    let mut total_weight = 0.0;
 
-    sum / predecessors.len() as f64
+    for &pred_idx in &predecessors {
+        // Weight by:
+        // 1. Number of edges between this pair (supports multi-edge scenarios)
+        // 2. Total connectivity of the predecessor (hubs have more influence)
+        let edge_count = graph
+            .edges
+            .iter()
+            .filter(|e| e.source == pred_idx && e.target == node_idx)
+            .count() as f64;
+
+        // Predecessor's total degree (incoming + outgoing edges)
+        let pred_degree = graph.incoming_edges(pred_idx).len() + graph.outgoing_edges(pred_idx).len();
+
+        // Combined weight: edge count * (1 + log(degree))
+        // The log dampens the degree effect to avoid over-weighting hubs
+        let degree_factor = 1.0 + (pred_degree as f64).ln().max(0.0);
+        let weight = edge_count.max(1.0) * degree_factor;
+
+        weighted_sum += graph.nodes[pred_idx].position_in_layer as f64 * weight;
+        total_weight += weight;
+    }
+
+    weighted_sum / total_weight
 }
 
 /// Calculate barycenter based on successor positions.
+///
+/// Uses weighted averaging where nodes with higher connectivity (more edges)
+/// have stronger influence on the barycenter. This helps group related nodes
+/// together by pulling nodes more strongly toward highly-connected neighbors.
 fn calculate_barycenter_from_successors(graph: &LayeredGraph, node_idx: usize) -> f64 {
     let successors = graph.successors(node_idx);
     if successors.is_empty() {
         return graph.nodes[node_idx].position_in_layer as f64;
     }
 
-    let sum: f64 = successors
-        .iter()
-        .map(|&succ| graph.nodes[succ].position_in_layer as f64)
-        .sum();
+    let mut weighted_sum = 0.0;
+    let mut total_weight = 0.0;
 
-    sum / successors.len() as f64
+    for &succ_idx in &successors {
+        // Weight by:
+        // 1. Number of edges between this pair (supports multi-edge scenarios)
+        // 2. Total connectivity of the successor (hubs have more influence)
+        let edge_count = graph
+            .edges
+            .iter()
+            .filter(|e| e.source == node_idx && e.target == succ_idx)
+            .count() as f64;
+
+        // Successor's total degree (incoming + outgoing edges)
+        let succ_degree = graph.incoming_edges(succ_idx).len() + graph.outgoing_edges(succ_idx).len();
+
+        // Combined weight: edge count * (1 + log(degree))
+        // The log dampens the degree effect to avoid over-weighting hubs
+        let degree_factor = 1.0 + (succ_degree as f64).ln().max(0.0);
+        let weight = edge_count.max(1.0) * degree_factor;
+
+        weighted_sum += graph.nodes[succ_idx].position_in_layer as f64 * weight;
+        total_weight += weight;
+    }
+
+    weighted_sum / total_weight
 }
 
 /// Apply 2-opt local refinement to reduce crossings.
@@ -367,7 +545,8 @@ mod tests {
         let initial_crossings = count_total_crossings(&graph);
         assert_eq!(initial_crossings, 1);
 
-        minimize_crossings(&mut graph, 10, true);
+        let config = SugiyamaConfig::default();
+        minimize_crossings(&mut graph, &config);
 
         let final_crossings = count_total_crossings(&graph);
         assert_eq!(final_crossings, 0);
@@ -458,7 +637,8 @@ mod tests {
         let mut graph = setup_graph(nodes, edges);
 
         let initial_crossings = count_total_crossings(&graph);
-        minimize_crossings(&mut graph, 24, true);
+        let config = SugiyamaConfig::default();
+        minimize_crossings(&mut graph, &config);
         let final_crossings = count_total_crossings(&graph);
 
         // Should either maintain or reduce crossings

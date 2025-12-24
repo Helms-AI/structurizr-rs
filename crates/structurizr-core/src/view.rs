@@ -34,11 +34,11 @@ pub struct AutoLayout {
 }
 
 fn default_rank_separation() -> u32 {
-    100
+    150  // Increased for better readability
 }
 
 fn default_node_separation() -> u32 {
-    100
+    150  // Increased for better readability
 }
 
 impl Default for AutoLayout {
@@ -126,6 +126,9 @@ pub struct ViewProperties {
     pub auto_layout: Option<AutoLayout>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub properties: HashMap<String, String>,
+    /// Background color for the view (e.g., "#1a1a1a" for dark mode).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub background: Option<String>,
 }
 
 impl ViewProperties {
@@ -138,6 +141,7 @@ impl ViewProperties {
             relationships: Vec::new(),
             auto_layout: None,
             properties: HashMap::new(),
+            background: None,
         }
     }
 
@@ -153,6 +157,11 @@ impl ViewProperties {
 
     pub fn with_auto_layout(mut self, auto_layout: AutoLayout) -> Self {
         self.auto_layout = Some(auto_layout);
+        self
+    }
+
+    pub fn with_background(mut self, background: impl Into<String>) -> Self {
+        self.background = Some(background.into());
         self
     }
 

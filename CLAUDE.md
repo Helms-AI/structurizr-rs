@@ -194,16 +194,73 @@ All project documentation MUST be placed in the `/docs` directory:
 4. **Always update `/docs/index.md`** when adding new documentation
 5. **Context-specific READMEs** (like `demo/README.md`) may stay in their directories
 
-### Example Files
+### Example Workspace Structure
 
-All example `.dsl` files and example code MUST be placed in `/examples/`:
+> **CRITICAL**: All examples MUST follow this structure.
+
+Each example MUST be in its own folder under `/examples/{size}/{example-name}/`:
 
 ```
-/examples/
-├── *.dsl                 # Example DSL workspace files
-├── *.rs                  # Example Rust code
-└── README*.md            # Example-specific documentation
+examples/{size}/{example-name}/
+├── workspace.dsl     # The DSL workspace file (with !docs "docs" directive)
+├── serve.sh          # Script to serve the example (use template below)
+├── README.md         # Brief overview for GitHub browsing
+├── docs/             # Comprehensive documentation (referenced by !docs)
+│   ├── index.md      # Main documentation page
+│   └── *.md          # Additional documentation files
+└── adrs/             # Architecture Decision Records (referenced by !adrs)
+    └── *.md          # ADR files (001-*.md, 002-*.md, etc.)
 ```
+
+**Size categories:**
+- `small/` - Simple examples (1-3 containers)
+- `medium/` - Moderate complexity (4-8 containers)
+- `large/` - Complex examples (9+ containers, deployment views)
+
+**Documentation Requirements:**
+
+1. **README.md** - Brief overview for GitHub browsing
+2. **docs/index.md** - Comprehensive documentation (rendered in web UI via !docs directive):
+   - Overview and purpose of the example
+   - DSL features demonstrated
+   - Business context and use cases
+   - Architecture overview
+   - How to run and explore the example
+3. **adrs/*.md** - Architecture Decision Records (rendered in web UI via !adrs directive)
+
+**workspace.dsl MUST include:**
+```dsl
+!docs "docs"
+!adrs "adrs"
+```
+
+**serve.sh template:**
+```bash
+#!/bin/bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
+
+find_available_port() {
+    while true; do
+        PORT=$((RANDOM % 55535 + 10000))
+        if ! lsof -i:$PORT > /dev/null 2>&1; then
+            echo $PORT
+            return
+        fi
+    done
+}
+
+PORT=$(find_available_port)
+echo "Starting [Example Name] example..."
+echo "URL: http://localhost:$PORT"
+cd "$PROJECT_ROOT"
+cargo run --quiet -- serve --data-dir "$SCRIPT_DIR" --port $PORT
+```
+
+**Do NOT:**
+- Put loose `.dsl` files directly in `/examples/`
+- Create examples without `serve.sh`, `README.md`, and `docs/` folder
+- Create workspace.dsl without `!docs "docs"` directive
 
 ### Temporary/Throwaway Files
 

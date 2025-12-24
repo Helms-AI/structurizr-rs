@@ -1,20 +1,20 @@
 //! SVG rendering for Structurizr diagrams.
 
 use structurizr_core::model::{ElementId, DeploymentNode};
-use structurizr_core::style::Styles;
+use structurizr_core::style::{IconPosition, Routing, Styles};
 use structurizr_core::view::{
     ComponentView, ContainerView, CustomView, DeploymentView, DynamicView,
     FilteredView, FilterMode, ImageView, SystemContextView, SystemLandscapeView,
+    ViewProperties,
 };
 use structurizr_core::Workspace;
 
 use crate::error::Result;
 use crate::layout::{GridLayout, LayoutEdge, LayoutNode};
 use crate::routing::orthogonal::{OrthogonalConfig, OrthogonalRouter};
-use crate::routing::EdgePath;
+use crate::routing::{route_curved, EdgePath};
 use crate::shapes::{render_shape, Bounds};
 use crate::style_resolver::{ElementKind, StyleResolver};
-use structurizr_core::style::Routing;
 
 /// Tracks the bounding box of all content in the SVG.
 /// Used to calculate dynamic viewBox dimensions.
@@ -100,6 +100,50 @@ struct TextBounds {
     y: f64,      // Center Y
     width: f64,  // Estimated text width
     height: f64, // Based on font size
+}
+
+/// Configuration for SVG rendering.
+#[derive(Debug, Clone)]
+pub struct RenderConfig {
+    /// Background color for the diagram (default: "#ffffff" for light mode).
+    pub background_color: String,
+}
+
+impl RenderConfig {
+    /// Create a new render config with default settings.
+    pub fn new() -> Self {
+        Self {
+            background_color: "#ffffff".to_string(),
+        }
+    }
+
+    /// Create a render config for dark mode.
+    pub fn dark_mode() -> Self {
+        Self {
+            background_color: "#1a1a1a".to_string(),
+        }
+    }
+
+    /// Create a render config from view properties.
+    pub fn from_view_properties(props: &ViewProperties) -> Self {
+        Self {
+            background_color: props.background.clone().unwrap_or_else(|| "#ffffff".to_string()),
+        }
+    }
+
+    /// Check if dark mode is enabled (background is dark).
+    pub fn is_dark_mode(&self) -> bool {
+        // Consider it dark mode if background starts with #0, #1, or #2
+        self.background_color.starts_with("#0")
+            || self.background_color.starts_with("#1")
+            || self.background_color.starts_with("#2")
+    }
+}
+
+impl Default for RenderConfig {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TextBounds {
@@ -321,6 +365,64 @@ fn line_rect_intersection(
     }
 
     intersection
+}
+
+/// Calculate intersection point with offset for distributing multiple edges.
+/// The offset moves the intersection point along the rectangle edge.
+fn line_rect_intersection_with_offset(
+    x1: f64, y1: f64,  // Start point (outside rectangle)
+    x2: f64, y2: f64,  // End point (center of rectangle)
+    rect_x: f64, rect_y: f64, rect_w: f64, rect_h: f64,
+    edge_idx: usize,
+    total_edges: usize,
+) -> (f64, f64) {
+    // Get the base intersection point
+    let (base_x, base_y) = line_rect_intersection(x1, y1, x2, y2, rect_x, rect_y, rect_w, rect_h);
+
+    // If only one edge, no offset needed
+    if total_edges <= 1 {
+        return (base_x, base_y);
+    }
+
+    // Rectangle edges
+    let left = rect_x;
+    let right = rect_x + rect_w;
+    let top = rect_y;
+    let bottom = rect_y + rect_h;
+
+    // Determine which edge the intersection is on and apply offset
+    let tolerance = 1.0;
+    let margin = 0.2;  // 20% margin on each side
+    let usable = 1.0 - 2.0 * margin;
+
+    // Calculate offset position (0.0 to 1.0 along the edge)
+    let offset_ratio = if total_edges == 1 {
+        0.5
+    } else {
+        margin + usable * (edge_idx as f64 / (total_edges - 1) as f64)
+    };
+
+    // Apply offset based on which edge the intersection is on
+    if (base_x - left).abs() < tolerance {
+        // Left edge - offset vertically
+        let edge_y = top + rect_h * offset_ratio;
+        (left, edge_y)
+    } else if (base_x - right).abs() < tolerance {
+        // Right edge - offset vertically
+        let edge_y = top + rect_h * offset_ratio;
+        (right, edge_y)
+    } else if (base_y - top).abs() < tolerance {
+        // Top edge - offset horizontally
+        let edge_x = left + rect_w * offset_ratio;
+        (edge_x, top)
+    } else if (base_y - bottom).abs() < tolerance {
+        // Bottom edge - offset horizontally
+        let edge_x = left + rect_w * offset_ratio;
+        (edge_x, bottom)
+    } else {
+        // Fallback to base intersection
+        (base_x, base_y)
+    }
 }
 
 /// SVG renderer for Structurizr diagrams.
@@ -1493,6 +1595,7 @@ impl SvgRenderer {
             technology: Option<String>,
             font_size: u32,
             color: String,
+            is_orthogonal: bool,  // Track if path uses orthogonal routing (for horizontal labels)
         }
 
         let mut rel_lines: Vec<RelLineData> = Vec::new();
@@ -1502,6 +1605,21 @@ impl SvgRenderer {
             structurizr_core::view::AutoLayoutDirection::TopBottom
         );
         let orthogonal_router = OrthogonalRouter::new(orthogonal_config);
+
+        // Pre-compute edge indices for port distribution
+        // This allows multiple connectors to the same node to attach at different points
+        let mut edges_by_source: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+        let mut edges_by_target: std::collections::HashMap<String, Vec<String>> = std::collections::HashMap::new();
+
+        for rel in relationships {
+            let src = rel.source_id.to_string();
+            let tgt = rel.destination_id.to_string();
+            // Only count edges where both nodes are in the view
+            if node_map.contains_key(&src) && node_map.contains_key(&tgt) {
+                edges_by_source.entry(src.clone()).or_default().push(tgt.clone());
+                edges_by_target.entry(tgt).or_default().push(src);
+            }
+        }
 
         // First pass: collect relationship data and render lines/paths
         for rel in relationships {
@@ -1514,12 +1632,29 @@ impl SvgRenderer {
                 // Resolve relationship style
                 let rel_style = style_resolver.resolve_relationship(&rel.tags);
 
-                // Check if orthogonal routing is requested
+                // Check which routing style is requested
                 let use_orthogonal = matches!(rel_style.routing, Routing::Orthogonal);
+                let use_curved = matches!(rel_style.routing, Routing::Curved);
+
+                // Get edge indices for proper port distribution
+                let src_edges = edges_by_source.get(&source_id);
+                let tgt_edges = edges_by_target.get(&target_id);
+                let edge_idx_at_source = src_edges
+                    .and_then(|edges| edges.iter().position(|t| t == &target_id))
+                    .unwrap_or(0);
+                let edge_idx_at_target = tgt_edges
+                    .and_then(|edges| edges.iter().position(|s| s == &source_id))
+                    .unwrap_or(0);
+                let total_source_edges = src_edges.map(|e| e.len()).unwrap_or(1);
+                let total_target_edges = tgt_edges.map(|e| e.len()).unwrap_or(1);
 
                 let (x1, y1, x2, y2) = if use_orthogonal {
-                    // Orthogonal routing - use the router
-                    let path = orthogonal_router.route_edge(source_node, target_node, 0, 1, 0, 1);
+                    // Orthogonal routing - use the router with proper port distribution
+                    let path = orthogonal_router.route_edge(
+                        source_node, target_node,
+                        edge_idx_at_source, total_source_edges,
+                        edge_idx_at_target, total_target_edges,
+                    );
 
                     // Get waypoints from the path
                     if let EdgePath::Orthogonal { waypoints } = &path {
@@ -1570,8 +1705,62 @@ impl SvgRenderer {
                         let tgt_cy = target_node.position.y + target_node.size.height / 2.0;
                         (src_cx, src_cy, tgt_cx, tgt_cy)
                     }
+                } else if use_curved {
+                    // Curved routing - smooth Bezier curves
+                    let path = route_curved(
+                        source_node, target_node,
+                        edge_idx_at_source, total_source_edges,
+                        edge_idx_at_target, total_target_edges,
+                    );
+
+                    // Get control points from the path
+                    if let EdgePath::Curved { control_points } = &path {
+                        // Build SVG path data
+                        let path_data = path.to_svg_path();
+
+                        // Build path attributes
+                        let mut path_attrs = format!(
+                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}""#,
+                            path_data, rel_style.color, rel_style.thickness
+                        );
+
+                        // Add dash pattern if needed
+                        if let Some(dasharray) = rel_style.stroke_dasharray() {
+                            path_attrs.push_str(&format!(r#" stroke-dasharray="{}""#, dasharray));
+                        }
+
+                        // Add opacity if not 100%
+                        if rel_style.opacity < 100 {
+                            path_attrs.push_str(&format!(r#" opacity="{}""#, rel_style.opacity as f64 / 100.0));
+                        }
+
+                        // Draw path with arrow marker
+                        svg.push_str(&format!(
+                            r##"  <path {} marker-end="url(#arrowhead)"/>"##,
+                            path_attrs
+                        ));
+                        svg.push('\n');
+
+                        // Use first and last control points for label data
+                        let start = control_points.first().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
+                        let end = control_points.last().map(|p| (p.x, p.y)).unwrap_or((0.0, 0.0));
+
+                        // Expand bounds to include all control points
+                        for cp in control_points {
+                            bounds.expand_point(cp.x, cp.y);
+                        }
+
+                        (start.0, start.1, end.0, end.1)
+                    } else {
+                        // Fallback to direct if somehow we got a different path type
+                        let src_cx = source_node.position.x + source_node.size.width / 2.0;
+                        let src_cy = source_node.position.y + source_node.size.height / 2.0;
+                        let tgt_cx = target_node.position.x + target_node.size.width / 2.0;
+                        let tgt_cy = target_node.position.y + target_node.size.height / 2.0;
+                        (src_cx, src_cy, tgt_cx, tgt_cy)
+                    }
                 } else {
-                    // Direct routing (default) - original logic
+                    // Direct routing (default) - with edge distribution
                     // Calculate center points
                     let src_cx = source_node.position.x + source_node.size.width / 2.0;
                     let src_cy = source_node.position.y + source_node.size.height / 2.0;
@@ -1579,15 +1768,18 @@ impl SvgRenderer {
                     let tgt_cy = target_node.position.y + target_node.size.height / 2.0;
 
                     // Calculate intersection points with element boundaries
-                    let (x1, y1) = line_rect_intersection(
+                    // Use offset version to distribute multiple edges along the boundary
+                    let (x1, y1) = line_rect_intersection_with_offset(
                         tgt_cx, tgt_cy, src_cx, src_cy,
                         source_node.position.x, source_node.position.y,
                         source_node.size.width, source_node.size.height,
+                        edge_idx_at_source, total_source_edges,
                     );
-                    let (x2, y2) = line_rect_intersection(
+                    let (x2, y2) = line_rect_intersection_with_offset(
                         src_cx, src_cy, tgt_cx, tgt_cy,
                         target_node.position.x, target_node.position.y,
                         target_node.size.width, target_node.size.height,
+                        edge_idx_at_target, total_target_edges,
                     );
 
                     // Build line attributes
@@ -1617,6 +1809,7 @@ impl SvgRenderer {
                 };
 
                 // Store data for label rendering
+                // Both orthogonal and curved paths use horizontal labels for better readability
                 rel_lines.push(RelLineData {
                     x1,
                     y1,
@@ -1626,6 +1819,7 @@ impl SvgRenderer {
                     technology: rel.technology.clone(),
                     font_size: rel_style.font_size,
                     color: rel_style.color.clone(),
+                    is_orthogonal: use_orthogonal || use_curved,
                 });
             }
         }
@@ -1635,7 +1829,12 @@ impl SvgRenderer {
 
         for rel_data in &rel_lines {
             // Calculate the angle for this relationship line
-            let angle = calculate_line_angle(rel_data.x1, rel_data.y1, rel_data.x2, rel_data.y2);
+            // Orthogonal paths use horizontal (0°) labels for better readability
+            let angle = if rel_data.is_orthogonal {
+                0.0
+            } else {
+                calculate_line_angle(rel_data.x1, rel_data.y1, rel_data.x2, rel_data.y2)
+            };
 
             // Render description label with collision avoidance
             if let Some(ref desc) = rel_data.description {
@@ -1847,6 +2046,7 @@ impl SvgRenderer {
                 height: legend_icon_size as u32,
                 opacity: 100,
                 icon: None,
+                icon_position: structurizr_core::style::IconPosition::Top,
                 show_metadata: false,
                 show_description: false,
             };
@@ -1988,7 +2188,23 @@ impl SvgRenderer {
         svg.push_str(&render_shape(resolved_style.shape, &bounds, &resolved_style));
         svg.push('\n');
 
-        // Calculate text position based on shape
+        // Render icon if present
+        let icon_text_offset = if let Some(ref icon_url) = resolved_style.icon {
+            let (icon_svg, text_offset) = render_icon(
+                icon_url,
+                resolved_style.icon_position,
+                &bounds,
+                resolved_style.shape,
+            );
+            svg.push_str("  ");
+            svg.push_str(&icon_svg);
+            svg.push('\n');
+            text_offset
+        } else {
+            0.0
+        };
+
+        // Calculate text position based on shape (with icon offset)
         let text_y = match resolved_style.shape {
             structurizr_core::style::Shape::Person => y + height - 80.0,
             structurizr_core::style::Shape::Robot => y + height - 60.0,
@@ -1997,7 +2213,7 @@ impl SvgRenderer {
             structurizr_core::style::Shape::MobileDevicePortrait |
             structurizr_core::style::Shape::MobileDeviceLandscape => y + height * 0.35,
             structurizr_core::style::Shape::Folder => y + height * 0.35,
-            _ => y + 40.0,
+            _ => y + 40.0 + icon_text_offset,
         };
 
         let text_color = &resolved_style.color;
@@ -2150,6 +2366,63 @@ fn wrap_text(text: &str, max_chars: usize) -> Vec<String> {
     }
 
     lines
+}
+
+/// Render an icon image within an element.
+///
+/// Returns the SVG `<image>` element and the vertical offset for text positioning.
+fn render_icon(
+    icon_url: &str,
+    position: IconPosition,
+    bounds: &Bounds,
+    shape: structurizr_core::style::Shape,
+) -> (String, f64) {
+    // Icon size is proportional to element size, max 48px
+    let icon_size = 48.0_f64.min(bounds.width * 0.25).min(bounds.height * 0.25);
+
+    let (icon_x, icon_y) = match position {
+        IconPosition::Top => {
+            // Center horizontally, position at top with some padding
+            let padding = match shape {
+                structurizr_core::style::Shape::Person |
+                structurizr_core::style::Shape::Robot => bounds.height * 0.15,
+                structurizr_core::style::Shape::Cylinder => bounds.height * 0.2,
+                _ => 10.0,
+            };
+            (
+                bounds.x + (bounds.width - icon_size) / 2.0,
+                bounds.y + padding,
+            )
+        }
+        IconPosition::Bottom => {
+            // Center horizontally, position at bottom
+            (
+                bounds.x + (bounds.width - icon_size) / 2.0,
+                bounds.y + bounds.height - icon_size - 10.0,
+            )
+        }
+        IconPosition::Left => {
+            // Left side, vertically centered
+            (
+                bounds.x + 10.0,
+                bounds.y + (bounds.height - icon_size) / 2.0,
+            )
+        }
+    };
+
+    // Calculate text offset based on icon position
+    let text_offset = match position {
+        IconPosition::Top => icon_size + 15.0,
+        IconPosition::Bottom => 0.0,
+        IconPosition::Left => 0.0,
+    };
+
+    let svg = format!(
+        r#"<image x="{:.0}" y="{:.0}" width="{:.0}" height="{:.0}" href="{}" preserveAspectRatio="xMidYMid meet"/>"#,
+        icon_x, icon_y, icon_size, icon_size, escape_xml(icon_url)
+    );
+
+    (svg, text_offset)
 }
 
 #[cfg(test)]

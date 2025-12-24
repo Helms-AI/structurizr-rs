@@ -47,10 +47,20 @@ pub enum LineStyle {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum Routing {
-    #[default]
     Direct,
     Orthogonal,
+    #[default]
     Curved,
+}
+
+/// Position of an icon within an element.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum IconPosition {
+    #[default]
+    Top,
+    Bottom,
+    Left,
 }
 
 /// Style for elements with a specific tag.
@@ -61,6 +71,8 @@ pub struct ElementStyle {
     pub shape: Option<Shape>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub icon: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none", rename = "iconPosition")]
+    pub icon_position: Option<IconPosition>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub width: Option<u32>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

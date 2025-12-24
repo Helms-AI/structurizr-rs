@@ -3,10 +3,13 @@
 //! This module provides different routing strategies for relationship edges:
 //! - Direct: Straight lines between elements
 //! - Orthogonal: Right-angle paths through channels
-//! - Curved: Bezier curves (future)
+//! - Curved: Smooth Bezier curves
 
+pub mod curved;
 pub mod direct;
 pub mod orthogonal;
+
+pub use curved::route_curved;
 
 use crate::layout::Point;
 

@@ -4,7 +4,7 @@
 //! It provides a `ResolvedStyle` struct that contains all the computed style values
 //! with appropriate defaults.
 
-use structurizr_core::style::{Border, ElementStyle, LineStyle, RelationshipStyle, Routing, Shape, Styles};
+use structurizr_core::style::{Border, ElementStyle, IconPosition, LineStyle, RelationshipStyle, Routing, Shape, Styles};
 
 /// Default colors matching Structurizr's color scheme.
 pub mod defaults {
@@ -98,6 +98,7 @@ pub struct ResolvedElementStyle {
     pub height: u32,
     pub opacity: u32,
     pub icon: Option<String>,
+    pub icon_position: IconPosition,
     pub show_metadata: bool,
     pub show_description: bool,
 }
@@ -118,6 +119,7 @@ impl ResolvedElementStyle {
             height,
             opacity: 100,
             icon: None,
+            icon_position: IconPosition::Top,
             show_metadata: true,
             show_description: true,
         }
@@ -158,6 +160,9 @@ impl ResolvedElementStyle {
         if style.icon.is_some() {
             self.icon = style.icon.clone();
         }
+        if let Some(icon_position) = style.icon_position {
+            self.icon_position = icon_position;
+        }
         if let Some(metadata) = style.metadata {
             self.show_metadata = metadata;
         }
@@ -185,7 +190,7 @@ impl Default for ResolvedRelationshipStyle {
             thickness: defaults::DEFAULT_RELATIONSHIP_THICKNESS,
             color: defaults::RELATIONSHIP_COLOR.to_string(),
             style: LineStyle::Solid,
-            routing: Routing::Orthogonal,
+            routing: Routing::default(),  // Use the enum's default (Curved)
             font_size: 12,
             opacity: 100,
             dashed: false,

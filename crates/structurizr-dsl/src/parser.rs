@@ -739,6 +739,7 @@ impl Parser {
             exclude: Vec::new(),
             auto_layout: None,
             properties: HashMap::new(),
+            background: None,
         };
 
         self.skip_newlines_and_comments();
@@ -748,7 +749,7 @@ impl Parser {
             loop {
                 self.skip_newlines_and_comments();
 
-                match self.current_kind() {
+                match self.current_kind().cloned() {
                     Some(TokenKind::CloseBrace) => {
                         self.advance();
                         break;
@@ -786,6 +787,15 @@ impl Parser {
                         self.advance();
                         props.properties.extend(self.parse_properties_block()?);
                     }
+                    Some(TokenKind::Identifier(ref id)) => {
+                        match id.to_lowercase().as_str() {
+                            "background" => {
+                                self.advance();
+                                props.background = Some(self.expect_string()?);
+                            }
+                            _ => break,
+                        }
+                    }
                     _ => break,
                 }
             }
@@ -798,12 +808,24 @@ impl Parser {
         self.skip_newlines_and_comments();
 
         let direction = if let Some(TokenKind::Identifier(id)) = self.current_kind().cloned() {
-            self.advance();
+            // Only consume the identifier if it's a known direction
             match id.to_lowercase().as_str() {
-                "tb" => crate::ast::AutoLayoutDirection::TopBottom,
-                "bt" => crate::ast::AutoLayoutDirection::BottomTop,
-                "lr" => crate::ast::AutoLayoutDirection::LeftRight,
-                "rl" => crate::ast::AutoLayoutDirection::RightLeft,
+                "tb" => {
+                    self.advance();
+                    crate::ast::AutoLayoutDirection::TopBottom
+                }
+                "bt" => {
+                    self.advance();
+                    crate::ast::AutoLayoutDirection::BottomTop
+                }
+                "lr" => {
+                    self.advance();
+                    crate::ast::AutoLayoutDirection::LeftRight
+                }
+                "rl" => {
+                    self.advance();
+                    crate::ast::AutoLayoutDirection::RightLeft
+                }
                 _ => crate::ast::AutoLayoutDirection::TopBottom,
             }
         } else {
@@ -946,6 +968,7 @@ impl Parser {
             tag,
             shape: None,
             icon: None,
+            icon_position: None,
             width: None,
             height: None,
             background: None,
@@ -979,6 +1002,9 @@ impl Parser {
                                 style.shape = Some(self.expect_identifier_or_shape_keyword()?);
                             }
                             "icon" => style.icon = Some(self.expect_string()?),
+                            "iconposition" => {
+                                style.icon_position = Some(self.expect_identifier()?);
+                            }
                             "width" => {
                                 if let Some(TokenKind::Number(n)) = self.current_kind().cloned() {
                                     self.advance();
@@ -1460,6 +1486,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
             if let Some(auto_layout) = view.properties.auto_layout {
                 v.properties = v.properties.with_auto_layout(convert_auto_layout(auto_layout));
             }
+            if let Some(background) = view.properties.background {
+                v.properties = v.properties.with_background(background);
+            }
             workspace.views_mut().add_system_landscape_view(v);
         }
 
@@ -1474,6 +1503,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 }
                 if let Some(auto_layout) = view.properties.auto_layout {
                     v.properties = v.properties.with_auto_layout(convert_auto_layout(auto_layout));
+                }
+                if let Some(background) = view.properties.background {
+                    v.properties = v.properties.with_background(background);
                 }
                 workspace.views_mut().add_system_context_view(v);
             }
@@ -1491,6 +1523,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 if let Some(auto_layout) = view.properties.auto_layout {
                     v.properties = v.properties.with_auto_layout(convert_auto_layout(auto_layout));
                 }
+                if let Some(background) = view.properties.background {
+                    v.properties = v.properties.with_background(background);
+                }
                 workspace.views_mut().add_container_view(v);
             }
         }
@@ -1507,6 +1542,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 }
                 if let Some(auto_layout) = view.properties.auto_layout {
                     v.properties = v.properties.with_auto_layout(convert_auto_layout(auto_layout));
+                }
+                if let Some(background) = view.properties.background {
+                    v.properties = v.properties.with_background(background);
                 }
                 workspace.views_mut().add_component_view(v);
             }
@@ -1531,6 +1569,14 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 if let Some(shape) = elem_style.shape {
                     if let Some(s) = parse_shape(&shape) {
                         style = style.with_shape(s);
+                    }
+                }
+                if let Some(icon) = elem_style.icon {
+                    style.icon = Some(icon);
+                }
+                if let Some(icon_pos) = elem_style.icon_position {
+                    if let Some(pos) = parse_icon_position(&icon_pos) {
+                        style.icon_position = Some(pos);
                     }
                 }
                 workspace.styles_mut().add_element_style(style);
@@ -1743,6 +1789,9 @@ fn build_element_relationships(
 }
 
 fn convert_auto_layout(node: AutoLayoutNode) -> AutoLayout {
+    // Use AutoLayout's defaults when not specified in DSL
+    let default_layout = AutoLayout::default();
+
     AutoLayout {
         direction: match node.direction {
             crate::ast::AutoLayoutDirection::TopBottom => structurizr_core::view::AutoLayoutDirection::TopBottom,
@@ -1750,8 +1799,8 @@ fn convert_auto_layout(node: AutoLayoutNode) -> AutoLayout {
             crate::ast::AutoLayoutDirection::LeftRight => structurizr_core::view::AutoLayoutDirection::LeftRight,
             crate::ast::AutoLayoutDirection::RightLeft => structurizr_core::view::AutoLayoutDirection::RightLeft,
         },
-        rank_separation: node.rank_separation.unwrap_or(300),
-        node_separation: node.node_separation.unwrap_or(300),
+        rank_separation: node.rank_separation.unwrap_or(default_layout.rank_separation),
+        node_separation: node.node_separation.unwrap_or(default_layout.node_separation),
     }
 }
 
@@ -1789,6 +1838,15 @@ fn parse_routing(s: &str) -> Option<Routing> {
         "direct" => Some(Routing::Direct),
         "orthogonal" => Some(Routing::Orthogonal),
         "curved" => Some(Routing::Curved),
+        _ => None,
+    }
+}
+
+fn parse_icon_position(s: &str) -> Option<IconPosition> {
+    match s.to_lowercase().as_str() {
+        "top" => Some(IconPosition::Top),
+        "bottom" => Some(IconPosition::Bottom),
+        "left" => Some(IconPosition::Left),
         _ => None,
     }
 }

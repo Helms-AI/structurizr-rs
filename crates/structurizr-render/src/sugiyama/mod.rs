@@ -86,18 +86,27 @@ pub struct SugiyamaConfig {
     pub max_iterations: usize,
     /// Whether to apply 2-opt local refinement
     pub local_refinement: bool,
+    /// Use connectivity-based initial ordering (groups related nodes together)
+    pub connectivity_ordering: bool,
+    /// Apply force-directed position refinement (pulls connected nodes closer)
+    pub force_directed_refinement: bool,
+    /// Number of force-directed iterations (higher = better grouping, slower)
+    pub force_iterations: usize,
 }
 
 impl Default for SugiyamaConfig {
     fn default() -> Self {
         Self {
             direction: AutoLayoutDirection::TopBottom,
-            rank_separation: 100.0,
-            node_separation: 100.0,
+            rank_separation: 150.0,  // Increased vertical spacing between layers
+            node_separation: 150.0,  // Increased horizontal spacing between nodes
             default_width: 400.0,
             default_height: 250.0,
             max_iterations: 24,
             local_refinement: true,
+            connectivity_ordering: true,
+            force_directed_refinement: true,
+            force_iterations: 10,
         }
     }
 }
@@ -171,7 +180,7 @@ pub fn sugiyama_layout(
     dummy::insert_dummy_nodes(&mut graph);
 
     // Phase 5: Minimize crossings
-    ordering::minimize_crossings(&mut graph, config.max_iterations, config.local_refinement);
+    ordering::minimize_crossings(&mut graph, config);
 
     // Phase 6: Assign coordinates
     positioning::assign_coordinates(&mut graph, config, &size_map);

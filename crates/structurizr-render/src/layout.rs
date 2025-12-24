@@ -81,11 +81,11 @@ pub struct AdaptiveLayoutConfig {
 impl Default for AdaptiveLayoutConfig {
     fn default() -> Self {
         Self {
-            target_width: 1200.0,
-            target_height: 900.0,
-            min_spacing: 50.0,
-            max_spacing: 200.0,
-            padding: 50.0,
+            target_width: 2400.0,   // Doubled for larger diagrams
+            target_height: 1800.0,  // Doubled for larger diagrams
+            min_spacing: 150.0,     // Increased from 50 for better readability
+            max_spacing: 300.0,     // Increased from 200
+            padding: 80.0,          // Increased from 50
         }
     }
 }
@@ -103,8 +103,8 @@ impl Default for GridLayout {
     fn default() -> Self {
         Self {
             direction: AutoLayoutDirection::TopBottom,
-            rank_separation: 100.0,
-            node_separation: 100.0,
+            rank_separation: 150.0,  // Increased for better readability
+            node_separation: 150.0,  // Increased for better readability
             default_width: 400.0,
             default_height: 250.0,
         }

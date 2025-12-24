@@ -135,6 +135,8 @@ pub struct ViewPropertiesNode {
     pub exclude: Vec<IncludeExclude>,
     pub auto_layout: Option<AutoLayoutNode>,
     pub properties: HashMap<String, String>,
+    /// Background color for the view (e.g., "#1a1a1a" for dark mode).
+    pub background: Option<String>,
 }
 
 /// Include or exclude directive in a view.
@@ -250,6 +252,7 @@ pub struct ElementStyleNode {
     pub tag: String,
     pub shape: Option<String>,
     pub icon: Option<String>,
+    pub icon_position: Option<String>,
     pub width: Option<u32>,
     pub height: Option<u32>,
     pub background: Option<String>,

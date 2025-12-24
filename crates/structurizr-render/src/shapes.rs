@@ -487,6 +487,7 @@ mod tests {
             height: 300,
             opacity: 100,
             icon: None,
+            icon_position: structurizr_core::style::IconPosition::Top,
             show_metadata: true,
             show_description: true,
         }
