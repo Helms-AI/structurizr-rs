@@ -1060,6 +1060,148 @@ fn escape_json(s: &str) -> String {
         .replace('\t', "\\t")
 }
 
+// =============================================================================
+// Documentation Navigation Tree Structures
+// =============================================================================
+
+/// Extracted heading metadata from markdown parsing.
+#[derive(Debug, Clone)]
+struct ExtractedHeading {
+    /// Heading level (1-6)
+    level: u8,
+    /// Heading text content
+    title: String,
+    /// Unique anchor ID for linking
+    id: String,
+}
+
+/// Tree node for hierarchical navigation.
+#[derive(Debug, Clone)]
+struct HeadingNode {
+    /// Heading level (0 = section, 1-6 = h1-h6)
+    #[allow(dead_code)]
+    level: u8,
+    /// Display title
+    title: String,
+    /// Anchor ID
+    id: String,
+    /// Nested child headings
+    children: Vec<HeadingNode>,
+}
+
+/// Result of rendering markdown with heading extraction.
+struct MarkdownResult {
+    /// Rendered HTML content
+    html: String,
+    /// Extracted headings for navigation
+    headings: Vec<ExtractedHeading>,
+}
+
+/// Extract heading level and title from a markdown line.
+/// Returns None if the line is not a heading.
+fn extract_heading(line: &str) -> Option<(u8, String)> {
+    // Check from h6 to h1 (most specific first)
+    for level in (1..=6).rev() {
+        let prefix = "#".repeat(level) + " ";
+        if line.starts_with(&prefix) {
+            return Some((level as u8, line[prefix.len()..].to_string()));
+        }
+    }
+    None
+}
+
+/// Convert text to a URL-safe slug.
+fn slugify(text: &str) -> String {
+    text.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .split('-')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join("-")
+}
+
+/// Build a tree structure from a flat list of extracted headings.
+/// Uses level-based nesting: headings with higher levels become children
+/// of preceding headings with lower levels.
+fn build_heading_tree(headings: Vec<ExtractedHeading>) -> Vec<HeadingNode> {
+    if headings.is_empty() {
+        return Vec::new();
+    }
+
+    let mut result: Vec<HeadingNode> = Vec::new();
+    let mut idx = 0;
+
+    while idx < headings.len() {
+        let (node, consumed) = build_subtree(&headings, idx);
+        result.push(node);
+        idx += consumed;
+    }
+
+    result
+}
+
+/// Recursively build a subtree starting at the given index.
+/// Returns the node and how many headings were consumed.
+fn build_subtree(headings: &[ExtractedHeading], start: usize) -> (HeadingNode, usize) {
+    let heading = &headings[start];
+    let mut node = HeadingNode {
+        level: heading.level,
+        title: heading.title.clone(),
+        id: heading.id.clone(),
+        children: Vec::new(),
+    };
+
+    let mut consumed = 1;
+    let mut idx = start + 1;
+
+    // Collect all following headings with higher level as children
+    while idx < headings.len() && headings[idx].level > heading.level {
+        let (child, child_consumed) = build_subtree(headings, idx);
+        node.children.push(child);
+        consumed += child_consumed;
+        idx += child_consumed;
+    }
+
+    (node, consumed)
+}
+
+/// Render the navigation tree as HTML.
+fn render_nav_tree(nodes: &[HeadingNode], depth: usize) -> String {
+    nodes.iter().map(|node| {
+        let has_children = !node.children.is_empty();
+        let depth_class = format!("depth-{}", depth.min(5));
+        let expanded_class = if depth == 0 { " expanded" } else { "" };
+
+        if has_children {
+            format!(
+                r##"<li class="nav-item expandable{} {}">
+                    <div class="nav-row">
+                        <span class="toggle"></span>
+                        <a href="#{}" class="nav-link">{}</a>
+                    </div>
+                    <ul class="nav-children">{}</ul>
+                </li>"##,
+                expanded_class,
+                depth_class,
+                node.id,
+                escape_html(&node.title),
+                render_nav_tree(&node.children, depth + 1)
+            )
+        } else {
+            format!(
+                r##"<li class="nav-item leaf {}">
+                    <a href="#{}" class="nav-link">{}</a>
+                </li>"##,
+                depth_class,
+                node.id,
+                escape_html(&node.title)
+            )
+        }
+    }).collect()
+}
+
 /// Documentation viewer page.
 pub async fn documentation(
     State(state): State<AppState>,
@@ -1069,21 +1211,50 @@ pub async fn documentation(
 
     let docs = &workspace.documentation;
 
-    // Build sections list
+    // Build sections list and collect navigation tree
+    let mut nav_tree: Vec<HeadingNode> = Vec::new();
+
     let sections_html: String = if docs.sections.is_empty() {
         "<p class=\"empty\">No documentation sections available.</p>".to_string()
     } else {
         docs.sections.iter().enumerate().map(|(i, section)| {
             let default_title = format!("Section {}", i + 1);
             let title = section.title.as_deref().unwrap_or(&default_title);
+            let section_id = format!("section-{}", i);
+
+            // Render markdown and extract headings
+            let result = render_markdown_with_headings(&section.content, i);
+
+            // Build tree from extracted headings
+            let mut heading_tree = build_heading_tree(result.headings);
+
+            // If the first heading matches the section title, use its children directly
+            // to avoid duplicate entries like "Styling Guide" > "Styling Guide"
+            let children = if heading_tree.len() == 1
+                && heading_tree[0].title.eq_ignore_ascii_case(title)
+            {
+                // First heading matches section title - use its children instead
+                std::mem::take(&mut heading_tree[0].children)
+            } else {
+                heading_tree
+            };
+
+            // Add section as root node with its heading children
+            nav_tree.push(HeadingNode {
+                level: 0,
+                title: title.to_string(),
+                id: section_id.clone(),
+                children,
+            });
+
             format!(
-                r#"<div class="doc-section" id="section-{}">
+                r#"<div class="doc-section" id="{}">
                     <h2>{}</h2>
                     <div class="content">{}</div>
                 </div>"#,
-                i,
+                section_id,
                 escape_html(title),
-                render_markdown(&section.content)
+                result.html
             )
         }).collect()
     };
@@ -1129,15 +1300,16 @@ pub async fn documentation(
         )
     };
 
-    // Build sidebar
-    let sidebar_sections: String = docs.sections.iter().enumerate().map(|(i, section)| {
-        let default_title = format!("Section {}", i + 1);
-        let title = section.title.as_deref().unwrap_or(&default_title);
-        format!(r##"<a href="#section-{}">{}</a>"##, i, escape_html(title))
-    }).collect();
+    // Build sidebar with tree navigation
+    let sidebar_sections = if nav_tree.is_empty() {
+        String::new()
+    } else {
+        format!(r##"<ul class="nav-tree">{}</ul>"##, render_nav_tree(&nav_tree, 0))
+    };
 
+    // ADRs as flat list (they don't have internal heading hierarchy)
     let sidebar_decisions: String = docs.decisions.iter().map(|decision| {
-        format!(r##"<a href="#adr-{}">{}: {}</a>"##, decision.id, decision.id, escape_html(&decision.title))
+        format!(r##"<a href="#adr-{}" class="nav-link adr-link">{}: {}</a>"##, decision.id, decision.id, escape_html(&decision.title))
     }).collect();
 
     let html = format!(
@@ -1152,11 +1324,43 @@ pub async fn documentation(
         .header a {{ color: white; text-decoration: none; }}
         .header h1 {{ margin: 0; font-size: 18px; }}
         .container {{ display: flex; height: calc(100vh - 54px); }}
-        .sidebar {{ width: 280px; background: white; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; flex-shrink: 0; height: calc(100vh - 54px); }}
+        .sidebar {{ width: 300px; background: white; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; flex-shrink: 0; height: calc(100vh - 54px); }}
         .sidebar h3 {{ margin: 0 0 10px 0; font-size: 12px; text-transform: uppercase; color: #888; }}
-        .sidebar a {{ display: block; padding: 8px 12px; color: #333; text-decoration: none; border-radius: 4px; margin-bottom: 2px; font-size: 14px; }}
-        .sidebar a:hover {{ background: #f0f0f0; }}
-        .sidebar a.active {{ background: #e3f2fd; color: #1976d2; font-weight: 500; }}
+
+        /* Tree Navigation */
+        .nav-tree, .nav-tree ul {{ list-style: none; padding: 0; margin: 0; }}
+        .nav-item {{ margin: 1px 0; position: relative; }}
+        .nav-row {{ display: flex; align-items: center; }}
+        .nav-link {{ flex: 1; padding: 6px 8px; color: #333; text-decoration: none; border-radius: 4px; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .nav-link:hover {{ background: #f0f0f0; }}
+        .nav-link.active {{ background: #e3f2fd; color: #1976d2; font-weight: 500; }}
+
+        /* Toggle arrow */
+        .toggle {{ width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 4px; }}
+        .toggle:hover {{ background: #e0e0e0; }}
+        .toggle::before {{ content: '\25B6'; font-size: 8px; color: #666; transition: transform 0.15s ease; }}
+        .expandable.expanded > .nav-row > .toggle::before {{ transform: rotate(90deg); }}
+
+        /* Leaf nodes need padding to align with expandable nodes (account for 20px toggle) */
+        .leaf > .nav-link {{ padding-left: 28px; }}
+
+        /* Children container */
+        .nav-children {{ display: none; margin-left: 12px; border-left: 1px solid #e0e0e0; padding-left: 4px; }}
+        .expandable.expanded > .nav-children {{ display: block; }}
+
+        /* Depth styling */
+        .depth-0 > .nav-row > .nav-link, .depth-0 > .nav-link {{ font-weight: 600; font-size: 14px; }}
+        .depth-1 > .nav-row > .nav-link, .depth-1 > .nav-link {{ font-size: 13px; }}
+        .depth-2 > .nav-row > .nav-link, .depth-2 > .nav-link {{ font-size: 12px; color: #555; }}
+        .depth-3 > .nav-row > .nav-link, .depth-3 > .nav-link {{ font-size: 12px; color: #666; }}
+        .depth-4 > .nav-row > .nav-link, .depth-4 > .nav-link {{ font-size: 11px; color: #777; }}
+        .depth-5 > .nav-row > .nav-link, .depth-5 > .nav-link {{ font-size: 11px; color: #888; }}
+
+        /* Active parent chain */
+        .nav-item.active-parent > .nav-row > .nav-link {{ color: #1976d2; }}
+
+        /* ADR links (flat list) */
+        .adr-link {{ display: block; padding: 6px 8px; margin: 2px 0; font-size: 13px; }}
         .main {{ flex: 1; padding: 40px; width: 95%; overflow-y: auto; height: calc(100vh - 54px); }}
         .doc-section {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
         .doc-section h2 {{ margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
@@ -1205,45 +1409,109 @@ pub async fn documentation(
     <script>
     document.addEventListener('DOMContentLoaded', function() {{
         const mainContent = document.querySelector('.main');
-        const sidebarLinks = document.querySelectorAll('.sidebar a');
-        const sections = document.querySelectorAll('.doc-section, .decision');
+        const allHeadings = document.querySelectorAll('[id^="section-"], [id^="s"]');
+        const navItems = document.querySelectorAll('.nav-item');
+        const navLinks = document.querySelectorAll('.nav-link');
 
-        function updateActiveLink() {{
-            let currentSection = '';
-            const scrollTop = mainContent.scrollTop;
-            const offset = 100;
-
-            sections.forEach(function(section) {{
-                const sectionTop = section.offsetTop - offset;
-                if (scrollTop >= sectionTop) {{
-                    currentSection = section.id;
-                }}
-            }});
-
-            sidebarLinks.forEach(function(link) {{
-                link.classList.remove('active');
-                if (link.getAttribute('href') === '#' + currentSection) {{
-                    link.classList.add('active');
-                }}
-            }});
-        }}
-
-        mainContent.addEventListener('scroll', updateActiveLink);
-        updateActiveLink();
-
-        sidebarLinks.forEach(function(link) {{
-            link.addEventListener('click', function(e) {{
+        // Toggle expand/collapse on toggle button click
+        document.querySelectorAll('.toggle').forEach(function(toggle) {{
+            toggle.addEventListener('click', function(e) {{
+                e.stopPropagation();
                 e.preventDefault();
-                const targetId = this.getAttribute('href').slice(1);
-                const target = document.getElementById(targetId);
-                if (target) {{
-                    mainContent.scrollTo({{
-                        top: target.offsetTop - 20,
-                        behavior: 'smooth'
-                    }});
+                const navItem = this.closest('.nav-item');
+                if (navItem && navItem.classList.contains('expandable')) {{
+                    navItem.classList.toggle('expanded');
                 }}
             }});
         }});
+
+        // Smooth scroll on nav link click
+        navLinks.forEach(function(link) {{
+            link.addEventListener('click', function(e) {{
+                e.preventDefault();
+                const href = this.getAttribute('href');
+                if (href && href.startsWith('#')) {{
+                    const targetId = href.slice(1);
+                    const target = document.getElementById(targetId);
+                    if (target) {{
+                        mainContent.scrollTo({{
+                            top: target.offsetTop - 20,
+                            behavior: 'smooth'
+                        }});
+                    }}
+                }}
+            }});
+        }});
+
+        // Scroll-spy: update active state based on scroll position
+        function updateActiveState() {{
+            const scrollTop = mainContent.scrollTop;
+            const offset = 100;
+            let currentId = '';
+
+            // Find the current heading based on scroll position
+            allHeadings.forEach(function(heading) {{
+                if (scrollTop >= heading.offsetTop - offset) {{
+                    currentId = heading.id;
+                }}
+            }});
+
+            // Clear all active states
+            navItems.forEach(function(item) {{
+                item.classList.remove('active', 'active-parent');
+            }});
+            navLinks.forEach(function(link) {{
+                link.classList.remove('active');
+            }});
+
+            // Set active state and expand parent chain
+            if (currentId) {{
+                const activeLink = document.querySelector('.nav-link[href="#' + currentId + '"]');
+                if (activeLink) {{
+                    activeLink.classList.add('active');
+
+                    // Traverse up and mark/expand parents
+                    let parent = activeLink.closest('.nav-item');
+                    if (parent) {{
+                        parent.classList.add('active');
+                    }}
+                    parent = parent ? parent.parentElement : null;
+                    while (parent) {{
+                        const parentItem = parent.closest('.nav-item');
+                        if (parentItem) {{
+                            parentItem.classList.add('active-parent');
+                            if (parentItem.classList.contains('expandable')) {{
+                                parentItem.classList.add('expanded');
+                            }}
+                            parent = parentItem.parentElement;
+                        }} else {{
+                            break;
+                        }}
+                    }}
+
+                    // Scroll sidebar to keep active link visible (centered)
+                    const sidebar = document.querySelector('.sidebar');
+                    if (sidebar) {{
+                        const linkRect = activeLink.getBoundingClientRect();
+                        const sidebarRect = sidebar.getBoundingClientRect();
+                        const linkCenter = linkRect.top + linkRect.height / 2;
+                        const sidebarCenter = sidebarRect.top + sidebarRect.height / 2;
+                        const scrollOffset = linkCenter - sidebarCenter;
+                        sidebar.scrollBy({{ top: scrollOffset, behavior: 'smooth' }});
+                    }}
+                }}
+            }}
+        }}
+
+        // Debounced scroll handler
+        let scrollTimer;
+        mainContent.addEventListener('scroll', function() {{
+            clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(updateActiveState, 50);
+        }});
+
+        // Initial state
+        updateActiveState();
     }});
     </script>
 </body>
@@ -1333,6 +1601,97 @@ fn render_markdown(md: &str) -> String {
     }
 
     html
+}
+
+/// Render markdown and extract headings for navigation.
+/// Similar to render_markdown but:
+/// 1. Supports h1-h6 (not just h1-h3)
+/// 2. Generates unique IDs for each heading
+/// 3. Returns extracted headings alongside HTML
+fn render_markdown_with_headings(md: &str, section_idx: usize) -> MarkdownResult {
+    let mut html = String::new();
+    let mut headings = Vec::new();
+    let mut heading_idx = 0;
+    let mut in_code_block = false;
+    let mut in_list = false;
+
+    for line in md.lines() {
+        // Code blocks
+        if line.starts_with("```") {
+            if in_code_block {
+                html.push_str("</code></pre>\n");
+                in_code_block = false;
+            } else {
+                let code_lang = line[3..].trim();
+                html.push_str(&format!("<pre><code class=\"language-{}\">", code_lang));
+                in_code_block = true;
+            }
+            continue;
+        }
+
+        if in_code_block {
+            html.push_str(&escape_html(line));
+            html.push('\n');
+            continue;
+        }
+
+        // Close list if needed
+        if in_list && !line.starts_with("- ") && !line.starts_with("* ") && !line.starts_with("1.") {
+            html.push_str("</ul>\n");
+            in_list = false;
+        }
+
+        // Headers (h1-h6 with ID generation)
+        if let Some((level, title)) = extract_heading(line) {
+            let slug = slugify(&title);
+            let id = format!("s{}-h{}-{}", section_idx, heading_idx, slug);
+            html.push_str(&format!(
+                "<h{} id=\"{}\">{}</h{}>\n",
+                level, id, escape_html(&title), level
+            ));
+            headings.push(ExtractedHeading {
+                level,
+                title,
+                id,
+            });
+            heading_idx += 1;
+            continue;
+        }
+
+        // Lists
+        if line.starts_with("- ") || line.starts_with("* ") {
+            if !in_list {
+                html.push_str("<ul>\n");
+                in_list = true;
+            }
+            html.push_str(&format!("<li>{}</li>\n", render_inline(&line[2..])));
+        }
+        // Blockquotes
+        else if line.starts_with("> ") {
+            html.push_str(&format!("<blockquote>{}</blockquote>\n", render_inline(&line[2..])));
+        }
+        // Horizontal rule
+        else if line == "---" || line == "***" || line == "___" {
+            html.push_str("<hr>\n");
+        }
+        // Empty line
+        else if line.trim().is_empty() {
+            html.push_str("<br>\n");
+        }
+        // Paragraph
+        else {
+            html.push_str(&format!("<p>{}</p>\n", render_inline(line)));
+        }
+    }
+
+    if in_list {
+        html.push_str("</ul>\n");
+    }
+    if in_code_block {
+        html.push_str("</code></pre>\n");
+    }
+
+    MarkdownResult { html, headings }
 }
 
 /// Render inline Markdown elements.
