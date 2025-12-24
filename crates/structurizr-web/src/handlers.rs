@@ -16,6 +16,7 @@ use structurizr_render::SvgRenderer;
 use structurizr_render::layout::{GridLayout, LayoutEdge};
 
 use crate::error::{Error, Result};
+use crate::markdown::{escape_html, render_markdown, render_markdown_with_heading_ids, ExtractedHeading};
 use crate::state::AppState;
 
 /// Home page handler.
@@ -1064,17 +1065,6 @@ fn escape_json(s: &str) -> String {
 // Documentation Navigation Tree Structures
 // =============================================================================
 
-/// Extracted heading metadata from markdown parsing.
-#[derive(Debug, Clone)]
-struct ExtractedHeading {
-    /// Heading level (1-6)
-    level: u8,
-    /// Heading text content
-    title: String,
-    /// Unique anchor ID for linking
-    id: String,
-}
-
 /// Tree node for hierarchical navigation.
 #[derive(Debug, Clone)]
 struct HeadingNode {
@@ -1087,39 +1077,6 @@ struct HeadingNode {
     id: String,
     /// Nested child headings
     children: Vec<HeadingNode>,
-}
-
-/// Result of rendering markdown with heading extraction.
-struct MarkdownResult {
-    /// Rendered HTML content
-    html: String,
-    /// Extracted headings for navigation
-    headings: Vec<ExtractedHeading>,
-}
-
-/// Extract heading level and title from a markdown line.
-/// Returns None if the line is not a heading.
-fn extract_heading(line: &str) -> Option<(u8, String)> {
-    // Check from h6 to h1 (most specific first)
-    for level in (1..=6).rev() {
-        let prefix = "#".repeat(level) + " ";
-        if line.starts_with(&prefix) {
-            return Some((level as u8, line[prefix.len()..].to_string()));
-        }
-    }
-    None
-}
-
-/// Convert text to a URL-safe slug.
-fn slugify(text: &str) -> String {
-    text.to_lowercase()
-        .chars()
-        .map(|c| if c.is_alphanumeric() { c } else { '-' })
-        .collect::<String>()
-        .split('-')
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<_>>()
-        .join("-")
 }
 
 /// Build a tree structure from a flat list of extracted headings.
@@ -1223,7 +1180,7 @@ pub async fn documentation(
             let section_id = format!("section-{}", i);
 
             // Render markdown and extract headings
-            let result = render_markdown_with_headings(&section.content, i);
+            let result = render_markdown_with_heading_ids(&section.content, i);
 
             // Build tree from extracted headings
             let mut heading_tree = build_heading_tree(result.headings);
@@ -1372,9 +1329,26 @@ pub async fn documentation(
         .content code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: "SF Mono", Monaco, monospace; font-size: 0.9em; }}
         .content pre code {{ background: none; padding: 0; }}
         .content blockquote {{ border-left: 4px solid #ddd; margin: 0; padding-left: 20px; color: #666; }}
-        .content table {{ border-collapse: collapse; width: 100%; margin: 1em 0; }}
+        .content table {{ border-collapse: collapse; width: 100%; margin: 1em 0; display: block; overflow-x: auto; }}
         .content th, .content td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
-        .content th {{ background: #f5f5f5; }}
+        .content th {{ background: #f5f5f5; font-weight: 600; }}
+        .content tr:nth-child(even) {{ background: #fafafa; }}
+        /* Strikethrough */
+        .content del {{ color: #999; text-decoration: line-through; }}
+        /* Task lists */
+        .content input[type="checkbox"] {{ margin-right: 0.5em; transform: scale(1.1); }}
+        .content ul.contains-task-list {{ list-style: none; padding-left: 1em; }}
+        .content li.task-list-item {{ list-style: none; }}
+        /* Footnotes */
+        .content .footnotes {{ font-size: 0.9em; border-top: 1px solid #eee; padding-top: 1em; margin-top: 2em; }}
+        .content .footnote-ref {{ font-size: 0.75em; vertical-align: super; }}
+        .content .footnote-backref {{ text-decoration: none; margin-left: 0.25em; }}
+        /* Images */
+        .content img {{ max-width: 100%; height: auto; border-radius: 4px; margin: 1em 0; }}
+        /* Description lists */
+        .content dl {{ margin: 1em 0; }}
+        .content dt {{ font-weight: 600; margin-top: 0.5em; }}
+        .content dd {{ margin-left: 2em; color: #555; }}
         .decisions-section {{ margin-top: 40px; }}
         .decision {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
         .decision-header {{ display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }}
@@ -1525,204 +1499,6 @@ pub async fn documentation(
     );
 
     Ok(Html(html))
-}
-
-/// Simple Markdown to HTML renderer.
-fn render_markdown(md: &str) -> String {
-    let mut html = String::new();
-    let mut in_code_block = false;
-    let mut in_list = false;
-
-    for line in md.lines() {
-        // Code blocks
-        if line.starts_with("```") {
-            if in_code_block {
-                html.push_str("</code></pre>\n");
-                in_code_block = false;
-            } else {
-                let code_lang = line[3..].trim();
-                html.push_str(&format!("<pre><code class=\"language-{}\">", code_lang));
-                in_code_block = true;
-            }
-            continue;
-        }
-
-        if in_code_block {
-            html.push_str(&escape_html(line));
-            html.push('\n');
-            continue;
-        }
-
-        // Close list if needed
-        if in_list && !line.starts_with("- ") && !line.starts_with("* ") && !line.starts_with("1.") {
-            html.push_str("</ul>\n");
-            in_list = false;
-        }
-
-        // Headers
-        if line.starts_with("### ") {
-            html.push_str(&format!("<h3>{}</h3>\n", escape_html(&line[4..])));
-        } else if line.starts_with("## ") {
-            html.push_str(&format!("<h2>{}</h2>\n", escape_html(&line[3..])));
-        } else if line.starts_with("# ") {
-            html.push_str(&format!("<h1>{}</h1>\n", escape_html(&line[2..])));
-        }
-        // Lists
-        else if line.starts_with("- ") || line.starts_with("* ") {
-            if !in_list {
-                html.push_str("<ul>\n");
-                in_list = true;
-            }
-            html.push_str(&format!("<li>{}</li>\n", render_inline(&line[2..])));
-        }
-        // Blockquotes
-        else if line.starts_with("> ") {
-            html.push_str(&format!("<blockquote>{}</blockquote>\n", render_inline(&line[2..])));
-        }
-        // Horizontal rule
-        else if line == "---" || line == "***" || line == "___" {
-            html.push_str("<hr>\n");
-        }
-        // Empty line
-        else if line.trim().is_empty() {
-            html.push_str("<br>\n");
-        }
-        // Paragraph
-        else {
-            html.push_str(&format!("<p>{}</p>\n", render_inline(line)));
-        }
-    }
-
-    if in_list {
-        html.push_str("</ul>\n");
-    }
-    if in_code_block {
-        html.push_str("</code></pre>\n");
-    }
-
-    html
-}
-
-/// Render markdown and extract headings for navigation.
-/// Similar to render_markdown but:
-/// 1. Supports h1-h6 (not just h1-h3)
-/// 2. Generates unique IDs for each heading
-/// 3. Returns extracted headings alongside HTML
-fn render_markdown_with_headings(md: &str, section_idx: usize) -> MarkdownResult {
-    let mut html = String::new();
-    let mut headings = Vec::new();
-    let mut heading_idx = 0;
-    let mut in_code_block = false;
-    let mut in_list = false;
-
-    for line in md.lines() {
-        // Code blocks
-        if line.starts_with("```") {
-            if in_code_block {
-                html.push_str("</code></pre>\n");
-                in_code_block = false;
-            } else {
-                let code_lang = line[3..].trim();
-                html.push_str(&format!("<pre><code class=\"language-{}\">", code_lang));
-                in_code_block = true;
-            }
-            continue;
-        }
-
-        if in_code_block {
-            html.push_str(&escape_html(line));
-            html.push('\n');
-            continue;
-        }
-
-        // Close list if needed
-        if in_list && !line.starts_with("- ") && !line.starts_with("* ") && !line.starts_with("1.") {
-            html.push_str("</ul>\n");
-            in_list = false;
-        }
-
-        // Headers (h1-h6 with ID generation)
-        if let Some((level, title)) = extract_heading(line) {
-            let slug = slugify(&title);
-            let id = format!("s{}-h{}-{}", section_idx, heading_idx, slug);
-            html.push_str(&format!(
-                "<h{} id=\"{}\">{}</h{}>\n",
-                level, id, escape_html(&title), level
-            ));
-            headings.push(ExtractedHeading {
-                level,
-                title,
-                id,
-            });
-            heading_idx += 1;
-            continue;
-        }
-
-        // Lists
-        if line.starts_with("- ") || line.starts_with("* ") {
-            if !in_list {
-                html.push_str("<ul>\n");
-                in_list = true;
-            }
-            html.push_str(&format!("<li>{}</li>\n", render_inline(&line[2..])));
-        }
-        // Blockquotes
-        else if line.starts_with("> ") {
-            html.push_str(&format!("<blockquote>{}</blockquote>\n", render_inline(&line[2..])));
-        }
-        // Horizontal rule
-        else if line == "---" || line == "***" || line == "___" {
-            html.push_str("<hr>\n");
-        }
-        // Empty line
-        else if line.trim().is_empty() {
-            html.push_str("<br>\n");
-        }
-        // Paragraph
-        else {
-            html.push_str(&format!("<p>{}</p>\n", render_inline(line)));
-        }
-    }
-
-    if in_list {
-        html.push_str("</ul>\n");
-    }
-    if in_code_block {
-        html.push_str("</code></pre>\n");
-    }
-
-    MarkdownResult { html, headings }
-}
-
-/// Render inline Markdown elements.
-fn render_inline(text: &str) -> String {
-    let mut result = escape_html(text);
-
-    // Bold
-    let bold_re = regex_lite::Regex::new(r"\*\*(.+?)\*\*").unwrap();
-    result = bold_re.replace_all(&result, "<strong>$1</strong>").to_string();
-
-    // Italic
-    let italic_re = regex_lite::Regex::new(r"\*(.+?)\*").unwrap();
-    result = italic_re.replace_all(&result, "<em>$1</em>").to_string();
-
-    // Inline code
-    let code_re = regex_lite::Regex::new(r"`(.+?)`").unwrap();
-    result = code_re.replace_all(&result, "<code>$1</code>").to_string();
-
-    // Links
-    let link_re = regex_lite::Regex::new(r"\[(.+?)\]\((.+?)\)").unwrap();
-    result = link_re.replace_all(&result, "<a href=\"$2\">$1</a>").to_string();
-
-    result
-}
-
-/// Escape HTML special characters.
-fn escape_html(s: &str) -> String {
-    s.replace('&', "&amp;")
-        .replace('<', "&lt;")
-        .replace('>', "&gt;")
-        .replace('"', "&quot;")
 }
 
 /// Helper function to check if an element should be visible for a given perspective.

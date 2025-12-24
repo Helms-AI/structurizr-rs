@@ -63,6 +63,9 @@ pretty_assertions = "1.0"
 # Regex (lite version for simple patterns)
 regex-lite = "0.1"
 
+# Markdown parsing (GitHub Flavored Markdown)
+comrak = "0.31"
+
 # Internal crates
 structurizr-core = { path = "crates/structurizr-core" }
 structurizr-dsl = { path = "crates/structurizr-dsl" }

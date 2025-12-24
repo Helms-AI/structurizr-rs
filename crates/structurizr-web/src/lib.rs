@@ -7,6 +7,7 @@
 pub mod editor;
 pub mod error;
 pub mod handlers;
+pub mod markdown;
 pub mod server;
 pub mod state;
 pub mod watcher;

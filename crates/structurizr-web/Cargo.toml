@@ -23,6 +23,7 @@ tantivy.workspace = true
 uuid.workspace = true
 regex-lite.workspace = true
 chrono.workspace = true
+comrak.workspace = true
 
 [dev-dependencies]
 pretty_assertions.workspace = true
