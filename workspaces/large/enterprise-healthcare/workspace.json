@@ -1,0 +1,1538 @@
+{
+  "name": "Enterprise Healthcare System",
+  "description": "A comprehensive hospital information system managing clinical, administrative, and patient care operations across multiple departments",
+  "last_modified_date": "2025-12-22T20:11:04.188579Z",
+  "last_modified_agent": "structurizr-rs",
+  "model": {
+    "people": [
+      {
+        "id": "13ef9e97-890c-4f55-a2cb-5c936aa426ea",
+        "name": "Doctor",
+        "description": "Medical practitioner who diagnoses and treats patients",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "623038a2-5365-4a92-9035-54e770d9bca5",
+        "name": "Nurse",
+        "description": "Healthcare professional who provides patient care and administers treatments",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "7f52d46d-a289-4d63-ac36-e7347c8e95e9",
+        "name": "Patient",
+        "description": "Individual receiving medical care and services",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "959bef33-bdac-4e80-a6c3-821e77cadaff",
+        "name": "Administrative Staff",
+        "description": "Hospital administrator managing operations and staff",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "3b9a2e94-0684-4a09-b660-cae9d3ad8392",
+        "name": "Lab Technician",
+        "description": "Laboratory professional who conducts diagnostic tests",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "d2632ce0-1cec-4e29-8fef-d014a8ba94e0",
+        "name": "Pharmacist",
+        "description": "Licensed professional who dispenses medications and provides drug information",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "8d993706-fca2-4dae-b38a-ae2913d46f49",
+        "name": "Radiologist",
+        "description": "Medical doctor specializing in diagnosing diseases using medical imaging",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "b0d56973-c0e1-4b65-9b9e-8bf6853d332b",
+        "name": "Billing Staff",
+        "description": "Financial administrator who processes claims and manages patient billing",
+        "tags": [
+          "Element",
+          "Person"
+        ],
+        "location": "internal"
+      }
+    ],
+    "software_systems": [
+      {
+        "id": "17306485-9351-48e1-9695-e53f7ed2cde7",
+        "name": "Electronic Health Record System",
+        "description": "Core clinical system managing patient records, orders, and care coordination",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "c5a7e050-b6f4-481f-b4fe-9c701b25d622",
+            "name": "Clinical Portal",
+            "description": "Web-based interface for healthcare providers",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "React/TypeScript"
+          },
+          {
+            "id": "59af3900-dc73-484f-a523-f082e59bfaca",
+            "name": "Mobile App",
+            "description": "Mobile application for physicians and nurses",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "React Native"
+          },
+          {
+            "id": "31147ea0-f830-4636-8f33-753061567ed3",
+            "name": "API Gateway",
+            "description": "Central API gateway handling authentication and routing",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Kong/Nginx"
+          },
+          {
+            "id": "d76a0c7a-34c1-4d59-bbe1-1beaa4ba3222",
+            "name": "Patient Service",
+            "description": "Manages patient demographics and medical records",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Rust/Actix"
+          },
+          {
+            "id": "a608a6c5-23d5-4650-9b55-3edc7b80f078",
+            "name": "Clinical Service",
+            "description": "Handles clinical workflows, orders, and decision support",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Rust/Actix",
+            "components": [
+              {
+                "id": "88d2efd3-0abe-4722-9465-4f5b3f7d1817",
+                "name": "Clinical Rules Engine",
+                "description": "Executes clinical decision support rules",
+                "tags": [
+                  "Element",
+                  "Component"
+                ],
+                "technology": "Rust"
+              },
+              {
+                "id": "c47010dc-fba2-4239-926e-d779284d98ab",
+                "name": "Drug Interaction Checker",
+                "description": "Validates medication orders for interactions",
+                "tags": [
+                  "Element",
+                  "Component"
+                ],
+                "technology": "Rust"
+              },
+              {
+                "id": "e4e19470-7d65-4ba1-ae2a-efe0ac97ba9d",
+                "name": "Alert Generator",
+                "description": "Generates clinical alerts and notifications",
+                "tags": [
+                  "Element",
+                  "Component"
+                ],
+                "technology": "Rust"
+              },
+              {
+                "id": "a9f90b01-21a2-4807-8674-070c7fcfcdf6",
+                "name": "Order Processor",
+                "description": "Processes clinical orders and requisitions",
+                "tags": [
+                  "Element",
+                  "Component"
+                ],
+                "technology": "Rust"
+              }
+            ]
+          },
+          {
+            "id": "e31984d6-69bc-4416-9076-aa2ef9547f6d",
+            "name": "Lab Integration Service",
+            "description": "Integrates with laboratory systems",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Rust/Actix"
+          },
+          {
+            "id": "de734922-2204-4217-a931-64b1ffa86956",
+            "name": "Pharmacy Integration Service",
+            "description": "Integrates with pharmacy systems",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Rust/Actix"
+          },
+          {
+            "id": "59510255-f46e-4b7e-b9b3-2e2de7f155f9",
+            "name": "Primary Database",
+            "description": "Stores patient and clinical data",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          },
+          {
+            "id": "41f38dfd-2391-4ea8-a846-827889f6bbd5",
+            "name": "Cache Layer",
+            "description": "Distributed cache for performance",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Redis"
+          },
+          {
+            "id": "b91fa4d3-b941-4727-88da-29599bde7e98",
+            "name": "Message Queue",
+            "description": "Asynchronous message processing",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "RabbitMQ"
+          }
+        ]
+      },
+      {
+        "id": "5fe5f2fd-64b3-43a5-acad-2bb77ce075e5",
+        "name": "Laboratory Information System",
+        "description": "Manages lab test orders, results, and quality control",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "b2d1e6bf-69b3-4bb0-ab98-fb4dcd7037d5",
+            "name": "Lab Portal",
+            "description": "Web interface for lab technicians",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Angular"
+          },
+          {
+            "id": "bc99bdce-01da-4285-ab2b-22821013315a",
+            "name": "Lab Result Processor",
+            "description": "Processes and validates lab results",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java/Spring"
+          },
+          {
+            "id": "1071cdd4-3a73-4586-821f-543db1bd6b91",
+            "name": "Instrument Interface",
+            "description": "Connects to lab equipment",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java"
+          },
+          {
+            "id": "be109d55-50cb-454d-9925-2d12492de74a",
+            "name": "Lab Database",
+            "description": "Stores test results and reference ranges",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          }
+        ]
+      },
+      {
+        "id": "4e0e69ec-eea8-44e5-b228-762a44e43e02",
+        "name": "Pharmacy Management System",
+        "description": "Manages medication dispensing, inventory, and formulary",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "9d275c23-1a59-4392-95ec-5b791eac881a",
+            "name": "Pharmacy Portal",
+            "description": "Web interface for pharmacists",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Vue.js"
+          },
+          {
+            "id": "a007b286-18f1-4b5d-bd06-e1eb5a09b300",
+            "name": "Dispensing Service",
+            "description": "Manages medication dispensing workflows",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java/Spring"
+          },
+          {
+            "id": "ddef1b87-3ad5-445b-bc8b-93b4b503445d",
+            "name": "Inventory Management",
+            "description": "Tracks medication stock and ordering",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java/Spring"
+          },
+          {
+            "id": "2477b4c4-9268-41b0-b715-549b2ee52c37",
+            "name": "Pharmacy Database",
+            "description": "Stores medication and inventory data",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          }
+        ]
+      },
+      {
+        "id": "f617f142-9239-4f10-bbe1-5e172e0a989d",
+        "name": "Radiology Information System",
+        "description": "Manages imaging orders, studies, and PACS integration",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "41b9e747-f230-49d8-94ae-e8da207fae76",
+            "name": "Radiology Portal",
+            "description": "Web interface for radiologists",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "React"
+          },
+          {
+            "id": "0ac8ca91-36c7-4c57-9b1c-06de1065f98f",
+            "name": "Study Manager",
+            "description": "Manages imaging studies and reports",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Python/Django"
+          },
+          {
+            "id": "3567ef65-2e47-4f4a-8e1e-a5a4a25adcbc",
+            "name": "PACS Connector",
+            "description": "Integrates with picture archiving system",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Python"
+          },
+          {
+            "id": "2fce8f83-a069-46cf-9981-e6b0e18a1af1",
+            "name": "Radiology Database",
+            "description": "Stores imaging metadata and reports",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          }
+        ]
+      },
+      {
+        "id": "1c06a89d-58de-4145-81ad-ccb8af38e137",
+        "name": "Billing and Claims System",
+        "description": "Manages patient billing, insurance claims, and revenue cycle",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "c9d14aec-e209-40e7-8486-332e52f973ed",
+            "name": "Billing Portal",
+            "description": "Web interface for billing staff",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Angular"
+          },
+          {
+            "id": "9a690380-e198-431d-b7af-4eef9f471412",
+            "name": "Claims Processor",
+            "description": "Processes insurance claims",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java/Spring"
+          },
+          {
+            "id": "4d57c808-d18e-4a92-afcc-b68ec03d535a",
+            "name": "Charge Capture Service",
+            "description": "Captures and validates charges",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java/Spring"
+          },
+          {
+            "id": "a1e0803a-6c91-4bd5-89e1-ec1abd472923",
+            "name": "Billing Database",
+            "description": "Stores billing and claims data",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          }
+        ]
+      },
+      {
+        "id": "fc3e2251-cae5-4b72-8147-8d20f57b05b9",
+        "name": "Patient Portal",
+        "description": "Patient-facing portal for appointments, records, and communication",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "e5fcc7cb-fec1-4b2f-ba1b-621079c85a74",
+            "name": "Patient Web Portal",
+            "description": "Web interface for patients",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "React"
+          },
+          {
+            "id": "8dff1ab3-b8f4-416a-8640-038845af522c",
+            "name": "Patient API",
+            "description": "Backend API for patient services",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Node.js/Express"
+          },
+          {
+            "id": "37836427-e658-4edb-9080-c5fe03d2f429",
+            "name": "Appointment Service",
+            "description": "Manages patient appointments",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Node.js"
+          },
+          {
+            "id": "df746ec5-6074-408f-82b4-46381e7cfacf",
+            "name": "Secure Messaging",
+            "description": "Enables patient-provider communication",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Node.js"
+          },
+          {
+            "id": "692292dc-68e7-4e9a-95ee-e382bf774b33",
+            "name": "Patient Portal Database",
+            "description": "Stores patient portal data",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "MongoDB"
+          }
+        ]
+      },
+      {
+        "id": "69102441-e3f9-48fa-b654-aea32f0fc6dd",
+        "name": "Emergency Department System",
+        "description": "Manages emergency department workflows and triage",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "e971b5d0-8b2e-47a9-b0c5-e5ff24612c7e",
+            "name": "ED Portal",
+            "description": "Emergency department tracking board",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "React"
+          },
+          {
+            "id": "5a1b29c9-03e4-451b-8c83-c83685c04ac1",
+            "name": "Triage Service",
+            "description": "Manages patient triage and prioritization",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Rust/Actix"
+          },
+          {
+            "id": "ac705646-f5a3-45ba-9445-2421a7d1d831",
+            "name": "ED Database",
+            "description": "Stores emergency department data",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          }
+        ]
+      },
+      {
+        "id": "ccda7869-a501-406f-b702-d66b0820189a",
+        "name": "Enterprise Scheduling System",
+        "description": "Manages appointments, resources, and provider schedules",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "55a90f60-db40-4949-9c32-40c5d575dc7a",
+            "name": "Scheduling Portal",
+            "description": "Web interface for scheduling staff",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Vue.js"
+          },
+          {
+            "id": "3131b1a9-bf74-40c6-85d7-c9f1f49c5fc1",
+            "name": "Scheduling Engine",
+            "description": "Optimizes appointment scheduling",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Python/FastAPI"
+          },
+          {
+            "id": "42225777-4f0f-4b0f-9908-9aba0d793740",
+            "name": "Scheduling Database",
+            "description": "Stores schedules and appointments",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          }
+        ]
+      },
+      {
+        "id": "610f3a82-04db-4da7-bef3-9bba3605dd6e",
+        "name": "Clinical Analytics Platform",
+        "description": "Provides reporting, analytics, and business intelligence",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "461e8501-e382-49d1-b188-0398d3e6535e",
+            "name": "Analytics Portal",
+            "description": "Dashboard and reporting interface",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "React"
+          },
+          {
+            "id": "191d1666-588d-44bb-9db3-417c6a4444fa",
+            "name": "Data Warehouse",
+            "description": "Central data repository for analytics",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          },
+          {
+            "id": "5f6b17ff-0be4-4796-a0d2-1855ea65872c",
+            "name": "ETL Pipeline",
+            "description": "Extracts and transforms data from source systems",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Apache Spark"
+          },
+          {
+            "id": "46f2c541-d85e-4a9c-98e7-cf8498839447",
+            "name": "Reporting Engine",
+            "description": "Generates reports and visualizations",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Python"
+          }
+        ]
+      },
+      {
+        "id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "name": "Integration Hub",
+        "description": "Enterprise service bus for system integration",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "68bd6545-a5cc-4f3b-87f7-a142fa73c675",
+        "name": "Identity Management System",
+        "description": "Centralized authentication and authorization",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal"
+      },
+      {
+        "id": "be65a53d-3879-4170-ad88-ba5c64accf3f",
+        "name": "Compliance and Audit System",
+        "description": "Manages regulatory compliance and audit trails",
+        "tags": [
+          "Element",
+          "Software System"
+        ],
+        "location": "internal",
+        "containers": [
+          {
+            "id": "067f155e-0525-4e50-ab5b-e64f70181ff2",
+            "name": "Compliance Portal",
+            "description": "Web interface for compliance officers",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Angular"
+          },
+          {
+            "id": "e14d0e76-e8e1-4226-9d00-e24252f47624",
+            "name": "Audit Service",
+            "description": "Tracks and reports on system access and changes",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "Java/Spring"
+          },
+          {
+            "id": "dc8f594b-909b-4efc-8273-b685dd48ecb4",
+            "name": "Compliance Database",
+            "description": "Stores audit logs and compliance data",
+            "tags": [
+              "Element",
+              "Container"
+            ],
+            "technology": "PostgreSQL"
+          }
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "id": "1e94346e-3f3e-467c-bf6d-80f8776da4d1",
+        "source_id": "13ef9e97-890c-4f55-a2cb-5c936aa426ea",
+        "destination_id": "c5a7e050-b6f4-481f-b4fe-9c701b25d622",
+        "description": "Views patient records and enters orders using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "6ba419cd-ce0e-49ba-9c02-713a1bd4f10b",
+        "source_id": "13ef9e97-890c-4f55-a2cb-5c936aa426ea",
+        "destination_id": "59af3900-dc73-484f-a523-f082e59bfaca",
+        "description": "Reviews patient information and signs orders using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "15b1c1dc-fb89-4e73-ae2d-a89cc9c3e8c6",
+        "source_id": "623038a2-5365-4a92-9035-54e770d9bca5",
+        "destination_id": "c5a7e050-b6f4-481f-b4fe-9c701b25d622",
+        "description": "Documents patient care and administers medications using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "cfe1a8d3-6ad3-44b3-9b57-a57b39c9af13",
+        "source_id": "623038a2-5365-4a92-9035-54e770d9bca5",
+        "destination_id": "59af3900-dc73-484f-a523-f082e59bfaca",
+        "description": "Records vital signs and care activities using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "d5c42240-189f-4b53-84ee-d3770cea17fe",
+        "source_id": "7f52d46d-a289-4d63-ac36-e7347c8e95e9",
+        "destination_id": "e5fcc7cb-fec1-4b2f-ba1b-621079c85a74",
+        "description": "Views health records and schedules appointments using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "fd9977c7-f133-45f4-bb42-d8e4f4b4a82d",
+        "source_id": "959bef33-bdac-4e80-a6c3-821e77cadaff",
+        "destination_id": "55a90f60-db40-4949-9c32-40c5d575dc7a",
+        "description": "Manages provider schedules and resources using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "bf340685-a3c3-4172-9b4c-9ead12bc405b",
+        "source_id": "3b9a2e94-0684-4a09-b660-cae9d3ad8392",
+        "destination_id": "b2d1e6bf-69b3-4bb0-ab98-fb4dcd7037d5",
+        "description": "Enters and validates lab results using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "6eea6516-7ec9-463b-8b88-e53f216744ff",
+        "source_id": "d2632ce0-1cec-4e29-8fef-d014a8ba94e0",
+        "destination_id": "9d275c23-1a59-4392-95ec-5b791eac881a",
+        "description": "Reviews and dispenses medications using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "e21eeb5c-a1d7-40e9-902e-d452c7080f92",
+        "source_id": "8d993706-fca2-4dae-b38a-ae2913d46f49",
+        "destination_id": "41b9e747-f230-49d8-94ae-e8da207fae76",
+        "description": "Reviews imaging studies and dictates reports using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "45e0fe84-d5ec-40a3-b0be-e8d892a8ae0e",
+        "source_id": "b0d56973-c0e1-4b65-9b9e-8bf6853d332b",
+        "destination_id": "c9d14aec-e209-40e7-8486-332e52f973ed",
+        "description": "Processes claims and manages billing using",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "0372acd9-1365-4b7c-90d6-a2cacad4c824",
+        "source_id": "c5a7e050-b6f4-481f-b4fe-9c701b25d622",
+        "destination_id": "31147ea0-f830-4636-8f33-753061567ed3",
+        "description": "Makes API calls to",
+        "technology": "HTTPS/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "6e549d06-f51b-461a-b346-21d2c90f9160",
+        "source_id": "59af3900-dc73-484f-a523-f082e59bfaca",
+        "destination_id": "31147ea0-f830-4636-8f33-753061567ed3",
+        "description": "Authenticates and sends requests to",
+        "technology": "HTTPS/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "e6205fc4-e4a5-443a-9d0f-0e0deb0b57a0",
+        "source_id": "31147ea0-f830-4636-8f33-753061567ed3",
+        "destination_id": "d76a0c7a-34c1-4d59-bbe1-1beaa4ba3222",
+        "description": "Routes patient requests to",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "ceba17ca-3a04-4b2f-82c9-cfccf190ef7a",
+        "source_id": "31147ea0-f830-4636-8f33-753061567ed3",
+        "destination_id": "a608a6c5-23d5-4650-9b55-3edc7b80f078",
+        "description": "Routes clinical requests to",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "905aba08-0c46-4666-b879-c2f9a0ce50fa",
+        "source_id": "31147ea0-f830-4636-8f33-753061567ed3",
+        "destination_id": "68bd6545-a5cc-4f3b-87f7-a142fa73c675",
+        "description": "Validates authentication tokens with",
+        "technology": "HTTPS/OAuth2",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "0ffc8b5f-bbb4-43dd-ae6c-50434f84c114",
+        "source_id": "d76a0c7a-34c1-4d59-bbe1-1beaa4ba3222",
+        "destination_id": "59510255-f46e-4b7e-b9b3-2e2de7f155f9",
+        "description": "Reads and writes patient data to",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "cfd61832-b3d9-48c3-af40-7babfafbe886",
+        "source_id": "d76a0c7a-34c1-4d59-bbe1-1beaa4ba3222",
+        "destination_id": "41f38dfd-2391-4ea8-a846-827889f6bbd5",
+        "description": "Caches patient data in",
+        "technology": "Redis Protocol",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "6157e7bd-babd-493e-a1e3-7e973d691dc9",
+        "source_id": "d76a0c7a-34c1-4d59-bbe1-1beaa4ba3222",
+        "destination_id": "b91fa4d3-b941-4727-88da-29599bde7e98",
+        "description": "Publishes patient events to",
+        "technology": "AMQP",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "8a2c8884-4b56-4be8-a5de-1aaaa0e3a887",
+        "source_id": "a608a6c5-23d5-4650-9b55-3edc7b80f078",
+        "destination_id": "59510255-f46e-4b7e-b9b3-2e2de7f155f9",
+        "description": "Reads and writes clinical data to",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "be5026df-45d9-414f-ad1b-5cf4d410840d",
+        "source_id": "a608a6c5-23d5-4650-9b55-3edc7b80f078",
+        "destination_id": "b91fa4d3-b941-4727-88da-29599bde7e98",
+        "description": "Publishes order events to",
+        "technology": "AMQP",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "acf1def6-41da-406c-b072-7a312c218ad7",
+        "source_id": "a608a6c5-23d5-4650-9b55-3edc7b80f078",
+        "destination_id": "41f38dfd-2391-4ea8-a846-827889f6bbd5",
+        "description": "Caches clinical data in",
+        "technology": "Redis Protocol",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "8768c124-7e05-4234-823d-7e11d6a9ce0f",
+        "source_id": "88d2efd3-0abe-4722-9465-4f5b3f7d1817",
+        "destination_id": "c47010dc-fba2-4239-926e-d779284d98ab",
+        "description": "Validates medication orders with",
+        "technology": "Internal API",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "3997c98d-7112-42df-8859-d9db8cb210d0",
+        "source_id": "88d2efd3-0abe-4722-9465-4f5b3f7d1817",
+        "destination_id": "e4e19470-7d65-4ba1-ae2a-efe0ac97ba9d",
+        "description": "Triggers clinical alerts via",
+        "technology": "Internal API",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "c51c663a-c144-42ab-a797-a1f2a6142dd2",
+        "source_id": "a9f90b01-21a2-4807-8674-070c7fcfcdf6",
+        "destination_id": "88d2efd3-0abe-4722-9465-4f5b3f7d1817",
+        "description": "Executes clinical rules through",
+        "technology": "Internal API",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "2980dd5c-6f04-4fb6-82f1-ad92084d5df2",
+        "source_id": "a9f90b01-21a2-4807-8674-070c7fcfcdf6",
+        "destination_id": "e4e19470-7d65-4ba1-ae2a-efe0ac97ba9d",
+        "description": "Generates order-related alerts via",
+        "technology": "Internal API",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "62f09df4-7f45-4688-8e8a-9b75d1cb1274",
+        "source_id": "e31984d6-69bc-4416-9076-aa2ef9547f6d",
+        "destination_id": "bc99bdce-01da-4285-ab2b-22821013315a",
+        "description": "Sends lab orders to",
+        "technology": "HL7/FHIR",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "f21f9614-77ac-4172-bfc2-87b68c696941",
+        "source_id": "e31984d6-69bc-4416-9076-aa2ef9547f6d",
+        "destination_id": "b91fa4d3-b941-4727-88da-29599bde7e98",
+        "description": "Receives lab results from",
+        "technology": "AMQP",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "c7f46c11-9e61-4ba5-8407-e53a554325a2",
+        "source_id": "e31984d6-69bc-4416-9076-aa2ef9547f6d",
+        "destination_id": "59510255-f46e-4b7e-b9b3-2e2de7f155f9",
+        "description": "Stores lab results in",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "8ec87124-b84b-4fb3-a4df-f2ce1bf44b1f",
+        "source_id": "de734922-2204-4217-a931-64b1ffa86956",
+        "destination_id": "a007b286-18f1-4b5d-bd06-e1eb5a09b300",
+        "description": "Sends medication orders to",
+        "technology": "HL7",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "d32a8fb0-1c44-475a-845c-8a0c9bd01036",
+        "source_id": "de734922-2204-4217-a931-64b1ffa86956",
+        "destination_id": "b91fa4d3-b941-4727-88da-29599bde7e98",
+        "description": "Receives dispense notifications from",
+        "technology": "AMQP",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "539003b0-f748-428d-a0de-b6ebefc6ea6f",
+        "source_id": "de734922-2204-4217-a931-64b1ffa86956",
+        "destination_id": "59510255-f46e-4b7e-b9b3-2e2de7f155f9",
+        "description": "Updates medication administration in",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "a5d1b575-3ddd-4739-9df3-a6c0ba904556",
+        "source_id": "bc99bdce-01da-4285-ab2b-22821013315a",
+        "destination_id": "be109d55-50cb-454d-9925-2d12492de74a",
+        "description": "Reads and writes lab data to",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "317e4c26-f5cb-4ebb-8bbe-86021596a672",
+        "source_id": "bc99bdce-01da-4285-ab2b-22821013315a",
+        "destination_id": "1071cdd4-3a73-4586-821f-543db1bd6b91",
+        "description": "Receives results from",
+        "technology": "HL7",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "ee7cc818-27b0-4600-90a9-d86b12a702eb",
+        "source_id": "bc99bdce-01da-4285-ab2b-22821013315a",
+        "destination_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "description": "Sends results to",
+        "technology": "HL7/FHIR",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "2be7513a-0b93-4c3a-9f60-04cc982c3d28",
+        "source_id": "a007b286-18f1-4b5d-bd06-e1eb5a09b300",
+        "destination_id": "2477b4c4-9268-41b0-b715-549b2ee52c37",
+        "description": "Reads and writes pharmacy data to",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "b83b65e9-70c3-4fa2-bec9-91d79f78e370",
+        "source_id": "a007b286-18f1-4b5d-bd06-e1eb5a09b300",
+        "destination_id": "ddef1b87-3ad5-445b-bc8b-93b4b503445d",
+        "description": "Updates inventory via",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "223bc160-9e86-4bfe-bfde-addfada03bc5",
+        "source_id": "a007b286-18f1-4b5d-bd06-e1eb5a09b300",
+        "destination_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "description": "Sends dispense notifications to",
+        "technology": "HL7",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "9befc31e-b556-4682-9765-518ffd0f7a9c",
+        "source_id": "0ac8ca91-36c7-4c57-9b1c-06de1065f98f",
+        "destination_id": "2fce8f83-a069-46cf-9981-e6b0e18a1af1",
+        "description": "Reads and writes imaging data to",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "e2fa38b5-8585-4cd0-836a-bc74f51b4c60",
+        "source_id": "0ac8ca91-36c7-4c57-9b1c-06de1065f98f",
+        "destination_id": "3567ef65-2e47-4f4a-8e1e-a5a4a25adcbc",
+        "description": "Retrieves images from",
+        "technology": "DICOM",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "2d24ac42-d5bd-4033-b664-1e3c6ab86742",
+        "source_id": "0ac8ca91-36c7-4c57-9b1c-06de1065f98f",
+        "destination_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "description": "Sends reports to",
+        "technology": "HL7/FHIR",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "b835e7c5-ea7e-487f-b39a-f69dfc234f34",
+        "source_id": "9a690380-e198-431d-b7af-4eef9f471412",
+        "destination_id": "a1e0803a-6c91-4bd5-89e1-ec1abd472923",
+        "description": "Reads and writes billing data to",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "0de7de45-25cb-45b5-a021-31c484bd19f7",
+        "source_id": "9a690380-e198-431d-b7af-4eef9f471412",
+        "destination_id": "4d57c808-d18e-4a92-afcc-b68ec03d535a",
+        "description": "Receives charges from",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "4fc50a29-9a93-4d9a-88f7-136bbd4f1986",
+        "source_id": "4d57c808-d18e-4a92-afcc-b68ec03d535a",
+        "destination_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "description": "Receives clinical charges from",
+        "technology": "HL7",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "0933fabc-4b30-48f7-b90c-f60290e5ed97",
+        "source_id": "e5fcc7cb-fec1-4b2f-ba1b-621079c85a74",
+        "destination_id": "8dff1ab3-b8f4-416a-8640-038845af522c",
+        "description": "Makes API requests to",
+        "technology": "HTTPS/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "7af91546-63ff-407a-a379-516dcc22b196",
+        "source_id": "8dff1ab3-b8f4-416a-8640-038845af522c",
+        "destination_id": "37836427-e658-4edb-9080-c5fe03d2f429",
+        "description": "Manages appointments via",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "161fccf2-5bca-42b8-8b97-3774d5545840",
+        "source_id": "8dff1ab3-b8f4-416a-8640-038845af522c",
+        "destination_id": "df746ec5-6074-408f-82b4-46381e7cfacf",
+        "description": "Sends messages via",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "edf6203c-fdc4-425a-b82b-ae42cb20bfe1",
+        "source_id": "8dff1ab3-b8f4-416a-8640-038845af522c",
+        "destination_id": "68bd6545-a5cc-4f3b-87f7-a142fa73c675",
+        "description": "Authenticates patients with",
+        "technology": "HTTPS/OAuth2",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "e111ed3b-671b-42cc-900d-631ef4b18dd1",
+        "source_id": "37836427-e658-4edb-9080-c5fe03d2f429",
+        "destination_id": "692292dc-68e7-4e9a-95ee-e382bf774b33",
+        "description": "Stores appointment data in",
+        "technology": "MongoDB",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "d0a53021-0d13-481a-bd60-4b2a7c8da631",
+        "source_id": "df746ec5-6074-408f-82b4-46381e7cfacf",
+        "destination_id": "692292dc-68e7-4e9a-95ee-e382bf774b33",
+        "description": "Stores messages in",
+        "technology": "MongoDB",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "cddd5147-dd99-4beb-8b9e-b8c0c7202288",
+        "source_id": "37836427-e658-4edb-9080-c5fe03d2f429",
+        "destination_id": "3131b1a9-bf74-40c6-85d7-c9f1f49c5fc1",
+        "description": "Books appointments with",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "92bcc45b-0da3-48a4-b8f3-9d5ae67eea50",
+        "source_id": "5a1b29c9-03e4-451b-8c83-c83685c04ac1",
+        "destination_id": "ac705646-f5a3-45ba-9445-2421a7d1d831",
+        "description": "Stores triage data in",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "f1a56078-5c2c-41ca-98f8-5ae74348a2ff",
+        "source_id": "5a1b29c9-03e4-451b-8c83-c83685c04ac1",
+        "destination_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "description": "Sends ED admissions to",
+        "technology": "HL7",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "5a28ef5a-f20e-4e35-9d40-bc89ea5a5eb3",
+        "source_id": "e971b5d0-8b2e-47a9-b0c5-e5ff24612c7e",
+        "destination_id": "5a1b29c9-03e4-451b-8c83-c83685c04ac1",
+        "description": "Displays triage status from",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "bb957f6b-0c7d-43f8-b351-37bd6f0d5e66",
+        "source_id": "3131b1a9-bf74-40c6-85d7-c9f1f49c5fc1",
+        "destination_id": "42225777-4f0f-4b0f-9908-9aba0d793740",
+        "description": "Reads and writes schedules to",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "7d2a7014-2968-4acd-a4b8-d5f72a9837d9",
+        "source_id": "3131b1a9-bf74-40c6-85d7-c9f1f49c5fc1",
+        "destination_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "description": "Publishes appointment events to",
+        "technology": "HL7/FHIR",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "0bdc35e1-60c1-4db3-a5dc-6d68d45cbade",
+        "source_id": "5f6b17ff-0be4-4796-a0d2-1855ea65872c",
+        "destination_id": "59510255-f46e-4b7e-b9b3-2e2de7f155f9",
+        "description": "Extracts clinical data from",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "c4dcf094-052a-4c97-ab7a-57209884c7a1",
+        "source_id": "5f6b17ff-0be4-4796-a0d2-1855ea65872c",
+        "destination_id": "be109d55-50cb-454d-9925-2d12492de74a",
+        "description": "Extracts lab data from",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "80b65867-8bc3-432e-bd45-161e1660ba6c",
+        "source_id": "5f6b17ff-0be4-4796-a0d2-1855ea65872c",
+        "destination_id": "2477b4c4-9268-41b0-b715-549b2ee52c37",
+        "description": "Extracts pharmacy data from",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "a2e07c4e-e5ca-4330-8d80-31698c880b15",
+        "source_id": "5f6b17ff-0be4-4796-a0d2-1855ea65872c",
+        "destination_id": "2fce8f83-a069-46cf-9981-e6b0e18a1af1",
+        "description": "Extracts radiology data from",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "dc077a1f-ed1b-4834-8d5b-60769bb4fc81",
+        "source_id": "5f6b17ff-0be4-4796-a0d2-1855ea65872c",
+        "destination_id": "a1e0803a-6c91-4bd5-89e1-ec1abd472923",
+        "description": "Extracts billing data from",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "6b1be6dc-9889-4f35-b21a-82fd1277d28f",
+        "source_id": "5f6b17ff-0be4-4796-a0d2-1855ea65872c",
+        "destination_id": "191d1666-588d-44bb-9db3-417c6a4444fa",
+        "description": "Loads transformed data into",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "7ce014ef-8597-4005-8f54-80b9729d94da",
+        "source_id": "46f2c541-d85e-4a9c-98e7-cf8498839447",
+        "destination_id": "191d1666-588d-44bb-9db3-417c6a4444fa",
+        "description": "Queries analytics data from",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "8ded094b-cac2-44a6-97d5-e5ff1197a134",
+        "source_id": "461e8501-e382-49d1-b188-0398d3e6535e",
+        "destination_id": "46f2c541-d85e-4a9c-98e7-cf8498839447",
+        "description": "Requests reports from",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "55a9c972-600e-43fd-a951-c9818e266f30",
+        "source_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "destination_id": "b91fa4d3-b941-4727-88da-29599bde7e98",
+        "description": "Routes messages to",
+        "technology": "AMQP",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "1e70e464-9c65-4fdd-aec4-7ba658407e5e",
+        "source_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "destination_id": "31147ea0-f830-4636-8f33-753061567ed3",
+        "description": "Sends external events to",
+        "technology": "HTTPS/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "ef2f5f5d-3379-4a7a-9b80-430bbe30a17e",
+        "source_id": "e14d0e76-e8e1-4226-9d00-e24252f47624",
+        "destination_id": "dc8f594b-909b-4efc-8273-b685dd48ecb4",
+        "description": "Stores audit logs in",
+        "technology": "SQL",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "a520a8fc-ae19-4d62-a431-0abc6187587d",
+        "source_id": "e14d0e76-e8e1-4226-9d00-e24252f47624",
+        "destination_id": "a4110958-910a-4e03-8221-a6f1b6b40827",
+        "description": "Receives audit events from",
+        "technology": "HL7/FHIR",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      },
+      {
+        "id": "3a14f1cf-0651-4c14-9038-b2a7fbc7521c",
+        "source_id": "067f155e-0525-4e50-ab5b-e64f70181ff2",
+        "destination_id": "e14d0e76-e8e1-4226-9d00-e24252f47624",
+        "description": "Retrieves audit reports from",
+        "technology": "HTTP/REST",
+        "interaction_style": "synchronous",
+        "tags": [
+          "Relationship"
+        ]
+      }
+    ]
+  },
+  "views": {
+    "system_landscape_views": [
+      {
+        "key": "SystemLandscape",
+        "title": "Overview of the entire enterprise healthcare ecosystem",
+        "auto_layout": {
+          "direction": "TopBottom",
+          "rank_separation": 300,
+          "node_separation": 300
+        },
+        "enterprise_boundary_visible": true
+      }
+    ],
+    "system_context_views": [
+      {
+        "key": "EHRSystemContext",
+        "title": "System context diagram for the Electronic Health Record System",
+        "auto_layout": {
+          "direction": "TopBottom",
+          "rank_separation": 300,
+          "node_separation": 300
+        },
+        "software_system_id": "17306485-9351-48e1-9695-e53f7ed2cde7",
+        "enterprise_boundary_visible": true
+      }
+    ],
+    "container_views": [
+      {
+        "key": "EHRContainers",
+        "title": "Container diagram showing the internal architecture of the EHR System",
+        "auto_layout": {
+          "direction": "TopBottom",
+          "rank_separation": 300,
+          "node_separation": 300
+        },
+        "software_system_id": "17306485-9351-48e1-9695-e53f7ed2cde7",
+        "external_software_system_boundary_visible": true
+      }
+    ]
+  },
+  "documentation": {},
+  "configuration": {
+    "styles": {
+      "elements": [
+        {
+          "tag": "Person",
+          "shape": "Person",
+          "background": "#08427b",
+          "color": "#ffffff"
+        },
+        {
+          "tag": "Software System",
+          "background": "#1168bd",
+          "color": "#ffffff"
+        },
+        {
+          "tag": "External",
+          "background": "#999999",
+          "color": "#ffffff"
+        },
+        {
+          "tag": "Container",
+          "background": "#438dd5",
+          "color": "#ffffff"
+        },
+        {
+          "tag": "Component",
+          "background": "#85bbf0",
+          "color": "#000000"
+        }
+      ],
+      "relationships": [
+        {
+          "tag": "Relationship",
+          "thickness": 2,
+          "color": "#707070"
+        }
+      ]
+    }
+  },
+  "properties": {
+    "structurizr.adrs": "adrs",
+    "structurizr.docs": "docs"
+  }
+}
