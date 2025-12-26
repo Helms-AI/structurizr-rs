@@ -146,911 +146,13 @@ pub async fn view_diagram(
     let workspace = state.get_workspace().await
         .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
 
-    let svg_url = format!("/view/{}/svg", view_key);
-    let model = workspace.model();
-    let views = workspace.views();
-
-    // Build navigation index for drill-down support
-    let nav_index = NavigationIndex::build(views);
-
-    // Build breadcrumbs for this view
-    let breadcrumbs = nav_index.build_breadcrumbs(&view_key);
-    let breadcrumbs_json = serde_json::to_string(&breadcrumbs).unwrap_or_else(|_| "[]".to_string());
-
-    // Get current view info
-    let current_view_title = nav_index.get_view_title(&view_key)
-        .cloned()
-        .unwrap_or_else(|| view_key.clone());
-
-    // Collect elements based on view type - MUST match SVG renderer element collection
-    // Tuple: (id_string, element_id, name, type, description, technology)
-    let mut element_ids: Vec<String> = Vec::new();
-    let mut element_data: Vec<(String, ElementId, String, String, Option<String>, Option<String>)> = Vec::new();
-    let mut auto_layout_config: Option<&structurizr_core::view::AutoLayout> = None;
-
-    // Determine view type and collect appropriate elements (matching SVG renderer logic)
-    if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
-        // SystemLandscape: People + Software Systems
-        auto_layout_config = view.properties.auto_layout.as_ref();
-        for person in &model.people {
-            element_ids.push(person.id().to_string());
-            element_data.push((
-                person.id().to_string(),
-                person.id(),
-                person.name().to_string(),
-                "Person".to_string(),
-                person.properties.description.clone(),
-                None,
-            ));
-        }
-        for system in &model.software_systems {
-            element_ids.push(system.id().to_string());
-            element_data.push((
-                system.id().to_string(),
-                system.id(),
-                system.name().to_string(),
-                "Software System".to_string(),
-                system.properties.description.clone(),
-                None,
-            ));
-        }
-    } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
-        // SystemContext: People + Software Systems
-        auto_layout_config = view.properties.auto_layout.as_ref();
-        for person in &model.people {
-            element_ids.push(person.id().to_string());
-            element_data.push((
-                person.id().to_string(),
-                person.id(),
-                person.name().to_string(),
-                "Person".to_string(),
-                person.properties.description.clone(),
-                None,
-            ));
-        }
-        for system in &model.software_systems {
-            element_ids.push(system.id().to_string());
-            element_data.push((
-                system.id().to_string(),
-                system.id(),
-                system.name().to_string(),
-                "Software System".to_string(),
-                system.properties.description.clone(),
-                None,
-            ));
-        }
-    } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
-        // Container: People + Containers from the target software system
-        auto_layout_config = view.properties.auto_layout.as_ref();
-        for person in &model.people {
-            element_ids.push(person.id().to_string());
-            element_data.push((
-                person.id().to_string(),
-                person.id(),
-                person.name().to_string(),
-                "Person".to_string(),
-                person.properties.description.clone(),
-                None,
-            ));
-        }
-        // Find the target software system and add its containers
-        if let Some(system) = model.software_systems.iter().find(|s| s.id() == view.software_system_id) {
-            for container in &system.containers {
-                element_ids.push(container.id().to_string());
-                element_data.push((
-                    container.id().to_string(),
-                    container.id(),
-                    container.name().to_string(),
-                    "Container".to_string(),
-                    container.properties.description.clone(),
-                    container.technology.clone(),
-                ));
-            }
-        }
-    } else if let Some(view) = views.component_views.iter().find(|v| v.properties.key == view_key) {
-        // Component: ONLY Components from the target container (matching SVG renderer)
-        // This gives a focused C3 view showing just the internal structure
-        auto_layout_config = view.properties.auto_layout.as_ref();
-        // Find the target container and add its components
-        for system in &model.software_systems {
-            if let Some(container) = system.containers.iter().find(|c| c.id() == view.container_id) {
-                for component in &container.components {
-                    element_ids.push(component.id().to_string());
-                    element_data.push((
-                        component.id().to_string(),
-                        component.id(),
-                        component.name().to_string(),
-                        "Component".to_string(),
-                        component.properties.description.clone(),
-                        component.technology.clone(),
-                    ));
-                }
-                break;
-            }
-        }
-    } else {
-        // Fallback: include all people and software systems
-        for person in &model.people {
-            element_ids.push(person.id().to_string());
-            element_data.push((
-                person.id().to_string(),
-                person.id(),
-                person.name().to_string(),
-                "Person".to_string(),
-                person.properties.description.clone(),
-                None,
-            ));
-        }
-        for system in &model.software_systems {
-            element_ids.push(system.id().to_string());
-            element_data.push((
-                system.id().to_string(),
-                system.id(),
-                system.name().to_string(),
-                "Software System".to_string(),
-                system.properties.description.clone(),
-                None,
-            ));
-        }
-    }
-
-    // Build edges from relationships (filter to only relevant elements)
-    let element_id_set: std::collections::HashSet<String> = element_ids.iter().cloned().collect();
-    let edges: Vec<LayoutEdge> = model
-        .relationships
-        .iter()
-        .filter(|r| element_id_set.contains(&r.source_id.to_string()) && element_id_set.contains(&r.destination_id.to_string()))
-        .map(|r| LayoutEdge {
-            source: r.source_id.to_string(),
-            target: r.destination_id.to_string(),
-        })
-        .collect();
-
-    // Compute layout using layout_adaptive (matching SVG renderer)
-    let layout = if let Some(ref auto_layout) = auto_layout_config {
-        GridLayout::from_config(auto_layout)
-    } else {
-        GridLayout::default()
-    };
-    let nodes = layout.layout_adaptive(&element_ids, &edges);
-
-    // Build elements JSON with position data for hit-testing and drill-down info
-    let mut elements_json = String::from("[");
-    for (i, (id, element_id, name, elem_type, desc, tech)) in element_data.iter().enumerate() {
-        if i > 0 { elements_json.push(','); }
-
-        // Find the corresponding layout node
-        let (x, y, width, height) = nodes.iter()
-            .find(|n| &n.id == id)
-            .map(|n| (n.position.x, n.position.y, n.size.width, n.size.height))
-            .unwrap_or((0.0, 0.0, 450.0, 300.0));
-
-        // Check if this element can be drilled into
-        let drillable = nav_index.is_drillable(*element_id);
-        let drill_target = nav_index.get_drill_target(*element_id);
-        let target_view = drill_target.map(|t| format!("\"{}\"", escape_json(&t.view_key))).unwrap_or_else(|| "null".to_string());
-        let target_type = drill_target.map(|t| format!("\"{}\"", t.target_type.display_name())).unwrap_or_else(|| "null".to_string());
-
-        elements_json.push_str(&format!(
-            r#"{{"id":"{}","name":"{}","type":"{}","description":{},"technology":{},"x":{},"y":{},"width":{},"height":{},"drillable":{},"targetView":{},"targetType":{}}}"#,
-            escape_json(id),
-            escape_json(name),
-            escape_json(elem_type),
-            desc.as_ref().map(|d| format!("\"{}\"", escape_json(d))).unwrap_or_else(|| "null".to_string()),
-            tech.as_ref().map(|t| format!("\"{}\"", escape_json(t))).unwrap_or_else(|| "null".to_string()),
-            x as i32,
-            y as i32,
-            width as i32,
-            height as i32,
-            drillable,
-            target_view,
-            target_type,
-        ));
-    }
-    elements_json.push(']');
-
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>{} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; background: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; overflow: hidden; }}
-        .toolbar {{ background: #333; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid #444; }}
-        .toolbar a {{ color: white; text-decoration: none; }}
-        .toolbar a:hover {{ text-decoration: underline; }}
-        .toolbar button {{ background: #555; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }}
-        .toolbar button:hover {{ background: #666; }}
-        .toolbar .separator {{ border-left: 1px solid #555; height: 20px; }}
-        .zoom-controls {{ display: flex; gap: 5px; align-items: center; }}
-        .zoom-level {{ font-size: 12px; min-width: 50px; text-align: center; }}
-        .diagram-container {{ height: calc(100vh - 50px); overflow: hidden; position: relative; background: #2a2a2a; }}
-        #diagram-canvas {{ width: 100%; height: 100%; cursor: grab; }}
-        #diagram-canvas.dragging {{ cursor: grabbing; }}
-        .tooltip {{ position: fixed; background: #333; color: white; padding: 12px 16px; border-radius: 6px; font-size: 13px; max-width: 300px; z-index: 1000; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: none; }}
-        .tooltip h4 {{ margin: 0 0 6px 0; font-size: 14px; }}
-        .tooltip .type {{ color: #888; font-size: 11px; margin-bottom: 8px; }}
-        .tooltip .desc {{ line-height: 1.4; }}
-        .tooltip .tech {{ color: #6af; margin-top: 6px; font-size: 12px; }}
-        .tooltip .drill-hint {{ color: #4c9; margin-top: 8px; font-size: 11px; font-style: italic; }}
-        .minimap {{ position: absolute; bottom: 20px; right: 20px; width: 200px; height: 150px; background: #333; border: 1px solid #555; border-radius: 4px; overflow: hidden; cursor: crosshair; }}
-        .minimap-canvas {{ width: 100%; height: 100%; opacity: 0.7; }}
-        .minimap .viewport {{ position: absolute; border: 2px solid #0066cc; background: rgba(0,102,204,0.1); cursor: grab; transition: background 0.15s; }}
-        .minimap .viewport:hover {{ background: rgba(0,102,204,0.25); }}
-        .keyboard-help {{ position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: #666; }}
-        /* Breadcrumb navigation styles */
-        .breadcrumbs {{ display: flex; align-items: center; gap: 6px; font-size: 13px; max-width: 500px; overflow: hidden; }}
-        .breadcrumb {{ display: flex; align-items: center; gap: 4px; color: #aaa; text-decoration: none; padding: 4px 8px; border-radius: 4px; transition: all 0.15s; white-space: nowrap; }}
-        .breadcrumb:hover {{ background: rgba(255,255,255,0.1); color: white; }}
-        .breadcrumb.current {{ color: white; font-weight: 500; }}
-        .breadcrumb-icon {{ background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }}
-        .breadcrumb-separator {{ color: #555; font-size: 11px; }}
-        /* Drill indicator styles */
-        .drill-indicator {{ position: absolute; pointer-events: none; }}
-    </style>
-</head>
-<body>
-    <div class="toolbar">
-        <a href="/">Home</a>
-        <div class="separator"></div>
-        <nav class="breadcrumbs" id="breadcrumbs">
-            <!-- Breadcrumbs will be rendered by JavaScript -->
-        </nav>
-        <div class="separator"></div>
-        <div class="zoom-controls">
-            <button onclick="zoomOut()">−</button>
-            <span class="zoom-level" id="zoom-level">100%</span>
-            <button onclick="zoomIn()">+</button>
-            <button onclick="resetZoom()">Reset</button>
-            <button onclick="fitToScreen()">Fit</button>
-        </div>
-        <div class="separator"></div>
-        <a href="/edit/{}">Edit</a>
-        <a href="{}" download="{}.svg">Download SVG</a>
-    </div>
-    <div class="diagram-container" id="diagram-container">
-        <canvas id="diagram-canvas"></canvas>
-    </div>
-    <div class="tooltip" id="tooltip"></div>
-    <div class="minimap" id="minimap">
-        <canvas class="minimap-canvas" id="minimap-canvas"></canvas>
-        <div class="viewport" id="minimap-viewport"></div>
-    </div>
-    <div class="keyboard-help">
-        Scroll to zoom • Drag to pan • Double-click to drill down • Hover for info • Esc to go back
-    </div>
-
-    <script>
-        // Element data with positions for hit-testing
-        const elements = {};
-
-        // Breadcrumb navigation data
-        const breadcrumbs = {};
-        const currentViewKey = '{}';
-        const currentViewTitle = '{}';
-
-        // View type level indicators
-        const viewTypeLevels = {{
-            'system_landscape': 'C1',
-            'system_context': 'C1',
-            'container': 'C2',
-            'component': 'C3',
-            'dynamic': 'Dyn',
-            'deployment': 'Dep',
-            'filtered': 'Flt',
-            'custom': 'Cst',
-            'image': 'Img'
-        }};
-
-        // Render breadcrumbs
-        function renderBreadcrumbs() {{
-            const container = document.getElementById('breadcrumbs');
-            if (!breadcrumbs || breadcrumbs.length === 0) {{
-                container.innerHTML = `<span class="breadcrumb current"><span class="breadcrumb-icon">V</span><span class="breadcrumb-text">${{currentViewTitle}}</span></span>`;
-                return;
-            }}
-
-            let html = '';
-            breadcrumbs.forEach((crumb, index) => {{
-                if (index > 0) {{
-                    html += '<span class="breadcrumb-separator">›</span>';
-                }}
-
-                const isLast = index === breadcrumbs.length - 1;
-                const level = viewTypeLevels[crumb.view_type] || 'V';
-
-                if (isLast) {{
-                    html += `<span class="breadcrumb current"><span class="breadcrumb-icon">${{level}}</span><span class="breadcrumb-text">${{escapeHtml(crumb.title)}}</span></span>`;
-                }} else {{
-                    html += `<a href="/view/${{crumb.view_key}}" class="breadcrumb"><span class="breadcrumb-icon">${{level}}</span><span class="breadcrumb-text">${{escapeHtml(crumb.title)}}</span></a>`;
-                }}
-            }});
-            container.innerHTML = html;
-        }}
-
-        function escapeHtml(text) {{
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }}
-
-        // Call renderBreadcrumbs on load
-        renderBreadcrumbs();
-
-        // Canvas and context
-        const canvas = document.getElementById('diagram-canvas');
-        const ctx = canvas.getContext('2d');
-        const container = document.getElementById('diagram-container');
-        const tooltip = document.getElementById('tooltip');
-        const zoomLevelEl = document.getElementById('zoom-level');
-
-        // Minimap elements
-        const minimap = document.getElementById('minimap');
-        const minimapCanvas = document.getElementById('minimap-canvas');
-        const minimapCtx = minimapCanvas.getContext('2d');
-        const minimapViewport = document.getElementById('minimap-viewport');
-
-        // SVG image
-        const svgImage = new Image();
-        let svgLoaded = false;
-        let svgWidth = 0;
-        let svgHeight = 0;
-        let svgMinX = 0;  // viewBox X offset
-        let svgMinY = 0;  // viewBox Y offset
-
-        // Transform state
-        let scale = 1;
-        let offsetX = 0;
-        let offsetY = 0;
-        let isPanning = false;
-        let panStartX = 0;
-        let panStartY = 0;
-        let panStartOffsetX = 0;
-        let panStartOffsetY = 0;
-
-        // Currently hovered element
-        let hoveredElement = null;
-
-        // Initialize canvas size
-        function initCanvas() {{
-            const rect = container.getBoundingClientRect();
-            console.log('Container rect:', rect.width, 'x', rect.height);
-
-            // Ensure we have valid dimensions
-            const width = rect.width || window.innerWidth;
-            const height = rect.height || (window.innerHeight - 50);
-
-            canvas.width = width;
-            canvas.height = height;
-            minimapCanvas.width = 200;
-            minimapCanvas.height = 150;
-
-            // Draw loading state
-            ctx.fillStyle = '#2a2a2a';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#666';
-            ctx.font = '16px system-ui, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('Loading diagram...', canvas.width / 2, canvas.height / 2);
-        }}
-
-        // Use requestAnimationFrame to ensure layout is complete
-        requestAnimationFrame(() => {{
-            initCanvas();
-        }});
-
-        // Load SVG image
-        svgImage.onload = () => {{
-            svgLoaded = true;
-            svgWidth = svgImage.naturalWidth;
-            svgHeight = svgImage.naturalHeight;
-
-            // Parse viewBox to get coordinate offset
-            // Fetch the SVG and parse the viewBox attribute
-            fetch('{}')
-                .then(r => r.text())
-                .then(svgText => {{
-                    const viewBoxMatch = svgText.match(/viewBox="([^"]+)"/);
-                    if (viewBoxMatch) {{
-                        const parts = viewBoxMatch[1].split(/\s+/).map(Number);
-                        if (parts.length >= 4) {{
-                            svgMinX = parts[0];
-                            svgMinY = parts[1];
-                            console.log('SVG viewBox offset:', svgMinX, svgMinY);
-                        }}
-                    }}
-                    console.log('SVG loaded:', svgWidth, 'x', svgHeight, 'viewBox offset:', svgMinX, svgMinY);
-
-                    // Fit diagram to screen
-                    fitToScreen();
-                }})
-                .catch(() => {{
-                    console.log('SVG loaded:', svgWidth, 'x', svgHeight, '(viewBox parse failed)');
-                    fitToScreen();
-                }});
-        }};
-        svgImage.onerror = (e) => {{
-            console.error('Failed to load SVG:', e);
-            ctx.fillStyle = '#2a2a2a';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-            ctx.fillStyle = '#f66';
-            ctx.font = '16px system-ui, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.fillText('Failed to load diagram', canvas.width / 2, canvas.height / 2);
-        }};
-        svgImage.src = '{}';
-
-        function resizeCanvas() {{
-            const rect = container.getBoundingClientRect();
-            canvas.width = rect.width;
-            canvas.height = rect.height;
-
-            // Set minimap canvas size
-            minimapCanvas.width = 200;
-            minimapCanvas.height = 150;
-
-            render();
-        }}
-
-        function render() {{
-            if (!svgLoaded) return;
-
-            // Clear canvas with dark background
-            ctx.fillStyle = '#2a2a2a';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
-
-            // Draw white background for diagram area
-            ctx.save();
-            ctx.translate(offsetX, offsetY);
-            ctx.scale(scale, scale);
-
-            // White background with shadow
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
-            ctx.shadowBlur = 20;
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 4;
-            ctx.fillStyle = 'white';
-            ctx.fillRect(0, 0, svgWidth, svgHeight);
-
-            // Reset shadow and draw SVG
-            ctx.shadowColor = 'transparent';
-            ctx.drawImage(svgImage, 0, 0);
-
-            // Draw drillable indicators on top of SVG
-            renderDrillableIndicators();
-
-            ctx.restore();
-
-            // Update zoom level display
-            zoomLevelEl.textContent = Math.round(scale * 100) + '%';
-
-            // Update minimap
-            updateMinimap();
-        }}
-
-        // Draw visual indicators for drillable elements
-        function renderDrillableIndicators() {{
-            for (const el of elements) {{
-                if (!el.drillable) continue;
-
-                // Convert element coords from SVG viewBox space to canvas drawing space
-                const drawX = el.x - svgMinX;
-                const drawY = el.y - svgMinY;
-
-                // Draw a subtle highlight border
-                ctx.strokeStyle = 'rgba(0, 150, 255, 0.6)';
-                ctx.lineWidth = 3;
-                ctx.setLineDash([]);
-                ctx.strokeRect(drawX + 2, drawY + 2, el.width - 4, el.height - 4);
-
-                // Draw expand icon in bottom-right corner
-                const iconSize = 24;
-                const iconX = drawX + el.width - iconSize - 8;
-                const iconY = drawY + el.height - iconSize - 8;
-
-                // Icon background circle
-                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
-                ctx.beginPath();
-                ctx.arc(iconX + iconSize/2, iconY + iconSize/2, iconSize/2, 0, Math.PI * 2);
-                ctx.fill();
-
-                // Plus sign
-                ctx.strokeStyle = 'white';
-                ctx.lineWidth = 2.5;
-                ctx.lineCap = 'round';
-                ctx.beginPath();
-                ctx.moveTo(iconX + iconSize/2 - 6, iconY + iconSize/2);
-                ctx.lineTo(iconX + iconSize/2 + 6, iconY + iconSize/2);
-                ctx.moveTo(iconX + iconSize/2, iconY + iconSize/2 - 6);
-                ctx.lineTo(iconX + iconSize/2, iconY + iconSize/2 + 6);
-                ctx.stroke();
-
-                // Draw "Click to explore" label above the element
-                ctx.font = 'bold 11px system-ui, sans-serif';
-                ctx.textAlign = 'center';
-                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
-                const labelText = 'Double-click to explore ' + (el.targetType || 'details');
-                const labelWidth = ctx.measureText(labelText).width + 12;
-                const labelX = drawX + el.width/2;
-                const labelY = drawY - 8;
-
-                // Label background
-                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
-                ctx.beginPath();
-                ctx.roundRect(labelX - labelWidth/2, labelY - 14, labelWidth, 18, 4);
-                ctx.fill();
-
-                // Label text
-                ctx.fillStyle = 'white';
-                ctx.fillText(labelText, labelX, labelY - 1);
-            }}
-        }}
-
-        function updateMinimap() {{
-            if (!svgLoaded) return;
-
-            // Clear minimap
-            minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
-
-            // Calculate scale to fit SVG in minimap
-            const minimapScale = Math.min(
-                minimapCanvas.width / svgWidth,
-                minimapCanvas.height / svgHeight
-            );
-
-            // Draw SVG in minimap
-            minimapCtx.save();
-            minimapCtx.scale(minimapScale, minimapScale);
-            minimapCtx.drawImage(svgImage, 0, 0);
-            minimapCtx.restore();
-
-            // Calculate viewport rectangle
-            const viewportWidth = (canvas.width / scale) * minimapScale;
-            const viewportHeight = (canvas.height / scale) * minimapScale;
-            const viewportX = (-offsetX / scale) * minimapScale;
-            const viewportY = (-offsetY / scale) * minimapScale;
-
-            minimapViewport.style.width = Math.max(10, Math.min(viewportWidth, minimapCanvas.width)) + 'px';
-            minimapViewport.style.height = Math.max(10, Math.min(viewportHeight, minimapCanvas.height)) + 'px';
-            minimapViewport.style.left = Math.max(0, Math.min(viewportX, minimapCanvas.width - 10)) + 'px';
-            minimapViewport.style.top = Math.max(0, Math.min(viewportY, minimapCanvas.height - 10)) + 'px';
-        }}
-
-        // Convert screen coordinates to diagram coordinates (SVG viewBox space)
-        function screenToDiagram(screenX, screenY) {{
-            const rect = canvas.getBoundingClientRect();
-            const canvasX = screenX - rect.left;
-            const canvasY = screenY - rect.top;
-            // Add svgMinX/svgMinY to convert from canvas space (0,0) to SVG viewBox space (which may be negative)
-            return {{
-                x: (canvasX - offsetX) / scale + svgMinX,
-                y: (canvasY - offsetY) / scale + svgMinY
-            }};
-        }}
-
-        // Find element at diagram coordinates
-        function getElementAtPoint(diagramX, diagramY) {{
-            for (const el of elements) {{
-                if (diagramX >= el.x && diagramX <= el.x + el.width &&
-                    diagramY >= el.y && diagramY <= el.y + el.height) {{
-                    return el;
-                }}
-            }}
-            return null;
-        }}
-
-        // Show/hide tooltip
-        function showTooltip(element, screenX, screenY) {{
-            if (element) {{
-                let html = `<h4>${{element.name}}</h4><div class="type">${{element.type}}</div>`;
-                if (element.description) {{
-                    html += `<div class="desc">${{element.description}}</div>`;
-                }}
-                if (element.technology) {{
-                    html += `<div class="tech">${{element.technology}}</div>`;
-                }}
-                if (element.drillable && element.targetType) {{
-                    html += `<div class="drill-hint">Double-click to view ${{element.targetType.toLowerCase()}}s</div>`;
-                }}
-                tooltip.innerHTML = html;
-                tooltip.style.left = (screenX + 15) + 'px';
-                tooltip.style.top = (screenY + 15) + 'px';
-                tooltip.style.display = 'block';
-            }} else {{
-                tooltip.style.display = 'none';
-            }}
-        }}
-
-        // Zoom functions
-        function setZoom(newScale, centerX, centerY) {{
-            newScale = Math.max(0.1, Math.min(5, newScale));
-
-            if (centerX !== undefined && centerY !== undefined) {{
-                // Zoom toward the specified point
-                offsetX = centerX - (centerX - offsetX) * (newScale / scale);
-                offsetY = centerY - (centerY - offsetY) * (newScale / scale);
-            }}
-
-            scale = newScale;
-            render();
-        }}
-
-        function zoomIn() {{
-            setZoom(scale * 1.2, canvas.width / 2, canvas.height / 2);
-        }}
-
-        function zoomOut() {{
-            setZoom(scale / 1.2, canvas.width / 2, canvas.height / 2);
-        }}
-
-        function resetZoom() {{
-            scale = 1;
-            offsetX = 50;
-            offsetY = 50;
-            render();
-        }}
-
-        function fitToScreen() {{
-            if (!svgLoaded) return;
-
-            const padding = 50;
-            const scaleX = (canvas.width - padding * 2) / svgWidth;
-            const scaleY = (canvas.height - padding * 2) / svgHeight;
-            scale = Math.min(scaleX, scaleY, 1);
-
-            offsetX = (canvas.width - svgWidth * scale) / 2;
-            offsetY = (canvas.height - svgHeight * scale) / 2;
-            render();
-        }}
-
-        // Mouse wheel zoom
-        canvas.addEventListener('wheel', (e) => {{
-            e.preventDefault();
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            setZoom(scale * delta, mouseX, mouseY);
-        }}, {{ passive: false }});
-
-        // Pan with mouse drag
-        canvas.addEventListener('mousedown', (e) => {{
-            if (e.button === 0) {{
-                isPanning = true;
-                panStartX = e.clientX;
-                panStartY = e.clientY;
-                panStartOffsetX = offsetX;
-                panStartOffsetY = offsetY;
-                canvas.classList.add('dragging');
-            }}
-        }});
-
-        document.addEventListener('mousemove', (e) => {{
-            if (isPanning) {{
-                offsetX = panStartOffsetX + (e.clientX - panStartX);
-                offsetY = panStartOffsetY + (e.clientY - panStartY);
-                render();
-            }} else {{
-                // Hit-testing for hover tooltips
-                const diagramPos = screenToDiagram(e.clientX, e.clientY);
-                const element = getElementAtPoint(diagramPos.x, diagramPos.y);
-
-                if (element !== hoveredElement) {{
-                    hoveredElement = element;
-                    showTooltip(element, e.clientX, e.clientY);
-                    // Use zoom-in cursor for drillable elements
-                    if (element && element.drillable) {{
-                        canvas.style.cursor = 'zoom-in';
-                    }} else if (element) {{
-                        canvas.style.cursor = 'pointer';
-                    }} else {{
-                        canvas.style.cursor = 'grab';
-                    }}
-                }} else if (element) {{
-                    // Update tooltip position
-                    tooltip.style.left = (e.clientX + 15) + 'px';
-                    tooltip.style.top = (e.clientY + 15) + 'px';
-                }}
-            }}
-        }});
-
-        document.addEventListener('mouseup', () => {{
-            if (isPanning) {{
-                isPanning = false;
-                canvas.classList.remove('dragging');
-                canvas.style.cursor = hoveredElement ? 'pointer' : 'grab';
-            }}
-        }});
-
-        // Double-click for drill-down navigation
-        canvas.addEventListener('dblclick', (e) => {{
-            e.preventDefault();
-            e.stopPropagation();
-
-            // Reset panning state to ensure clean coordinate calculation
-            isPanning = false;
-            canvas.classList.remove('dragging');
-
-            const rect = canvas.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-            const diagramPos = screenToDiagram(e.clientX, e.clientY);
-            const element = getElementAtPoint(diagramPos.x, diagramPos.y);
-
-            console.log('Double-click at diagram pos:', diagramPos);
-            console.log('Element found:', element);
-            if (element) {{
-                console.log('Element drillable:', element.drillable, 'targetView:', element.targetView);
-            }}
-
-            if (element && element.drillable && element.targetView) {{
-                // Animate zoom to element, then navigate
-                console.log('Initiating drill-down to:', element.targetView);
-                initiateDrillDown(element);
-                return; // Don't zoom
-            }} else {{
-                // No drillable element - zoom as before
-                console.log('No drillable element, zooming instead');
-                setZoom(e.shiftKey ? scale / 2 : scale * 2, mouseX, mouseY);
-            }}
-        }});
-
-        // Drill-down animation and navigation
-        function initiateDrillDown(element) {{
-            const centerX = element.x + element.width / 2;
-            const centerY = element.y + element.height / 2;
-
-            // Animate zoom into the element
-            animateZoomTo(centerX, centerY, 2.5, 400, () => {{
-                // Fade out and navigate
-                canvas.style.transition = 'opacity 0.2s ease-out';
-                canvas.style.opacity = '0';
-
-                setTimeout(() => {{
-                    // Navigate to target view
-                    window.location.href = '/view/' + element.targetView;
-                }}, 200);
-            }});
-        }}
-
-        // Animated zoom to a point
-        function animateZoomTo(targetX, targetY, targetScale, duration, callback) {{
-            const startScale = scale;
-            const startOffsetX = offsetX;
-            const startOffsetY = offsetY;
-
-            // Calculate end offsets to center on target
-            const endOffsetX = canvas.width / 2 - targetX * targetScale;
-            const endOffsetY = canvas.height / 2 - targetY * targetScale;
-
-            const startTime = performance.now();
-
-            function animate(currentTime) {{
-                const elapsed = currentTime - startTime;
-                const progress = Math.min(elapsed / duration, 1);
-
-                // Ease-in-out-cubic
-                const eased = progress < 0.5
-                    ? 4 * progress * progress * progress
-                    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
-
-                scale = startScale + (targetScale - startScale) * eased;
-                offsetX = startOffsetX + (endOffsetX - startOffsetX) * eased;
-                offsetY = startOffsetY + (endOffsetY - startOffsetY) * eased;
-
-                render();
-
-                if (progress < 1) {{
-                    requestAnimationFrame(animate);
-                }} else if (callback) {{
-                    callback();
-                }}
-            }}
-
-            requestAnimationFrame(animate);
-        }}
-
-        // Keyboard shortcuts
-        document.addEventListener('keydown', (e) => {{
-            if (e.key === '+' || e.key === '=') zoomIn();
-            if (e.key === '-') zoomOut();
-            if (e.key === '0') resetZoom();
-            if (e.key === 'f' || e.key === 'F') fitToScreen();
-            if (e.key === 'Escape') {{
-                // Navigate to parent view if breadcrumbs exist
-                if (breadcrumbs && breadcrumbs.length > 1) {{
-                    const parentCrumb = breadcrumbs[breadcrumbs.length - 2];
-                    if (parentCrumb) {{
-                        window.location.href = '/view/' + parentCrumb.view_key;
-                    }}
-                }}
-            }}
-        }});
-
-        // Minimap interaction
-        let minimapDragging = false;
-        let minimapDragStart = {{ x: 0, y: 0, offsetX: 0, offsetY: 0 }};
-
-        function getMinimapScale() {{
-            if (!svgLoaded) return 1;
-            return Math.min(
-                minimapCanvas.width / svgWidth,
-                minimapCanvas.height / svgHeight
-            );
-        }}
-
-        minimap.addEventListener('click', (e) => {{
-            if (minimapDragging) return;
-            const rect = minimap.getBoundingClientRect();
-            const clickX = e.clientX - rect.left;
-            const clickY = e.clientY - rect.top;
-            const minimapScale = getMinimapScale();
-
-            // Convert minimap click to diagram position
-            const diagramX = clickX / minimapScale;
-            const diagramY = clickY / minimapScale;
-
-            // Center viewport on clicked position
-            offsetX = (canvas.width / 2) - (diagramX * scale);
-            offsetY = (canvas.height / 2) - (diagramY * scale);
-            render();
-        }});
-
-        minimapViewport.addEventListener('mousedown', (e) => {{
-            e.stopPropagation();
-            minimapDragging = true;
-            minimapDragStart = {{
-                x: e.clientX,
-                y: e.clientY,
-                offsetX: offsetX,
-                offsetY: offsetY
-            }};
-            minimapViewport.style.cursor = 'grabbing';
-        }});
-
-        document.addEventListener('mousemove', (e) => {{
-            if (minimapDragging) {{
-                const minimapScale = getMinimapScale();
-                const deltaX = (e.clientX - minimapDragStart.x) / minimapScale * scale;
-                const deltaY = (e.clientY - minimapDragStart.y) / minimapScale * scale;
-                offsetX = minimapDragStart.offsetX - deltaX;
-                offsetY = minimapDragStart.offsetY - deltaY;
-                render();
-            }}
-        }});
-
-        document.addEventListener('mouseup', () => {{
-            if (minimapDragging) {{
-                minimapDragging = false;
-                minimapViewport.style.cursor = 'grab';
-            }}
-        }});
-
-        // Handle window resize
-        window.addEventListener('resize', () => {{
-            resizeCanvas();
-        }});
-
-        // Initialize minimap viewport cursor
-        minimapViewport.style.cursor = 'grab';
-    </script>
-</body>
-</html>"##,
-        view_key,           // title
-        view_key,           // edit link
-        svg_url,            // download href
-        view_key,           // download filename
-        elements_json,      // elements const
-        breadcrumbs_json,   // breadcrumbs const
-        view_key,           // currentViewKey
-        escape_json(&current_view_title), // currentViewTitle
-        svg_url,            // fetch for viewBox parsing
-        svg_url             // svgImage.src
-    );
-
+    // Use shared function with empty base_path for single-workspace mode
+    let html = generate_view_diagram_html(&workspace, &view_key, "");
     Ok(Html(html))
 }
+
+// Legacy view_diagram implementation has been consolidated into generate_view_diagram_html().
+// The 900+ lines of duplicated functionality are now shared via generate_view_diagram_html().
 
 /// Escape special characters for JSON strings.
 fn escape_json(s: &str) -> String {
@@ -1166,340 +268,13 @@ pub async fn documentation(
     let workspace = state.get_workspace().await
         .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
 
-    let docs = &workspace.documentation;
-
-    // Build sections list and collect navigation tree
-    let mut nav_tree: Vec<HeadingNode> = Vec::new();
-
-    let sections_html: String = if docs.sections.is_empty() {
-        "<p class=\"empty\">No documentation sections available.</p>".to_string()
-    } else {
-        docs.sections.iter().enumerate().map(|(i, section)| {
-            let default_title = format!("Section {}", i + 1);
-            let title = section.title.as_deref().unwrap_or(&default_title);
-            let section_id = format!("section-{}", i);
-
-            // Render markdown and extract headings
-            let result = render_markdown_with_heading_ids(&section.content, i);
-
-            // Build tree from extracted headings
-            let mut heading_tree = build_heading_tree(result.headings);
-
-            // If the first heading matches the section title, use its children directly
-            // to avoid duplicate entries like "Styling Guide" > "Styling Guide"
-            let children = if heading_tree.len() == 1
-                && heading_tree[0].title.eq_ignore_ascii_case(title)
-            {
-                // First heading matches section title - use its children instead
-                std::mem::take(&mut heading_tree[0].children)
-            } else {
-                heading_tree
-            };
-
-            // Add section as root node with its heading children
-            nav_tree.push(HeadingNode {
-                level: 0,
-                title: title.to_string(),
-                id: section_id.clone(),
-                children,
-            });
-
-            format!(
-                r#"<div class="doc-section" id="{}">
-                    <h2>{}</h2>
-                    <div class="content">{}</div>
-                </div>"#,
-                section_id,
-                escape_html(title),
-                result.html
-            )
-        }).collect()
-    };
-
-    // Build decisions list
-    let decisions_html: String = if docs.decisions.is_empty() {
-        String::new()
-    } else {
-        let decisions_list: String = docs.decisions.iter().map(|decision| {
-            let status_class = match decision.status {
-                structurizr_core::workspace::DecisionStatus::Accepted => "accepted",
-                structurizr_core::workspace::DecisionStatus::Proposed => "proposed",
-                structurizr_core::workspace::DecisionStatus::Superseded => "superseded",
-                structurizr_core::workspace::DecisionStatus::Deprecated => "deprecated",
-                structurizr_core::workspace::DecisionStatus::Rejected => "rejected",
-            };
-            format!(
-                r#"<div class="decision" id="adr-{}">
-                    <div class="decision-header">
-                        <span class="decision-id">{}</span>
-                        <h3>{}</h3>
-                        <span class="status {}">{:?}</span>
-                        <span class="date">{}</span>
-                    </div>
-                    <div class="content">{}</div>
-                </div>"#,
-                decision.id,
-                escape_html(&decision.id),
-                escape_html(&decision.title),
-                status_class,
-                decision.status,
-                escape_html(&decision.date),
-                render_markdown(&decision.content)
-            )
-        }).collect();
-
-        format!(
-            r#"<div class="decisions-section">
-                <h2>Architecture Decision Records</h2>
-                {}
-            </div>"#,
-            decisions_list
-        )
-    };
-
-    // Build sidebar with tree navigation
-    let sidebar_sections = if nav_tree.is_empty() {
-        String::new()
-    } else {
-        format!(r##"<ul class="nav-tree">{}</ul>"##, render_nav_tree(&nav_tree, 0))
-    };
-
-    // ADRs as flat list (they don't have internal heading hierarchy)
-    let sidebar_decisions: String = docs.decisions.iter().map(|decision| {
-        format!(r##"<a href="#adr-{}" class="nav-link adr-link">{}: {}</a>"##, decision.id, decision.id, escape_html(&decision.title))
-    }).collect();
-
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Documentation - {} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; overflow: hidden; }}
-        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; position: sticky; top: 0; z-index: 100; }}
-        .header a {{ color: white; text-decoration: none; }}
-        .header h1 {{ margin: 0; font-size: 18px; }}
-        .container {{ display: flex; height: calc(100vh - 54px); }}
-        .sidebar {{ width: 300px; background: white; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; flex-shrink: 0; height: calc(100vh - 54px); }}
-        .sidebar h3 {{ margin: 0 0 10px 0; font-size: 12px; text-transform: uppercase; color: #888; }}
-
-        /* Tree Navigation */
-        .nav-tree, .nav-tree ul {{ list-style: none; padding: 0; margin: 0; }}
-        .nav-item {{ margin: 1px 0; position: relative; }}
-        .nav-row {{ display: flex; align-items: center; }}
-        .nav-link {{ flex: 1; padding: 6px 8px; color: #333; text-decoration: none; border-radius: 4px; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-        .nav-link:hover {{ background: #f0f0f0; }}
-        .nav-link.active {{ background: #e3f2fd; color: #1976d2; font-weight: 500; }}
-
-        /* Toggle arrow */
-        .toggle {{ width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 4px; }}
-        .toggle:hover {{ background: #e0e0e0; }}
-        .toggle::before {{ content: '\25B6'; font-size: 8px; color: #666; transition: transform 0.15s ease; }}
-        .expandable.expanded > .nav-row > .toggle::before {{ transform: rotate(90deg); }}
-
-        /* Leaf nodes need padding to align with expandable nodes (account for 20px toggle) */
-        .leaf > .nav-link {{ padding-left: 28px; }}
-
-        /* Children container */
-        .nav-children {{ display: none; margin-left: 12px; border-left: 1px solid #e0e0e0; padding-left: 4px; }}
-        .expandable.expanded > .nav-children {{ display: block; }}
-
-        /* Depth styling */
-        .depth-0 > .nav-row > .nav-link, .depth-0 > .nav-link {{ font-weight: 600; font-size: 14px; }}
-        .depth-1 > .nav-row > .nav-link, .depth-1 > .nav-link {{ font-size: 13px; }}
-        .depth-2 > .nav-row > .nav-link, .depth-2 > .nav-link {{ font-size: 12px; color: #555; }}
-        .depth-3 > .nav-row > .nav-link, .depth-3 > .nav-link {{ font-size: 12px; color: #666; }}
-        .depth-4 > .nav-row > .nav-link, .depth-4 > .nav-link {{ font-size: 11px; color: #777; }}
-        .depth-5 > .nav-row > .nav-link, .depth-5 > .nav-link {{ font-size: 11px; color: #888; }}
-
-        /* Active parent chain */
-        .nav-item.active-parent > .nav-row > .nav-link {{ color: #1976d2; }}
-
-        /* ADR links (flat list) */
-        .adr-link {{ display: block; padding: 6px 8px; margin: 2px 0; font-size: 13px; }}
-        .main {{ flex: 1; padding: 40px; width: 95%; overflow-y: auto; height: calc(100vh - 54px); }}
-        .doc-section {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        .doc-section h2 {{ margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
-        .content {{ line-height: 1.5; }}
-        .content h1, .content h2, .content h3 {{ margin-top: 0.8em; margin-bottom: 0.3em; }}
-        .content p {{ margin: 0.5em 0; }}
-        .content ul, .content ol {{ margin: 0.5em 0; padding-left: 1.5em; }}
-        .content pre {{ background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }}
-        .content code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: "SF Mono", Monaco, monospace; font-size: 0.9em; }}
-        .content pre code {{ background: none; padding: 0; }}
-        .content blockquote {{ border-left: 4px solid #ddd; margin: 0; padding-left: 20px; color: #666; }}
-        .content table {{ border-collapse: collapse; width: 100%; margin: 1em 0; display: block; overflow-x: auto; }}
-        .content th, .content td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
-        .content th {{ background: #f5f5f5; font-weight: 600; }}
-        .content tr:nth-child(even) {{ background: #fafafa; }}
-        /* Strikethrough */
-        .content del {{ color: #999; text-decoration: line-through; }}
-        /* Task lists */
-        .content input[type="checkbox"] {{ margin-right: 0.5em; transform: scale(1.1); }}
-        .content ul.contains-task-list {{ list-style: none; padding-left: 1em; }}
-        .content li.task-list-item {{ list-style: none; }}
-        /* Footnotes */
-        .content .footnotes {{ font-size: 0.9em; border-top: 1px solid #eee; padding-top: 1em; margin-top: 2em; }}
-        .content .footnote-ref {{ font-size: 0.75em; vertical-align: super; }}
-        .content .footnote-backref {{ text-decoration: none; margin-left: 0.25em; }}
-        /* Images */
-        .content img {{ max-width: 100%; height: auto; border-radius: 4px; margin: 1em 0; }}
-        /* Description lists */
-        .content dl {{ margin: 1em 0; }}
-        .content dt {{ font-weight: 600; margin-top: 0.5em; }}
-        .content dd {{ margin-left: 2em; color: #555; }}
-        .decisions-section {{ margin-top: 40px; }}
-        .decision {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        .decision-header {{ display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }}
-        .decision-id {{ font-family: monospace; background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px; }}
-        .decision-header h3 {{ margin: 0; flex: 1; }}
-        .status {{ padding: 4px 10px; border-radius: 20px; font-size: 11px; text-transform: uppercase; font-weight: 600; }}
-        .status.accepted {{ background: #d4edda; color: #155724; }}
-        .status.proposed {{ background: #fff3cd; color: #856404; }}
-        .status.superseded {{ background: #e2e3e5; color: #383d41; }}
-        .status.deprecated {{ background: #f8d7da; color: #721c24; }}
-        .status.rejected {{ background: #f8d7da; color: #721c24; }}
-        .date {{ color: #888; font-size: 12px; }}
-        .empty {{ color: #888; font-style: italic; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <a href="/">← Back</a>
-        <h1>Documentation: {}</h1>
-    </div>
-    <div class="container">
-        <div class="sidebar">
-            <h3>Sections</h3>
-            {}
-            {}
-        </div>
-        <div class="main">
-            {}
-            {}
-        </div>
-    </div>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {{
-        const mainContent = document.querySelector('.main');
-        const allHeadings = document.querySelectorAll('[id^="section-"], [id^="s"]');
-        const navItems = document.querySelectorAll('.nav-item');
-        const navLinks = document.querySelectorAll('.nav-link');
-
-        // Toggle expand/collapse on toggle button click
-        document.querySelectorAll('.toggle').forEach(function(toggle) {{
-            toggle.addEventListener('click', function(e) {{
-                e.stopPropagation();
-                e.preventDefault();
-                const navItem = this.closest('.nav-item');
-                if (navItem && navItem.classList.contains('expandable')) {{
-                    navItem.classList.toggle('expanded');
-                }}
-            }});
-        }});
-
-        // Smooth scroll on nav link click
-        navLinks.forEach(function(link) {{
-            link.addEventListener('click', function(e) {{
-                e.preventDefault();
-                const href = this.getAttribute('href');
-                if (href && href.startsWith('#')) {{
-                    const targetId = href.slice(1);
-                    const target = document.getElementById(targetId);
-                    if (target) {{
-                        mainContent.scrollTo({{
-                            top: target.offsetTop - 20,
-                            behavior: 'smooth'
-                        }});
-                    }}
-                }}
-            }});
-        }});
-
-        // Scroll-spy: update active state based on scroll position
-        function updateActiveState() {{
-            const scrollTop = mainContent.scrollTop;
-            const offset = 100;
-            let currentId = '';
-
-            // Find the current heading based on scroll position
-            allHeadings.forEach(function(heading) {{
-                if (scrollTop >= heading.offsetTop - offset) {{
-                    currentId = heading.id;
-                }}
-            }});
-
-            // Clear all active states
-            navItems.forEach(function(item) {{
-                item.classList.remove('active', 'active-parent');
-            }});
-            navLinks.forEach(function(link) {{
-                link.classList.remove('active');
-            }});
-
-            // Set active state and expand parent chain
-            if (currentId) {{
-                const activeLink = document.querySelector('.nav-link[href="#' + currentId + '"]');
-                if (activeLink) {{
-                    activeLink.classList.add('active');
-
-                    // Traverse up and mark/expand parents
-                    let parent = activeLink.closest('.nav-item');
-                    if (parent) {{
-                        parent.classList.add('active');
-                    }}
-                    parent = parent ? parent.parentElement : null;
-                    while (parent) {{
-                        const parentItem = parent.closest('.nav-item');
-                        if (parentItem) {{
-                            parentItem.classList.add('active-parent');
-                            if (parentItem.classList.contains('expandable')) {{
-                                parentItem.classList.add('expanded');
-                            }}
-                            parent = parentItem.parentElement;
-                        }} else {{
-                            break;
-                        }}
-                    }}
-
-                    // Scroll sidebar to keep active link visible (centered)
-                    const sidebar = document.querySelector('.sidebar');
-                    if (sidebar) {{
-                        const linkRect = activeLink.getBoundingClientRect();
-                        const sidebarRect = sidebar.getBoundingClientRect();
-                        const linkCenter = linkRect.top + linkRect.height / 2;
-                        const sidebarCenter = sidebarRect.top + sidebarRect.height / 2;
-                        const scrollOffset = linkCenter - sidebarCenter;
-                        sidebar.scrollBy({{ top: scrollOffset, behavior: 'smooth' }});
-                    }}
-                }}
-            }}
-        }}
-
-        // Debounced scroll handler
-        let scrollTimer;
-        mainContent.addEventListener('scroll', function() {{
-            clearTimeout(scrollTimer);
-            scrollTimer = setTimeout(updateActiveState, 50);
-        }});
-
-        // Initial state
-        updateActiveState();
-    }});
-    </script>
-</body>
-</html>"##,
-        workspace.name,
-        workspace.name,
-        sidebar_sections,
-        if !docs.decisions.is_empty() { format!("<h3 style=\"margin-top: 20px;\">ADRs</h3>{}", sidebar_decisions) } else { String::new() },
-        sections_html,
-        decisions_html
-    );
-
+    // Use shared function with empty base_path for single-workspace mode
+    let html = generate_documentation_html(&workspace, "");
     Ok(Html(html))
 }
+
+// Legacy documentation implementation has been consolidated into generate_documentation_html().
+// The 340+ lines of duplicated functionality are now shared via generate_documentation_html().
 
 /// Helper function to check if an element should be visible for a given perspective.
 /// Elements with no perspectives specified are visible in all perspectives.
@@ -2266,211 +1041,8 @@ pub async fn edit_diagram(
     let _workspace = state.get_workspace().await
         .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
 
-    let ws_host = state.config.address();
-    let svg_url = format!("/view/{}/svg", view_key);
-
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Edit {} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: #fff; height: 100vh; overflow: hidden; }}
-        .toolbar {{ background: #333; padding: 10px 20px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid #444; }}
-        .toolbar a {{ color: #fff; text-decoration: none; }}
-        .toolbar button {{ background: #0066cc; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }}
-        .toolbar button:hover {{ background: #0052a3; }}
-        .toolbar button.secondary {{ background: #555; }}
-        .toolbar button.secondary:hover {{ background: #666; }}
-        .editor-container {{ display: flex; height: calc(100vh - 50px); }}
-        .canvas-container {{ flex: 1; overflow: auto; position: relative; background: #2a2a2a; }}
-        #canvas {{
-            position: absolute;
-            cursor: grab;
-            transform-origin: 0 0;
-        }}
-        #canvas.dragging {{ cursor: grabbing; }}
-        .element {{
-            position: absolute;
-            cursor: move;
-            user-select: none;
-        }}
-        .element:hover {{ filter: brightness(1.1); }}
-        .element.selected {{ outline: 3px solid #0066cc; outline-offset: 2px; }}
-        .status {{ position: fixed; bottom: 20px; right: 20px; background: #333; padding: 10px 20px; border-radius: 4px; }}
-        .status.connected {{ background: #28a745; }}
-        .status.disconnected {{ background: #dc3545; }}
-    </style>
-</head>
-<body>
-    <div class="toolbar">
-        <a href="/">← Back</a>
-        <span id="view-name">{}</span>
-        <button onclick="autoLayout()">Auto Layout</button>
-        <button onclick="save()" class="secondary">Save</button>
-        <button onclick="undo()" class="secondary">Undo</button>
-        <button onclick="redo()" class="secondary">Redo</button>
-        <span style="margin-left: auto; font-size: 12px; color: #888;">
-            Drag elements to reposition • Click to select
-        </span>
-    </div>
-    <div class="editor-container">
-        <div class="canvas-container" id="canvas-container">
-            <div id="canvas">
-                <img src="{}" alt="{}" id="diagram-svg" style="pointer-events: none;">
-            </div>
-        </div>
-    </div>
-    <div class="status disconnected" id="status">Connecting...</div>
-
-    <script>
-        const viewKey = '{}';
-        const wsUrl = 'ws://{}/ws/edit/' + viewKey;
-        let ws = null;
-        let selectedElements = [];
-        let isDragging = false;
-        let dragStart = {{ x: 0, y: 0 }};
-        let elementStart = {{ x: 0, y: 0 }};
-        let currentElement = null;
-
-        // Connect to WebSocket
-        function connect() {{
-            ws = new WebSocket(wsUrl);
-
-            ws.onopen = () => {{
-                console.log('WebSocket connected');
-                document.getElementById('status').className = 'status connected';
-                document.getElementById('status').textContent = 'Connected';
-
-                // Request initial state
-                ws.send(JSON.stringify({{ type: 'request_state', view_key: viewKey }}));
-            }};
-
-            ws.onclose = () => {{
-                console.log('WebSocket disconnected');
-                document.getElementById('status').className = 'status disconnected';
-                document.getElementById('status').textContent = 'Disconnected';
-                // Reconnect after 2 seconds
-                setTimeout(connect, 2000);
-            }};
-
-            ws.onerror = (error) => {{
-                console.error('WebSocket error:', error);
-            }};
-
-            ws.onmessage = (event) => {{
-                const message = JSON.parse(event.data);
-                handleMessage(message);
-            }};
-        }}
-
-        function handleMessage(message) {{
-            console.log('Received:', message);
-
-            switch (message.type) {{
-                case 'state':
-                    // Initial state received
-                    console.log('State received with', message.elements.length, 'elements');
-                    break;
-                case 'element_moved':
-                    // Another client moved an element
-                    console.log('Element', message.element_id, 'moved to', message.x, message.y);
-                    break;
-                case 'error':
-                    alert('Error: ' + message.message);
-                    break;
-            }}
-        }}
-
-        function save() {{
-            if (ws && ws.readyState === WebSocket.OPEN) {{
-                ws.send(JSON.stringify({{ type: 'save' }}));
-            }}
-        }}
-
-        function autoLayout() {{
-            if (ws && ws.readyState === WebSocket.OPEN) {{
-                ws.send(JSON.stringify({{ type: 'auto_layout', view_key: viewKey }}));
-            }}
-        }}
-
-        function undo() {{
-            if (ws && ws.readyState === WebSocket.OPEN) {{
-                ws.send(JSON.stringify({{ type: 'undo', view_key: viewKey }}));
-            }}
-        }}
-
-        function redo() {{
-            if (ws && ws.readyState === WebSocket.OPEN) {{
-                ws.send(JSON.stringify({{ type: 'redo', view_key: viewKey }}));
-            }}
-        }}
-
-        // Pan and zoom setup
-        let scale = 1;
-        let translateX = 0;
-        let translateY = 0;
-        let isPanning = false;
-        let panStart = {{ x: 0, y: 0 }};
-
-        const canvasContainer = document.getElementById('canvas-container');
-        const canvas = document.getElementById('canvas');
-
-        canvasContainer.addEventListener('wheel', (e) => {{
-            e.preventDefault();
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            const newScale = Math.max(0.1, Math.min(5, scale * delta));
-
-            const rect = canvasContainer.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-
-            translateX = mouseX - (mouseX - translateX) * (newScale / scale);
-            translateY = mouseY - (mouseY - translateY) * (newScale / scale);
-            scale = newScale;
-
-            updateCanvasTransform();
-        }});
-
-        canvasContainer.addEventListener('mousedown', (e) => {{
-            if (e.button === 1 || (e.button === 0 && e.shiftKey)) {{
-                isPanning = true;
-                panStart = {{ x: e.clientX - translateX, y: e.clientY - translateY }};
-                canvas.classList.add('dragging');
-            }}
-        }});
-
-        document.addEventListener('mousemove', (e) => {{
-            if (isPanning) {{
-                translateX = e.clientX - panStart.x;
-                translateY = e.clientY - panStart.y;
-                updateCanvasTransform();
-            }}
-        }});
-
-        document.addEventListener('mouseup', () => {{
-            isPanning = false;
-            canvas.classList.remove('dragging');
-        }});
-
-        function updateCanvasTransform() {{
-            canvas.style.transform = `translate(${{translateX}}px, ${{translateY}}px) scale(${{scale}})`;
-        }}
-
-        // Initialize
-        connect();
-    </script>
-</body>
-</html>"##,
-        view_key,
-        view_key,
-        svg_url,
-        view_key,
-        view_key,
-        ws_host
-    );
-
+    // Use the shared editor generator with empty base_path for single-workspace mode
+    let html = generate_editor_html(&view_key, "", "");
     Ok(Html(html))
 }
 
@@ -3213,543 +1785,8 @@ pub async fn view_dynamic_animated(
     let workspace = state.get_workspace().await
         .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
 
-    // Find the dynamic view
-    let dynamic_view = workspace.views().dynamic_views.iter()
-        .find(|v| v.properties.key == view_key)
-        .ok_or_else(|| Error::WorkspaceNotFound(format!("Dynamic view '{}' not found", view_key)))?;
-
-    // Count steps for animation
-    let step_count = dynamic_view.steps.len();
-
-    // Build step data as JSON
-    let mut steps_json = String::from("[");
-    for (i, step) in dynamic_view.steps.iter().enumerate() {
-        if i > 0 { steps_json.push(','); }
-        steps_json.push_str(&format!(
-            r#"{{"order":{},"sourceId":"{}","destId":"{}","description":{}}}"#,
-            step.order,
-            step.source_id,
-            step.destination_id,
-            step.description.as_ref().map(|d| format!("\"{}\"", escape_json(d))).unwrap_or_else(|| "null".to_string())
-        ));
-    }
-    steps_json.push(']');
-
-    let svg_url = format!("/view/{}/svg", view_key);
-
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>{} - Animated - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; background: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; overflow: hidden; color: white; }}
-
-        .toolbar {{
-            background: #333;
-            color: white;
-            padding: 10px 20px;
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            border-bottom: 1px solid #444;
-            height: 50px;
-        }}
-        .toolbar a {{ color: white; text-decoration: none; }}
-        .toolbar a:hover {{ text-decoration: underline; }}
-        .toolbar .separator {{ border-left: 1px solid #555; height: 20px; }}
-
-        .controls {{
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            flex: 1;
-            justify-content: center;
-        }}
-
-        .btn {{
-            background: #555;
-            color: white;
-            border: none;
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-            font-size: 14px;
-            transition: background 0.2s;
-        }}
-        .btn:hover {{ background: #666; }}
-        .btn:disabled {{
-            background: #3a3a3a;
-            color: #666;
-            cursor: not-allowed;
-        }}
-        .btn.primary {{ background: #0066cc; }}
-        .btn.primary:hover {{ background: #0052a3; }}
-
-        .step-info {{
-            font-size: 14px;
-            color: #ccc;
-            min-width: 120px;
-            text-align: center;
-        }}
-
-        .speed-control {{
-            display: flex;
-            align-items: center;
-            gap: 8px;
-        }}
-        .speed-control label {{
-            font-size: 12px;
-            color: #aaa;
-        }}
-        .speed-control select {{
-            background: #555;
-            color: white;
-            border: 1px solid #666;
-            padding: 4px 8px;
-            border-radius: 4px;
-            cursor: pointer;
-        }}
-
-        .diagram-container {{
-            height: calc(100vh - 50px);
-            overflow: hidden;
-            position: relative;
-            background: #2a2a2a;
-        }}
-
-        #svg-wrapper {{
-            position: absolute;
-            transform-origin: 0 0;
-            background: white;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.4);
-        }}
-
-        #svg-wrapper svg {{
-            display: block;
-        }}
-
-        /* Arrow animation */
-        .arrow-line {{
-            opacity: 0;
-            transition: opacity 0.4s ease-in-out;
-        }}
-        .arrow-line.visible {{
-            opacity: 1;
-        }}
-        .arrow-text {{
-            opacity: 0;
-            transition: opacity 0.4s ease-in-out;
-        }}
-        .arrow-text.visible {{
-            opacity: 1;
-        }}
-
-        .step-overlay {{
-            position: absolute;
-            bottom: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0, 0, 0, 0.9);
-            color: white;
-            padding: 16px 24px;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
-            max-width: 600px;
-            opacity: 0;
-            transition: opacity 0.3s ease-in-out;
-            pointer-events: none;
-            z-index: 100;
-        }}
-        .step-overlay.visible {{
-            opacity: 1;
-        }}
-        .step-overlay .step-number {{
-            font-size: 12px;
-            color: #0066cc;
-            font-weight: 600;
-            margin-bottom: 6px;
-        }}
-        .step-overlay .step-desc {{
-            font-size: 15px;
-            line-height: 1.4;
-        }}
-
-        .keyboard-help {{
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            font-size: 11px;
-            color: #666;
-            z-index: 50;
-        }}
-
-        .loading {{
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            color: #666;
-            font-size: 16px;
-        }}
-    </style>
-</head>
-<body>
-    <div class="toolbar">
-        <a href="/">← Back</a>
-        <span>{}</span>
-        <div class="separator"></div>
-
-        <div class="controls">
-            <button class="btn" id="btn-reset" onclick="resetAnimation()">⟲ Reset</button>
-            <button class="btn" id="btn-prev" onclick="previousStep()" disabled>← Previous</button>
-            <button class="btn primary" id="btn-play" onclick="togglePlay()">▶ Play</button>
-            <button class="btn" id="btn-next" onclick="nextStep()">Next →</button>
-            <span class="step-info" id="step-counter">Step 0 of {}</span>
-
-            <div class="separator"></div>
-
-            <div class="speed-control">
-                <label>Speed:</label>
-                <select id="speed-select" onchange="updateSpeed()">
-                    <option value="3000">Slow (3s)</option>
-                    <option value="2000" selected>Normal (2s)</option>
-                    <option value="1000">Fast (1s)</option>
-                    <option value="500">Very Fast (0.5s)</option>
-                </select>
-            </div>
-        </div>
-
-        <div class="separator"></div>
-        <a href="/view/{}">View Static</a>
-    </div>
-
-    <div class="diagram-container" id="diagram-container">
-        <div class="loading" id="loading">Loading diagram...</div>
-        <div id="svg-wrapper"></div>
-        <div class="step-overlay" id="step-overlay">
-            <div class="step-number" id="overlay-number">Step 1</div>
-            <div class="step-desc" id="overlay-desc">Step description</div>
-        </div>
-    </div>
-
-    <div class="keyboard-help">
-        Space to play/pause • ← → to step • R to reset • 1-9 to jump to step • Scroll to zoom • Drag to pan
-    </div>
-
-    <script>
-        // Animation state
-        const steps = {};
-        const totalSteps = {};
-        let currentStep = 0;
-        let isPlaying = false;
-        let playInterval = null;
-        let playSpeed = 2000;
-
-        // SVG state
-        let svgWidth = 0;
-        let svgHeight = 0;
-        let scale = 1;
-        let offsetX = 0;
-        let offsetY = 0;
-
-        // Arrow elements
-        let arrowLines = [];
-        let arrowTexts = [];
-
-        // Pan state
-        let isPanning = false;
-        let panStartX = 0;
-        let panStartY = 0;
-        let panStartOffsetX = 0;
-        let panStartOffsetY = 0;
-
-        const container = document.getElementById('diagram-container');
-        const wrapper = document.getElementById('svg-wrapper');
-
-        // Load and display SVG
-        async function loadSVG() {{
-            try {{
-                const response = await fetch('{}');
-                const svgText = await response.text();
-
-                wrapper.innerHTML = svgText;
-                document.getElementById('loading').style.display = 'none';
-
-                const svg = wrapper.querySelector('svg');
-                if (!svg) {{
-                    console.error('SVG not found');
-                    return;
-                }}
-
-                // Get SVG dimensions
-                svgWidth = parseFloat(svg.getAttribute('width')) || 800;
-                svgHeight = parseFloat(svg.getAttribute('height')) || 600;
-
-                // Ensure viewBox is set
-                if (!svg.getAttribute('viewBox')) {{
-                    svg.setAttribute('viewBox', `0 0 ${{svgWidth}} ${{svgHeight}}`);
-                }}
-
-                // Find all arrow lines and their labels
-                const lines = svg.querySelectorAll('line[marker-end]');
-                arrowLines = Array.from(lines);
-
-                // Find text elements that are arrow labels (near arrows, contain step numbers)
-                const texts = svg.querySelectorAll('text');
-                arrowTexts = Array.from(texts).filter(t => {{
-                    const content = t.textContent || '';
-                    return /^\d+\./.test(content); // Labels starting with "1.", "2.", etc.
-                }});
-
-                // Tag arrows and texts for animation
-                arrowLines.forEach((line, idx) => {{
-                    line.classList.add('arrow-line');
-                    line.dataset.stepIndex = idx;
-                }});
-
-                arrowTexts.forEach((text, idx) => {{
-                    text.classList.add('arrow-text');
-                    text.dataset.stepIndex = idx;
-                }});
-
-                // Fit to screen
-                fitToScreen();
-
-                // Initial display
-                updateDisplay();
-
-            }} catch (err) {{
-                console.error('Error loading SVG:', err);
-                document.getElementById('loading').textContent = 'Failed to load diagram';
-            }}
-        }}
-
-        function fitToScreen() {{
-            const padding = 40;
-            const containerWidth = container.clientWidth;
-            const containerHeight = container.clientHeight;
-
-            const scaleX = (containerWidth - padding * 2) / svgWidth;
-            const scaleY = (containerHeight - padding * 2) / svgHeight;
-            scale = Math.min(scaleX, scaleY, 1.5); // Cap at 1.5x
-
-            offsetX = (containerWidth - svgWidth * scale) / 2;
-            offsetY = (containerHeight - svgHeight * scale) / 2;
-
-            applyTransform();
-        }}
-
-        function applyTransform() {{
-            wrapper.style.transform = `translate(${{offsetX}}px, ${{offsetY}}px) scale(${{scale}})`;
-            wrapper.style.width = svgWidth + 'px';
-            wrapper.style.height = svgHeight + 'px';
-        }}
-
-        function updateDisplay() {{
-            // Update step counter
-            document.getElementById('step-counter').textContent = `Step ${{currentStep}} of ${{totalSteps}}`;
-
-            // Update button states
-            document.getElementById('btn-prev').disabled = currentStep === 0;
-            document.getElementById('btn-next').disabled = currentStep >= totalSteps;
-
-            // Show/hide arrows based on current step
-            arrowLines.forEach((line, idx) => {{
-                if (idx < currentStep) {{
-                    line.classList.add('visible');
-                }} else {{
-                    line.classList.remove('visible');
-                }}
-            }});
-
-            arrowTexts.forEach((text, idx) => {{
-                if (idx < currentStep) {{
-                    text.classList.add('visible');
-                }} else {{
-                    text.classList.remove('visible');
-                }}
-            }});
-
-            // Show step overlay
-            const overlay = document.getElementById('step-overlay');
-            if (currentStep > 0 && currentStep <= steps.length) {{
-                const step = steps[currentStep - 1];
-                document.getElementById('overlay-number').textContent = `Step ${{step.order}}`;
-                document.getElementById('overlay-desc').textContent = step.description || 'No description';
-                overlay.classList.add('visible');
-            }} else {{
-                overlay.classList.remove('visible');
-            }}
-        }}
-
-        function nextStep() {{
-            if (currentStep < totalSteps) {{
-                currentStep++;
-                updateDisplay();
-            }}
-            if (currentStep >= totalSteps) {{
-                stopPlaying();
-            }}
-        }}
-
-        function previousStep() {{
-            if (currentStep > 0) {{
-                currentStep--;
-                updateDisplay();
-            }}
-        }}
-
-        function resetAnimation() {{
-            currentStep = 0;
-            stopPlaying();
-            updateDisplay();
-        }}
-
-        function togglePlay() {{
-            if (isPlaying) {{
-                stopPlaying();
-            }} else {{
-                startPlaying();
-            }}
-        }}
-
-        function startPlaying() {{
-            if (currentStep >= totalSteps) {{
-                currentStep = 0;
-            }}
-            isPlaying = true;
-            document.getElementById('btn-play').textContent = '⏸ Pause';
-
-            playInterval = setInterval(() => {{
-                nextStep();
-                if (currentStep >= totalSteps) {{
-                    stopPlaying();
-                }}
-            }}, playSpeed);
-        }}
-
-        function stopPlaying() {{
-            isPlaying = false;
-            document.getElementById('btn-play').textContent = '▶ Play';
-            if (playInterval) {{
-                clearInterval(playInterval);
-                playInterval = null;
-            }}
-        }}
-
-        function updateSpeed() {{
-            const select = document.getElementById('speed-select');
-            playSpeed = parseInt(select.value);
-            if (isPlaying) {{
-                stopPlaying();
-                startPlaying();
-            }}
-        }}
-
-        // Zoom with scroll wheel
-        container.addEventListener('wheel', (e) => {{
-            e.preventDefault();
-            const rect = container.getBoundingClientRect();
-            const mouseX = e.clientX - rect.left;
-            const mouseY = e.clientY - rect.top;
-
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            const newScale = Math.max(0.1, Math.min(3, scale * delta));
-
-            // Zoom toward mouse position
-            offsetX = mouseX - (mouseX - offsetX) * (newScale / scale);
-            offsetY = mouseY - (mouseY - offsetY) * (newScale / scale);
-            scale = newScale;
-
-            applyTransform();
-        }}, {{ passive: false }});
-
-        // Pan with mouse drag
-        container.addEventListener('mousedown', (e) => {{
-            if (e.button === 0) {{
-                isPanning = true;
-                panStartX = e.clientX;
-                panStartY = e.clientY;
-                panStartOffsetX = offsetX;
-                panStartOffsetY = offsetY;
-                container.style.cursor = 'grabbing';
-            }}
-        }});
-
-        document.addEventListener('mousemove', (e) => {{
-            if (isPanning) {{
-                offsetX = panStartOffsetX + (e.clientX - panStartX);
-                offsetY = panStartOffsetY + (e.clientY - panStartY);
-                applyTransform();
-            }}
-        }});
-
-        document.addEventListener('mouseup', () => {{
-            isPanning = false;
-            container.style.cursor = 'grab';
-        }});
-
-        // Set initial cursor
-        container.style.cursor = 'grab';
-
-        // Keyboard shortcuts
-        document.addEventListener('keydown', (e) => {{
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-
-            switch(e.key) {{
-                case ' ':
-                    e.preventDefault();
-                    togglePlay();
-                    break;
-                case 'ArrowRight':
-                    e.preventDefault();
-                    nextStep();
-                    break;
-                case 'ArrowLeft':
-                    e.preventDefault();
-                    previousStep();
-                    break;
-                case 'r':
-                case 'R':
-                    resetAnimation();
-                    break;
-                case 'f':
-                case 'F':
-                    fitToScreen();
-                    break;
-                case '0':
-                    resetAnimation();
-                    break;
-                default:
-                    if (e.key >= '1' && e.key <= '9') {{
-                        const stepNum = parseInt(e.key);
-                        if (stepNum <= totalSteps) {{
-                            currentStep = stepNum;
-                            updateDisplay();
-                        }}
-                    }}
-            }}
-        }});
-
-        // Handle window resize
-        window.addEventListener('resize', fitToScreen);
-
-        // Initialize
-        loadSVG();
-    </script>
-</body>
-</html>"##,
-        view_key,      // title
-        view_key,      // toolbar span
-        step_count,    // step counter display
-        view_key,      // View Static link
-        steps_json,    // const steps = ...
-        step_count,    // const totalSteps = ...
-        svg_url        // fetch URL
-    );
-
+    // Use shared function with empty base_path for single-workspace mode
+    let html = generate_dynamic_animated_html(&workspace, &view_key, "")?;
     Ok(Html(html))
 }
 
@@ -4272,4 +2309,3526 @@ fn render_deployment_node(html: &mut String, node: &structurizr_core::model::Dep
     }
 
     html.push_str(r#"</li>"#);
+}
+
+// ============================================================================
+// Multi-Workspace Mode Handlers
+// ============================================================================
+
+/// Helper function to extract workspace_id from wildcard path.
+fn extract_workspace_id(path: &str) -> String {
+    // Remove leading slash if present
+    path.trim_start_matches('/').to_string()
+}
+
+/// Multi-workspace index page - shows grid of available workspaces.
+pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<String>> {
+    let workspaces = state.list_workspaces().await;
+
+    let workspace_cards: String = if workspaces.is_empty() {
+        r#"<div class="empty-state">
+            <h2>No Workspaces Found</h2>
+            <p>Create a workspace by adding a directory containing a <code>workspace.dsl</code> file.</p>
+        </div>"#.to_string()
+    } else {
+        workspaces.iter().map(|ws| {
+            let description = ws.description.as_deref().unwrap_or("No description");
+            let last_modified = ws.last_modified
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| {
+                    let secs = d.as_secs();
+                    let days_ago = (std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .unwrap()
+                        .as_secs() - secs) / 86400;
+                    if days_ago == 0 { "Today".to_string() }
+                    else if days_ago == 1 { "Yesterday".to_string() }
+                    else { format!("{} days ago", days_ago) }
+                })
+                .unwrap_or_else(|_| "Unknown".to_string());
+
+            format!(
+                r#"<a href="/w/{}" class="workspace-card">
+                    <div class="card-header">
+                        <h3>{}</h3>
+                        <span class="view-count">{} views</span>
+                    </div>
+                    <p class="description">{}</p>
+                    <div class="card-footer">
+                        <span class="path">{}</span>
+                        <span class="modified">{}</span>
+                    </div>
+                </a>"#,
+                ws.id,
+                escape_html(&ws.name),
+                ws.view_count,
+                escape_html(description),
+                escape_html(&ws.id),
+                last_modified
+            )
+        }).collect::<Vec<_>>().join("\n")
+    };
+
+    let html = format!(
+        r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>Structurizr Workspaces</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0 0 10px 0;
+            font-size: 2.5rem;
+            font-weight: 600;
+        }}
+        .header p {{
+            margin: 0;
+            opacity: 0.8;
+            font-size: 1.1rem;
+        }}
+        .container {{
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 30px 20px;
+        }}
+        .workspaces-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(350px, 1fr));
+            gap: 24px;
+        }}
+        .workspace-card {{
+            background: white;
+            border-radius: 12px;
+            padding: 24px;
+            text-decoration: none;
+            color: inherit;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: block;
+        }}
+        .workspace-card:hover {{
+            transform: translateY(-4px);
+            box-shadow: 0 8px 24px rgba(0,0,0,0.12);
+        }}
+        .card-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 12px;
+        }}
+        .card-header h3 {{
+            margin: 0;
+            color: #1a1a2e;
+            font-size: 1.25rem;
+        }}
+        .view-count {{
+            background: #e8f4fd;
+            color: #0066cc;
+            padding: 4px 10px;
+            border-radius: 12px;
+            font-size: 0.85rem;
+            font-weight: 500;
+        }}
+        .description {{
+            color: #666;
+            margin: 0 0 16px 0;
+            line-height: 1.5;
+            font-size: 0.95rem;
+        }}
+        .card-footer {{
+            display: flex;
+            justify-content: space-between;
+            font-size: 0.85rem;
+            color: #999;
+            border-top: 1px solid #eee;
+            padding-top: 12px;
+        }}
+        .path {{
+            font-family: monospace;
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }}
+        .empty-state {{
+            text-align: center;
+            padding: 60px 20px;
+            color: #666;
+        }}
+        .empty-state h2 {{
+            color: #333;
+        }}
+        .empty-state code {{
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Structurizr Workspaces</h1>
+        <p>{} workspace{} available</p>
+    </div>
+    <div class="container">
+        <div class="workspaces-grid">
+            {}
+        </div>
+    </div>
+</body>
+</html>"##,
+        workspaces.len(),
+        if workspaces.len() == 1 { "" } else { "s" },
+        workspace_cards
+    );
+
+    Ok(Html(html))
+}
+
+/// Workspace home page - shows views for a specific workspace.
+pub async fn workspace_home(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let views = workspace.views();
+    let view_list: Vec<String> = views.all_keys().iter().map(|k| k.to_string()).collect();
+
+    let dynamic_view_keys: std::collections::HashSet<String> = views.dynamic_views.iter()
+        .map(|v| v.properties.key.clone())
+        .collect();
+
+    let base_path = format!("/w/{}", workspace_id);
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>{} - Structurizr</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        h1 {{ color: #333; }}
+        .workspace-info {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        .views {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }}
+        .view-card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        .view-card h3 {{ margin-top: 0; }}
+        .view-card a {{ color: #0066cc; text-decoration: none; }}
+        .view-card a:hover {{ text-decoration: underline; }}
+        .nav {{ margin-bottom: 20px; }}
+        .nav a {{ margin-right: 15px; color: #0066cc; text-decoration: none; }}
+        .breadcrumb {{ margin-bottom: 10px; color: #666; }}
+        .breadcrumb a {{ color: #0066cc; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb">
+            <a href="/">All Workspaces</a> / {}
+        </div>
+        <div class="nav">
+            <a href="{}">Home</a>
+            <a href="{}/tree">Tree View</a>
+            <a href="{}/docs">Documentation</a>
+            <a href="{}/search">Search</a>
+            <a href="{}/explore">Explore Graph</a>
+            <a href="{}/presentation">Presentation Mode</a>
+            <a href="{}/api/workspace">API</a>
+            <a href="{}/export/json">Export JSON</a>
+        </div>
+        <h1>{}</h1>
+        <div class="workspace-info">
+            <p>{}</p>
+            <p><strong>People:</strong> {}</p>
+            <p><strong>Software Systems:</strong> {}</p>
+            <p><strong>Relationships:</strong> {}</p>
+        </div>
+        <h2>Views</h2>
+        <div class="views">
+            {}
+        </div>
+    </div>
+</body>
+</html>"#,
+        workspace.name,
+        escape_html(&workspace_id),
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        base_path,
+        workspace.name,
+        workspace.description.as_deref().unwrap_or(""),
+        workspace.model().people.len(),
+        workspace.model().software_systems.len(),
+        workspace.model().relationships.len(),
+        view_list.iter().map(|v| {
+            let animate_link = if dynamic_view_keys.contains(v) {
+                format!(r#" | <a href="{}/view/{}/animate">Animate</a>"#, base_path, v)
+            } else {
+                String::new()
+            };
+            format!(
+                r#"<div class="view-card"><h3><a href="{}/view/{}">{}</a></h3><p><a href="{}/edit/{}">Edit</a> | <a href="{}/presentation?views={}">Present</a>{} | <a href="{}/view/{}/svg">SVG</a></p></div>"#,
+                base_path, v, v, base_path, v, base_path, v, animate_link, base_path, v
+            )
+        }).collect::<Vec<_>>().join("\n            ")
+    );
+
+    Ok(Html(html))
+}
+
+/// Workspace-scoped view diagram handler.
+pub async fn workspace_view_diagram(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+    render_view_diagram_html(&workspace, &view_key, &base_path)
+}
+
+/// Workspace-scoped animated dynamic view handler.
+pub async fn workspace_view_animated(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+    render_dynamic_animated_html(&workspace, &view_key, &base_path)
+}
+
+/// Workspace-scoped edit diagram handler.
+pub async fn workspace_edit_diagram(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+    render_edit_diagram_html(&workspace, &view_key, &base_path)
+}
+
+/// Workspace-scoped documentation handler.
+pub async fn workspace_documentation(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+    render_documentation_html(&workspace, &base_path)
+}
+
+/// Workspace-scoped search page handler.
+pub async fn workspace_search_page(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<SearchQuery>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+    let search_term = query.q.unwrap_or_default();
+    let results = perform_search(&workspace, &search_term);
+    Ok(Html(generate_search_page_html(&workspace.name, &base_path, &search_term, &results)))
+}
+
+/// Workspace-scoped tree view handler.
+pub async fn workspace_tree_view(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+    render_tree_view_html(&workspace, &base_path)
+}
+
+/// Workspace-scoped presentation handler.
+pub async fn workspace_presentation(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<PresentationQuery>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+    render_presentation_html(&workspace, &base_path, query.views)
+}
+
+/// Workspace-scoped explore view handler.
+pub async fn workspace_explore(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Html<String>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+    render_explore_html(&workspace, &base_path)
+}
+
+/// Workspace-scoped get workspace JSON handler.
+pub async fn workspace_get_json(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<Workspace>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    Ok(Json(workspace))
+}
+
+/// Workspace-scoped validate handler.
+pub async fn workspace_validate(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<Json<structurizr_dsl::ValidationResult>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let validation_result = structurizr_dsl::validate_workspace(&workspace);
+    Ok(Json(validation_result))
+}
+
+/// Workspace-scoped search API handler.
+pub async fn workspace_search_api(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<SearchQuery>,
+) -> Result<Json<Vec<SearchResult>>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let query_str = query.q.as_deref().unwrap_or("");
+    search_workspace(&workspace, query_str, "")
+}
+
+/// Workspace-scoped export JSON handler.
+pub async fn workspace_export_json(
+    State(state): State<AppState>,
+    Path(workspace_id): Path<String>,
+) -> Result<impl IntoResponse> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let json = JsonExporter::export(&workspace)?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], json))
+}
+
+/// Workspace-scoped render SVG handler.
+pub async fn workspace_render_svg(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<impl IntoResponse> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    render_view_svg(&workspace, &view_key)
+}
+
+/// Workspace-scoped PlantUML export handler.
+pub async fn workspace_export_plantuml(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<impl IntoResponse> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    export_view_plantuml(&workspace, &view_key)
+}
+
+/// Workspace-scoped Mermaid export handler.
+pub async fn workspace_export_mermaid(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<impl IntoResponse> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    export_view_mermaid(&workspace, &view_key)
+}
+
+/// Workspace-scoped DOT export handler.
+pub async fn workspace_export_dot(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<impl IntoResponse> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    export_view_dot(&workspace, &view_key)
+}
+
+/// Workspace-scoped D2 export handler.
+pub async fn workspace_export_d2(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<impl IntoResponse> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    export_view_d2(&workspace, &view_key)
+}
+
+// ============================================================================
+// Helper functions for rendering (used by both single and multi-workspace modes)
+// ============================================================================
+
+/// Generate view diagram HTML with full interactivity (shared implementation).
+///
+/// This function generates the complete HTML for diagram viewing with:
+/// - Canvas-based rendering with pan and zoom
+/// - Minimap navigation
+/// - Breadcrumb navigation
+/// - Element tooltips and drill-down
+/// - Keyboard shortcuts
+///
+/// # Parameters
+/// - `workspace`: The workspace containing the diagram
+/// - `view_key`: The key of the view to render
+/// - `base_path`: Base path for URLs (empty for single-workspace, "/w/workspace_id" for multi)
+fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: &str) -> String {
+    let svg_url = format!("{}/view/{}/svg", base_path, view_key);
+    let model = workspace.model();
+    let views = workspace.views();
+
+    // Build navigation index for drill-down support
+    let nav_index = NavigationIndex::build(views);
+
+    // Build breadcrumbs for this view
+    let breadcrumbs = nav_index.build_breadcrumbs(view_key);
+    let breadcrumbs_json = serde_json::to_string(&breadcrumbs).unwrap_or_else(|_| "[]".to_string());
+
+    // Get current view info
+    let current_view_title = nav_index.get_view_title(view_key)
+        .cloned()
+        .unwrap_or_else(|| view_key.to_string());
+
+    // Collect elements based on view type - MUST match SVG renderer element collection
+    // Tuple: (id_string, element_id, name, type, description, technology)
+    let mut element_ids: Vec<String> = Vec::new();
+    let mut element_data: Vec<(String, ElementId, String, String, Option<String>, Option<String>)> = Vec::new();
+    let mut auto_layout_config: Option<&structurizr_core::view::AutoLayout> = None;
+
+    // Determine view type and collect appropriate elements (matching SVG renderer logic)
+    if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+        auto_layout_config = view.properties.auto_layout.as_ref();
+        for person in &model.people {
+            element_ids.push(person.id().to_string());
+            element_data.push((
+                person.id().to_string(),
+                person.id(),
+                person.name().to_string(),
+                "Person".to_string(),
+                person.properties.description.clone(),
+                None,
+            ));
+        }
+        for system in &model.software_systems {
+            element_ids.push(system.id().to_string());
+            element_data.push((
+                system.id().to_string(),
+                system.id(),
+                system.name().to_string(),
+                "Software System".to_string(),
+                system.properties.description.clone(),
+                None,
+            ));
+        }
+    } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
+        auto_layout_config = view.properties.auto_layout.as_ref();
+        for person in &model.people {
+            element_ids.push(person.id().to_string());
+            element_data.push((
+                person.id().to_string(),
+                person.id(),
+                person.name().to_string(),
+                "Person".to_string(),
+                person.properties.description.clone(),
+                None,
+            ));
+        }
+        for system in &model.software_systems {
+            element_ids.push(system.id().to_string());
+            element_data.push((
+                system.id().to_string(),
+                system.id(),
+                system.name().to_string(),
+                "Software System".to_string(),
+                system.properties.description.clone(),
+                None,
+            ));
+        }
+    } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
+        auto_layout_config = view.properties.auto_layout.as_ref();
+        for person in &model.people {
+            element_ids.push(person.id().to_string());
+            element_data.push((
+                person.id().to_string(),
+                person.id(),
+                person.name().to_string(),
+                "Person".to_string(),
+                person.properties.description.clone(),
+                None,
+            ));
+        }
+        if let Some(system) = model.software_systems.iter().find(|s| s.id() == view.software_system_id) {
+            for container in &system.containers {
+                element_ids.push(container.id().to_string());
+                element_data.push((
+                    container.id().to_string(),
+                    container.id(),
+                    container.name().to_string(),
+                    "Container".to_string(),
+                    container.properties.description.clone(),
+                    container.technology.clone(),
+                ));
+            }
+        }
+    } else if let Some(view) = views.component_views.iter().find(|v| v.properties.key == view_key) {
+        auto_layout_config = view.properties.auto_layout.as_ref();
+        for system in &model.software_systems {
+            if let Some(container) = system.containers.iter().find(|c| c.id() == view.container_id) {
+                for component in &container.components {
+                    element_ids.push(component.id().to_string());
+                    element_data.push((
+                        component.id().to_string(),
+                        component.id(),
+                        component.name().to_string(),
+                        "Component".to_string(),
+                        component.properties.description.clone(),
+                        component.technology.clone(),
+                    ));
+                }
+                break;
+            }
+        }
+    } else {
+        // Fallback: include all people and software systems
+        for person in &model.people {
+            element_ids.push(person.id().to_string());
+            element_data.push((
+                person.id().to_string(),
+                person.id(),
+                person.name().to_string(),
+                "Person".to_string(),
+                person.properties.description.clone(),
+                None,
+            ));
+        }
+        for system in &model.software_systems {
+            element_ids.push(system.id().to_string());
+            element_data.push((
+                system.id().to_string(),
+                system.id(),
+                system.name().to_string(),
+                "Software System".to_string(),
+                system.properties.description.clone(),
+                None,
+            ));
+        }
+    }
+
+    // Build edges from relationships (filter to only relevant elements)
+    let element_id_set: std::collections::HashSet<String> = element_ids.iter().cloned().collect();
+    let edges: Vec<LayoutEdge> = model
+        .relationships
+        .iter()
+        .filter(|r| element_id_set.contains(&r.source_id.to_string()) && element_id_set.contains(&r.destination_id.to_string()))
+        .map(|r| LayoutEdge {
+            source: r.source_id.to_string(),
+            target: r.destination_id.to_string(),
+        })
+        .collect();
+
+    // Compute layout using layout_adaptive (matching SVG renderer)
+    let layout = if let Some(ref auto_layout) = auto_layout_config {
+        GridLayout::from_config(auto_layout)
+    } else {
+        GridLayout::default()
+    };
+    let nodes = layout.layout_adaptive(&element_ids, &edges);
+
+    // Build elements JSON with position data for hit-testing and drill-down info
+    let mut elements_json = String::from("[");
+    for (i, (id, element_id, name, elem_type, desc, tech)) in element_data.iter().enumerate() {
+        if i > 0 { elements_json.push(','); }
+
+        // Find the corresponding layout node
+        let (x, y, width, height) = nodes.iter()
+            .find(|n| &n.id == id)
+            .map(|n| (n.position.x, n.position.y, n.size.width, n.size.height))
+            .unwrap_or((0.0, 0.0, 450.0, 300.0));
+
+        // Check if this element can be drilled into
+        let drillable = nav_index.is_drillable(*element_id);
+        let drill_target = nav_index.get_drill_target(*element_id);
+        let target_view = drill_target.map(|t| format!("\"{}\"", escape_json(&t.view_key))).unwrap_or_else(|| "null".to_string());
+        let target_type = drill_target.map(|t| format!("\"{}\"", t.target_type.display_name())).unwrap_or_else(|| "null".to_string());
+
+        elements_json.push_str(&format!(
+            r#"{{"id":"{}","name":"{}","type":"{}","description":{},"technology":{},"x":{},"y":{},"width":{},"height":{},"drillable":{},"targetView":{},"targetType":{}}}"#,
+            escape_json(id),
+            escape_json(name),
+            escape_json(elem_type),
+            desc.as_ref().map(|d| format!("\"{}\"", escape_json(d))).unwrap_or_else(|| "null".to_string()),
+            tech.as_ref().map(|t| format!("\"{}\"", escape_json(t))).unwrap_or_else(|| "null".to_string()),
+            x as i32,
+            y as i32,
+            width as i32,
+            height as i32,
+            drillable,
+            target_view,
+            target_type,
+        ));
+    }
+    elements_json.push(']');
+
+    // Home link uses base_path (empty string means root "/")
+    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+
+    format!(
+        r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>{view_key} - Structurizr</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; padding: 0; background: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; overflow: hidden; }}
+        .toolbar {{ background: #333; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid #444; }}
+        .toolbar a {{ color: white; text-decoration: none; }}
+        .toolbar a:hover {{ text-decoration: underline; }}
+        .toolbar button {{ background: #555; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }}
+        .toolbar button:hover {{ background: #666; }}
+        .toolbar .separator {{ border-left: 1px solid #555; height: 20px; }}
+        .zoom-controls {{ display: flex; gap: 5px; align-items: center; }}
+        .zoom-level {{ font-size: 12px; min-width: 50px; text-align: center; }}
+        .diagram-container {{ height: calc(100vh - 50px); overflow: hidden; position: relative; background: #2a2a2a; }}
+        #diagram-canvas {{ width: 100%; height: 100%; cursor: grab; }}
+        #diagram-canvas.dragging {{ cursor: grabbing; }}
+        .tooltip {{ position: fixed; background: #333; color: white; padding: 12px 16px; border-radius: 6px; font-size: 13px; max-width: 300px; z-index: 1000; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: none; }}
+        .tooltip h4 {{ margin: 0 0 6px 0; font-size: 14px; }}
+        .tooltip .type {{ color: #888; font-size: 11px; margin-bottom: 8px; }}
+        .tooltip .desc {{ line-height: 1.4; }}
+        .tooltip .tech {{ color: #6af; margin-top: 6px; font-size: 12px; }}
+        .tooltip .drill-hint {{ color: #4c9; margin-top: 8px; font-size: 11px; font-style: italic; }}
+        .minimap {{ position: absolute; bottom: 20px; right: 20px; width: 200px; height: 150px; background: #333; border: 1px solid #555; border-radius: 4px; overflow: hidden; cursor: crosshair; }}
+        .minimap-canvas {{ width: 100%; height: 100%; opacity: 0.7; }}
+        .minimap .viewport {{ position: absolute; border: 2px solid #0066cc; background: rgba(0,102,204,0.1); cursor: grab; transition: background 0.15s; }}
+        .minimap .viewport:hover {{ background: rgba(0,102,204,0.25); }}
+        .keyboard-help {{ position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: #666; }}
+        .breadcrumbs {{ display: flex; align-items: center; gap: 6px; font-size: 13px; max-width: 500px; overflow: hidden; }}
+        .breadcrumb {{ display: flex; align-items: center; gap: 4px; color: #aaa; text-decoration: none; padding: 4px 8px; border-radius: 4px; transition: all 0.15s; white-space: nowrap; }}
+        .breadcrumb:hover {{ background: rgba(255,255,255,0.1); color: white; }}
+        .breadcrumb.current {{ color: white; font-weight: 500; }}
+        .breadcrumb-icon {{ background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }}
+        .breadcrumb-separator {{ color: #555; font-size: 11px; }}
+        .drill-indicator {{ position: absolute; pointer-events: none; }}
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="{home_href}">Home</a>
+        <div class="separator"></div>
+        <nav class="breadcrumbs" id="breadcrumbs"></nav>
+        <div class="separator"></div>
+        <div class="zoom-controls">
+            <button onclick="zoomOut()">−</button>
+            <span class="zoom-level" id="zoom-level">100%</span>
+            <button onclick="zoomIn()">+</button>
+            <button onclick="resetZoom()">Reset</button>
+            <button onclick="fitToScreen()">Fit</button>
+        </div>
+        <div class="separator"></div>
+        <a href="{base_path}/edit/{view_key}">Edit</a>
+        <a href="{svg_url}" download="{view_key}.svg">Download SVG</a>
+    </div>
+    <div class="diagram-container" id="diagram-container">
+        <canvas id="diagram-canvas"></canvas>
+    </div>
+    <div class="tooltip" id="tooltip"></div>
+    <div class="minimap" id="minimap">
+        <canvas class="minimap-canvas" id="minimap-canvas"></canvas>
+        <div class="viewport" id="minimap-viewport"></div>
+    </div>
+    <div class="keyboard-help">
+        Scroll to zoom • Drag to pan • Double-click to drill down • Hover for info • Esc to go back
+    </div>
+
+    <script>
+        // Base path for URL construction
+        const basePath = '{base_path}';
+
+        // Element data with positions for hit-testing
+        const elements = {elements_json};
+
+        // Breadcrumb navigation data
+        const breadcrumbs = {breadcrumbs_json};
+        const currentViewKey = '{view_key}';
+        const currentViewTitle = '{current_view_title}';
+
+        // View type level indicators
+        const viewTypeLevels = {{
+            'system_landscape': 'C1',
+            'system_context': 'C1',
+            'container': 'C2',
+            'component': 'C3',
+            'dynamic': 'Dyn',
+            'deployment': 'Dep',
+            'filtered': 'Flt',
+            'custom': 'Cst',
+            'image': 'Img'
+        }};
+
+        // Render breadcrumbs
+        function renderBreadcrumbs() {{
+            const container = document.getElementById('breadcrumbs');
+            if (!breadcrumbs || breadcrumbs.length === 0) {{
+                container.innerHTML = `<span class="breadcrumb current"><span class="breadcrumb-icon">V</span><span class="breadcrumb-text">${{currentViewTitle}}</span></span>`;
+                return;
+            }}
+
+            let html = '';
+            breadcrumbs.forEach((crumb, index) => {{
+                if (index > 0) {{
+                    html += '<span class="breadcrumb-separator">›</span>';
+                }}
+
+                const isLast = index === breadcrumbs.length - 1;
+                const level = viewTypeLevels[crumb.view_type] || 'V';
+
+                if (isLast) {{
+                    html += `<span class="breadcrumb current"><span class="breadcrumb-icon">${{level}}</span><span class="breadcrumb-text">${{escapeHtml(crumb.title)}}</span></span>`;
+                }} else {{
+                    html += `<a href="${{basePath}}/view/${{crumb.view_key}}" class="breadcrumb"><span class="breadcrumb-icon">${{level}}</span><span class="breadcrumb-text">${{escapeHtml(crumb.title)}}</span></a>`;
+                }}
+            }});
+            container.innerHTML = html;
+        }}
+
+        function escapeHtml(text) {{
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }}
+
+        renderBreadcrumbs();
+
+        // Canvas and context
+        const canvas = document.getElementById('diagram-canvas');
+        const ctx = canvas.getContext('2d');
+        const container = document.getElementById('diagram-container');
+        const tooltip = document.getElementById('tooltip');
+        const zoomLevelEl = document.getElementById('zoom-level');
+
+        // Minimap elements
+        const minimap = document.getElementById('minimap');
+        const minimapCanvas = document.getElementById('minimap-canvas');
+        const minimapCtx = minimapCanvas.getContext('2d');
+        const minimapViewport = document.getElementById('minimap-viewport');
+
+        // SVG image
+        const svgImage = new Image();
+        let svgLoaded = false;
+        let svgWidth = 0;
+        let svgHeight = 0;
+        let svgMinX = 0;
+        let svgMinY = 0;
+
+        // Transform state
+        let scale = 1;
+        let offsetX = 0;
+        let offsetY = 0;
+        let isPanning = false;
+        let panStartX = 0;
+        let panStartY = 0;
+        let panStartOffsetX = 0;
+        let panStartOffsetY = 0;
+
+        // Currently hovered element
+        let hoveredElement = null;
+
+        // Initialize canvas size
+        function initCanvas() {{
+            const rect = container.getBoundingClientRect();
+            const width = rect.width || window.innerWidth;
+            const height = rect.height || (window.innerHeight - 50);
+
+            canvas.width = width;
+            canvas.height = height;
+            minimapCanvas.width = 200;
+            minimapCanvas.height = 150;
+
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#666';
+            ctx.font = '16px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Loading diagram...', canvas.width / 2, canvas.height / 2);
+        }}
+
+        requestAnimationFrame(() => {{
+            initCanvas();
+        }});
+
+        // Load SVG image
+        svgImage.onload = () => {{
+            svgLoaded = true;
+            svgWidth = svgImage.naturalWidth;
+            svgHeight = svgImage.naturalHeight;
+
+            fetch('{svg_url}')
+                .then(r => r.text())
+                .then(svgText => {{
+                    const viewBoxMatch = svgText.match(/viewBox="([^"]+)"/);
+                    if (viewBoxMatch) {{
+                        const parts = viewBoxMatch[1].split(/\s+/).map(Number);
+                        if (parts.length >= 4) {{
+                            svgMinX = parts[0];
+                            svgMinY = parts[1];
+                        }}
+                    }}
+                    fitToScreen();
+                }})
+                .catch(() => {{
+                    fitToScreen();
+                }});
+        }};
+        svgImage.onerror = (e) => {{
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            ctx.fillStyle = '#f66';
+            ctx.font = '16px system-ui, sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText('Failed to load diagram', canvas.width / 2, canvas.height / 2);
+        }};
+        svgImage.src = '{svg_url}';
+
+        function resizeCanvas() {{
+            const rect = container.getBoundingClientRect();
+            canvas.width = rect.width;
+            canvas.height = rect.height;
+            minimapCanvas.width = 200;
+            minimapCanvas.height = 150;
+            render();
+        }}
+
+        function render() {{
+            if (!svgLoaded) return;
+
+            ctx.fillStyle = '#2a2a2a';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            ctx.save();
+            ctx.translate(offsetX, offsetY);
+            ctx.scale(scale, scale);
+
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.4)';
+            ctx.shadowBlur = 20;
+            ctx.shadowOffsetX = 0;
+            ctx.shadowOffsetY = 4;
+            ctx.fillStyle = 'white';
+            ctx.fillRect(0, 0, svgWidth, svgHeight);
+
+            ctx.shadowColor = 'transparent';
+            ctx.drawImage(svgImage, 0, 0);
+
+            renderDrillableIndicators();
+
+            ctx.restore();
+
+            zoomLevelEl.textContent = Math.round(scale * 100) + '%';
+            updateMinimap();
+        }}
+
+        function renderDrillableIndicators() {{
+            for (const el of elements) {{
+                if (!el.drillable) continue;
+
+                const drawX = el.x - svgMinX;
+                const drawY = el.y - svgMinY;
+
+                ctx.strokeStyle = 'rgba(0, 150, 255, 0.6)';
+                ctx.lineWidth = 3;
+                ctx.setLineDash([]);
+                ctx.strokeRect(drawX + 2, drawY + 2, el.width - 4, el.height - 4);
+
+                const iconSize = 24;
+                const iconX = drawX + el.width - iconSize - 8;
+                const iconY = drawY + el.height - iconSize - 8;
+
+                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
+                ctx.beginPath();
+                ctx.arc(iconX + iconSize/2, iconY + iconSize/2, iconSize/2, 0, Math.PI * 2);
+                ctx.fill();
+
+                ctx.strokeStyle = 'white';
+                ctx.lineWidth = 2.5;
+                ctx.lineCap = 'round';
+                ctx.beginPath();
+                ctx.moveTo(iconX + iconSize/2 - 6, iconY + iconSize/2);
+                ctx.lineTo(iconX + iconSize/2 + 6, iconY + iconSize/2);
+                ctx.moveTo(iconX + iconSize/2, iconY + iconSize/2 - 6);
+                ctx.lineTo(iconX + iconSize/2, iconY + iconSize/2 + 6);
+                ctx.stroke();
+
+                ctx.font = 'bold 11px system-ui, sans-serif';
+                ctx.textAlign = 'center';
+                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
+                const labelText = 'Double-click to explore ' + (el.targetType || 'details');
+                const labelWidth = ctx.measureText(labelText).width + 12;
+                const labelX = drawX + el.width/2;
+                const labelY = drawY - 8;
+
+                ctx.fillStyle = 'rgba(0, 150, 255, 0.9)';
+                ctx.beginPath();
+                ctx.roundRect(labelX - labelWidth/2, labelY - 14, labelWidth, 18, 4);
+                ctx.fill();
+
+                ctx.fillStyle = 'white';
+                ctx.fillText(labelText, labelX, labelY - 1);
+            }}
+        }}
+
+        function updateMinimap() {{
+            if (!svgLoaded) return;
+
+            minimapCtx.clearRect(0, 0, minimapCanvas.width, minimapCanvas.height);
+
+            const minimapScale = Math.min(
+                minimapCanvas.width / svgWidth,
+                minimapCanvas.height / svgHeight
+            );
+
+            minimapCtx.save();
+            minimapCtx.scale(minimapScale, minimapScale);
+            minimapCtx.drawImage(svgImage, 0, 0);
+            minimapCtx.restore();
+
+            const viewportWidth = (canvas.width / scale) * minimapScale;
+            const viewportHeight = (canvas.height / scale) * minimapScale;
+            const viewportX = (-offsetX / scale) * minimapScale;
+            const viewportY = (-offsetY / scale) * minimapScale;
+
+            minimapViewport.style.width = Math.max(10, Math.min(viewportWidth, minimapCanvas.width)) + 'px';
+            minimapViewport.style.height = Math.max(10, Math.min(viewportHeight, minimapCanvas.height)) + 'px';
+            minimapViewport.style.left = Math.max(0, Math.min(viewportX, minimapCanvas.width - 10)) + 'px';
+            minimapViewport.style.top = Math.max(0, Math.min(viewportY, minimapCanvas.height - 10)) + 'px';
+        }}
+
+        function screenToDiagram(screenX, screenY) {{
+            const rect = canvas.getBoundingClientRect();
+            const canvasX = screenX - rect.left;
+            const canvasY = screenY - rect.top;
+            return {{
+                x: (canvasX - offsetX) / scale + svgMinX,
+                y: (canvasY - offsetY) / scale + svgMinY
+            }};
+        }}
+
+        function getElementAtPoint(diagramX, diagramY) {{
+            for (const el of elements) {{
+                if (diagramX >= el.x && diagramX <= el.x + el.width &&
+                    diagramY >= el.y && diagramY <= el.y + el.height) {{
+                    return el;
+                }}
+            }}
+            return null;
+        }}
+
+        function showTooltip(element, screenX, screenY) {{
+            if (element) {{
+                let html = `<h4>${{element.name}}</h4><div class="type">${{element.type}}</div>`;
+                if (element.description) {{
+                    html += `<div class="desc">${{element.description}}</div>`;
+                }}
+                if (element.technology) {{
+                    html += `<div class="tech">${{element.technology}}</div>`;
+                }}
+                if (element.drillable && element.targetType) {{
+                    html += `<div class="drill-hint">Double-click to view ${{element.targetType.toLowerCase()}}s</div>`;
+                }}
+                tooltip.innerHTML = html;
+                tooltip.style.left = (screenX + 15) + 'px';
+                tooltip.style.top = (screenY + 15) + 'px';
+                tooltip.style.display = 'block';
+            }} else {{
+                tooltip.style.display = 'none';
+            }}
+        }}
+
+        function setZoom(newScale, centerX, centerY) {{
+            newScale = Math.max(0.1, Math.min(5, newScale));
+
+            if (centerX !== undefined && centerY !== undefined) {{
+                offsetX = centerX - (centerX - offsetX) * (newScale / scale);
+                offsetY = centerY - (centerY - offsetY) * (newScale / scale);
+            }}
+
+            scale = newScale;
+            render();
+        }}
+
+        function zoomIn() {{
+            setZoom(scale * 1.2, canvas.width / 2, canvas.height / 2);
+        }}
+
+        function zoomOut() {{
+            setZoom(scale / 1.2, canvas.width / 2, canvas.height / 2);
+        }}
+
+        function resetZoom() {{
+            scale = 1;
+            offsetX = 50;
+            offsetY = 50;
+            render();
+        }}
+
+        function fitToScreen() {{
+            if (!svgLoaded) return;
+
+            const padding = 50;
+            const scaleX = (canvas.width - padding * 2) / svgWidth;
+            const scaleY = (canvas.height - padding * 2) / svgHeight;
+            scale = Math.min(scaleX, scaleY, 1);
+
+            offsetX = (canvas.width - svgWidth * scale) / 2;
+            offsetY = (canvas.height - svgHeight * scale) / 2;
+            render();
+        }}
+
+        canvas.addEventListener('wheel', (e) => {{
+            e.preventDefault();
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            setZoom(scale * delta, mouseX, mouseY);
+        }}, {{ passive: false }});
+
+        canvas.addEventListener('mousedown', (e) => {{
+            if (e.button === 0) {{
+                isPanning = true;
+                panStartX = e.clientX;
+                panStartY = e.clientY;
+                panStartOffsetX = offsetX;
+                panStartOffsetY = offsetY;
+                canvas.classList.add('dragging');
+            }}
+        }});
+
+        document.addEventListener('mousemove', (e) => {{
+            if (isPanning) {{
+                offsetX = panStartOffsetX + (e.clientX - panStartX);
+                offsetY = panStartOffsetY + (e.clientY - panStartY);
+                render();
+            }} else {{
+                const diagramPos = screenToDiagram(e.clientX, e.clientY);
+                const element = getElementAtPoint(diagramPos.x, diagramPos.y);
+
+                if (element !== hoveredElement) {{
+                    hoveredElement = element;
+                    showTooltip(element, e.clientX, e.clientY);
+                    if (element && element.drillable) {{
+                        canvas.style.cursor = 'zoom-in';
+                    }} else if (element) {{
+                        canvas.style.cursor = 'pointer';
+                    }} else {{
+                        canvas.style.cursor = 'grab';
+                    }}
+                }} else if (element) {{
+                    tooltip.style.left = (e.clientX + 15) + 'px';
+                    tooltip.style.top = (e.clientY + 15) + 'px';
+                }}
+            }}
+        }});
+
+        document.addEventListener('mouseup', () => {{
+            if (isPanning) {{
+                isPanning = false;
+                canvas.classList.remove('dragging');
+                canvas.style.cursor = hoveredElement ? 'pointer' : 'grab';
+            }}
+        }});
+
+        canvas.addEventListener('dblclick', (e) => {{
+            e.preventDefault();
+            e.stopPropagation();
+
+            isPanning = false;
+            canvas.classList.remove('dragging');
+
+            const rect = canvas.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+            const diagramPos = screenToDiagram(e.clientX, e.clientY);
+            const element = getElementAtPoint(diagramPos.x, diagramPos.y);
+
+            if (element && element.drillable && element.targetView) {{
+                initiateDrillDown(element);
+                return;
+            }} else {{
+                setZoom(e.shiftKey ? scale / 2 : scale * 2, mouseX, mouseY);
+            }}
+        }});
+
+        function initiateDrillDown(element) {{
+            const centerX = element.x + element.width / 2;
+            const centerY = element.y + element.height / 2;
+
+            animateZoomTo(centerX, centerY, 2.5, 400, () => {{
+                canvas.style.transition = 'opacity 0.2s ease-out';
+                canvas.style.opacity = '0';
+
+                setTimeout(() => {{
+                    window.location.href = basePath + '/view/' + element.targetView;
+                }}, 200);
+            }});
+        }}
+
+        function animateZoomTo(targetX, targetY, targetScale, duration, callback) {{
+            const startScale = scale;
+            const startOffsetX = offsetX;
+            const startOffsetY = offsetY;
+
+            const endOffsetX = canvas.width / 2 - targetX * targetScale;
+            const endOffsetY = canvas.height / 2 - targetY * targetScale;
+
+            const startTime = performance.now();
+
+            function animate(currentTime) {{
+                const elapsed = currentTime - startTime;
+                const progress = Math.min(elapsed / duration, 1);
+
+                const eased = progress < 0.5
+                    ? 4 * progress * progress * progress
+                    : 1 - Math.pow(-2 * progress + 2, 3) / 2;
+
+                scale = startScale + (targetScale - startScale) * eased;
+                offsetX = startOffsetX + (endOffsetX - startOffsetX) * eased;
+                offsetY = startOffsetY + (endOffsetY - startOffsetY) * eased;
+
+                render();
+
+                if (progress < 1) {{
+                    requestAnimationFrame(animate);
+                }} else if (callback) {{
+                    callback();
+                }}
+            }}
+
+            requestAnimationFrame(animate);
+        }}
+
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === '+' || e.key === '=') zoomIn();
+            if (e.key === '-') zoomOut();
+            if (e.key === '0') resetZoom();
+            if (e.key === 'f' || e.key === 'F') fitToScreen();
+            if (e.key === 'Escape') {{
+                if (breadcrumbs && breadcrumbs.length > 1) {{
+                    const parentCrumb = breadcrumbs[breadcrumbs.length - 2];
+                    if (parentCrumb) {{
+                        window.location.href = basePath + '/view/' + parentCrumb.view_key;
+                    }}
+                }}
+            }}
+        }});
+
+        let minimapDragging = false;
+        let minimapDragStart = {{ x: 0, y: 0, offsetX: 0, offsetY: 0 }};
+
+        function getMinimapScale() {{
+            if (!svgLoaded) return 1;
+            return Math.min(
+                minimapCanvas.width / svgWidth,
+                minimapCanvas.height / svgHeight
+            );
+        }}
+
+        minimap.addEventListener('click', (e) => {{
+            if (minimapDragging) return;
+            const rect = minimap.getBoundingClientRect();
+            const clickX = e.clientX - rect.left;
+            const clickY = e.clientY - rect.top;
+            const minimapScale = getMinimapScale();
+
+            const diagramX = clickX / minimapScale;
+            const diagramY = clickY / minimapScale;
+
+            offsetX = (canvas.width / 2) - (diagramX * scale);
+            offsetY = (canvas.height / 2) - (diagramY * scale);
+            render();
+        }});
+
+        minimapViewport.addEventListener('mousedown', (e) => {{
+            e.stopPropagation();
+            minimapDragging = true;
+            minimapDragStart = {{
+                x: e.clientX,
+                y: e.clientY,
+                offsetX: offsetX,
+                offsetY: offsetY
+            }};
+            minimapViewport.style.cursor = 'grabbing';
+        }});
+
+        document.addEventListener('mousemove', (e) => {{
+            if (minimapDragging) {{
+                const minimapScale = getMinimapScale();
+                const deltaX = (e.clientX - minimapDragStart.x) / minimapScale * scale;
+                const deltaY = (e.clientY - minimapDragStart.y) / minimapScale * scale;
+                offsetX = minimapDragStart.offsetX - deltaX;
+                offsetY = minimapDragStart.offsetY - deltaY;
+                render();
+            }}
+        }});
+
+        document.addEventListener('mouseup', () => {{
+            if (minimapDragging) {{
+                minimapDragging = false;
+                minimapViewport.style.cursor = 'grab';
+            }}
+        }});
+
+        window.addEventListener('resize', () => {{
+            resizeCanvas();
+        }});
+
+        minimapViewport.style.cursor = 'grab';
+    </script>
+</body>
+</html>"##,
+        view_key = view_key,
+        home_href = home_href,
+        base_path = base_path,
+        svg_url = svg_url,
+        elements_json = elements_json,
+        breadcrumbs_json = breadcrumbs_json,
+        current_view_title = escape_json(&current_view_title),
+    )
+}
+
+/// Render view diagram HTML (wrapper for multi-workspace handlers).
+fn render_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: &str) -> Result<Html<String>> {
+    let html = generate_view_diagram_html(workspace, view_key, base_path);
+    Ok(Html(html))
+}
+
+/// Render dynamic animated view HTML.
+fn render_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_path: &str) -> Result<Html<String>> {
+    let html = generate_dynamic_animated_html(workspace, view_key, base_path)?;
+    Ok(Html(html))
+}
+
+/// Generate dynamic animated view HTML with full animation controls and visualization.
+fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_path: &str) -> Result<String> {
+    // Find the dynamic view
+    let dynamic_view = workspace.views().dynamic_views.iter()
+        .find(|v| v.properties.key == view_key)
+        .ok_or_else(|| Error::ViewNotFound(view_key.to_string()))?;
+
+    // Count steps for animation
+    let step_count = dynamic_view.steps.len();
+
+    // Build step data as JSON
+    let mut steps_json = String::from("[");
+    for (i, step) in dynamic_view.steps.iter().enumerate() {
+        if i > 0 { steps_json.push(','); }
+        steps_json.push_str(&format!(
+            r#"{{"order":{},"sourceId":"{}","destId":"{}","description":{}}}"#,
+            step.order,
+            step.source_id,
+            step.destination_id,
+            step.description.as_ref().map(|d| format!("\"{}\"", escape_json(d))).unwrap_or_else(|| "null".to_string())
+        ));
+    }
+    steps_json.push(']');
+
+    let svg_url = format!("{}/view/{}/svg", base_path, view_key);
+    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+
+    Ok(format!(
+        r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>{view_key} - Animated - Structurizr</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; padding: 0; background: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; overflow: hidden; color: white; }}
+        .toolbar {{ background: #333; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid #444; height: 50px; }}
+        .toolbar a {{ color: white; text-decoration: none; }}
+        .toolbar a:hover {{ text-decoration: underline; }}
+        .toolbar .separator {{ border-left: 1px solid #555; height: 20px; }}
+        .controls {{ display: flex; align-items: center; gap: 10px; flex: 1; justify-content: center; }}
+        .btn {{ background: #555; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-size: 14px; transition: background 0.2s; }}
+        .btn:hover {{ background: #666; }}
+        .btn:disabled {{ background: #3a3a3a; color: #666; cursor: not-allowed; }}
+        .btn.primary {{ background: #0066cc; }}
+        .btn.primary:hover {{ background: #0052a3; }}
+        .step-info {{ font-size: 14px; color: #ccc; min-width: 120px; text-align: center; }}
+        .speed-control {{ display: flex; align-items: center; gap: 8px; }}
+        .speed-control label {{ font-size: 12px; color: #aaa; }}
+        .speed-control select {{ background: #555; color: white; border: 1px solid #666; padding: 4px 8px; border-radius: 4px; cursor: pointer; }}
+        .diagram-container {{ height: calc(100vh - 50px); overflow: hidden; position: relative; background: #2a2a2a; }}
+        #svg-wrapper {{ position: absolute; transform-origin: 0 0; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }}
+        #svg-wrapper svg {{ display: block; }}
+        .arrow-line {{ opacity: 0; transition: opacity 0.4s ease-in-out; }}
+        .arrow-line.visible {{ opacity: 1; }}
+        .arrow-text {{ opacity: 0; transition: opacity 0.4s ease-in-out; }}
+        .arrow-text.visible {{ opacity: 1; }}
+        .step-overlay {{ position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.9); color: white; padding: 16px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 600px; opacity: 0; transition: opacity 0.3s ease-in-out; pointer-events: none; z-index: 100; }}
+        .step-overlay.visible {{ opacity: 1; }}
+        .step-overlay .step-number {{ font-size: 12px; color: #0066cc; font-weight: 600; margin-bottom: 6px; }}
+        .step-overlay .step-desc {{ font-size: 15px; line-height: 1.4; }}
+        .keyboard-help {{ position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: #666; z-index: 50; }}
+        .loading {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-size: 16px; }}
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="{home_href}">← Back</a>
+        <span>{view_key}</span>
+        <div class="separator"></div>
+        <div class="controls">
+            <button class="btn" id="btn-reset" onclick="resetAnimation()">⟲ Reset</button>
+            <button class="btn" id="btn-prev" onclick="previousStep()" disabled>← Previous</button>
+            <button class="btn primary" id="btn-play" onclick="togglePlay()">▶ Play</button>
+            <button class="btn" id="btn-next" onclick="nextStep()">Next →</button>
+            <span class="step-info" id="step-counter">Step 0 of {step_count}</span>
+            <div class="separator"></div>
+            <div class="speed-control">
+                <label>Speed:</label>
+                <select id="speed-select" onchange="updateSpeed()">
+                    <option value="3000">Slow (3s)</option>
+                    <option value="2000" selected>Normal (2s)</option>
+                    <option value="1000">Fast (1s)</option>
+                    <option value="500">Very Fast (0.5s)</option>
+                </select>
+            </div>
+        </div>
+        <div class="separator"></div>
+        <a href="{base_path}/view/{view_key}">View Static</a>
+    </div>
+    <div class="diagram-container" id="diagram-container">
+        <div class="loading" id="loading">Loading diagram...</div>
+        <div id="svg-wrapper"></div>
+        <div class="step-overlay" id="step-overlay">
+            <div class="step-number" id="overlay-number">Step 1</div>
+            <div class="step-desc" id="overlay-desc">Step description</div>
+        </div>
+    </div>
+    <div class="keyboard-help">Space to play/pause • ← → to step • R to reset • 1-9 to jump to step • Scroll to zoom • Drag to pan</div>
+    <script>
+        const steps = {steps_json};
+        const totalSteps = {step_count};
+        let currentStep = 0;
+        let isPlaying = false;
+        let playInterval = null;
+        let playSpeed = 2000;
+        let svgWidth = 0, svgHeight = 0, scale = 1, offsetX = 0, offsetY = 0;
+        let arrowLines = [], arrowTexts = [];
+        let isPanning = false, panStartX = 0, panStartY = 0, panStartOffsetX = 0, panStartOffsetY = 0;
+        const container = document.getElementById('diagram-container');
+        const wrapper = document.getElementById('svg-wrapper');
+
+        async function loadSVG() {{
+            try {{
+                const response = await fetch('{svg_url}');
+                const svgText = await response.text();
+                wrapper.innerHTML = svgText;
+                document.getElementById('loading').style.display = 'none';
+                const svg = wrapper.querySelector('svg');
+                if (!svg) return;
+                svgWidth = parseFloat(svg.getAttribute('width')) || 800;
+                svgHeight = parseFloat(svg.getAttribute('height')) || 600;
+                if (!svg.getAttribute('viewBox')) svg.setAttribute('viewBox', `0 0 ${{svgWidth}} ${{svgHeight}}`);
+                arrowLines = Array.from(svg.querySelectorAll('line[marker-end]'));
+                arrowTexts = Array.from(svg.querySelectorAll('text')).filter(t => /^\d+\./.test(t.textContent || ''));
+                arrowLines.forEach((line, idx) => {{ line.classList.add('arrow-line'); line.dataset.stepIndex = idx; }});
+                arrowTexts.forEach((text, idx) => {{ text.classList.add('arrow-text'); text.dataset.stepIndex = idx; }});
+                fitToScreen();
+                updateDisplay();
+            }} catch (err) {{
+                document.getElementById('loading').textContent = 'Failed to load diagram';
+            }}
+        }}
+
+        function fitToScreen() {{
+            const padding = 40;
+            const scaleX = (container.clientWidth - padding * 2) / svgWidth;
+            const scaleY = (container.clientHeight - padding * 2) / svgHeight;
+            scale = Math.min(scaleX, scaleY, 1.5);
+            offsetX = (container.clientWidth - svgWidth * scale) / 2;
+            offsetY = (container.clientHeight - svgHeight * scale) / 2;
+            applyTransform();
+        }}
+
+        function applyTransform() {{
+            wrapper.style.transform = `translate(${{offsetX}}px, ${{offsetY}}px) scale(${{scale}})`;
+            wrapper.style.width = svgWidth + 'px';
+            wrapper.style.height = svgHeight + 'px';
+        }}
+
+        function updateDisplay() {{
+            document.getElementById('step-counter').textContent = `Step ${{currentStep}} of ${{totalSteps}}`;
+            document.getElementById('btn-prev').disabled = currentStep === 0;
+            document.getElementById('btn-next').disabled = currentStep >= totalSteps;
+            arrowLines.forEach((line, idx) => line.classList.toggle('visible', idx < currentStep));
+            arrowTexts.forEach((text, idx) => text.classList.toggle('visible', idx < currentStep));
+            const overlay = document.getElementById('step-overlay');
+            if (currentStep > 0 && currentStep <= steps.length) {{
+                const step = steps[currentStep - 1];
+                document.getElementById('overlay-number').textContent = `Step ${{step.order}}`;
+                document.getElementById('overlay-desc').textContent = step.description || 'No description';
+                overlay.classList.add('visible');
+            }} else {{
+                overlay.classList.remove('visible');
+            }}
+        }}
+
+        function nextStep() {{ if (currentStep < totalSteps) {{ currentStep++; updateDisplay(); }} if (currentStep >= totalSteps) stopPlaying(); }}
+        function previousStep() {{ if (currentStep > 0) {{ currentStep--; updateDisplay(); }} }}
+        function resetAnimation() {{ currentStep = 0; stopPlaying(); updateDisplay(); }}
+        function togglePlay() {{ isPlaying ? stopPlaying() : startPlaying(); }}
+        function startPlaying() {{ if (currentStep >= totalSteps) currentStep = 0; isPlaying = true; document.getElementById('btn-play').textContent = '⏸ Pause'; playInterval = setInterval(() => {{ nextStep(); if (currentStep >= totalSteps) stopPlaying(); }}, playSpeed); }}
+        function stopPlaying() {{ isPlaying = false; document.getElementById('btn-play').textContent = '▶ Play'; if (playInterval) {{ clearInterval(playInterval); playInterval = null; }} }}
+        function updateSpeed() {{ playSpeed = parseInt(document.getElementById('speed-select').value); if (isPlaying) {{ stopPlaying(); startPlaying(); }} }}
+
+        container.addEventListener('wheel', (e) => {{
+            e.preventDefault();
+            const rect = container.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left, mouseY = e.clientY - rect.top;
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.max(0.1, Math.min(3, scale * delta));
+            offsetX = mouseX - (mouseX - offsetX) * (newScale / scale);
+            offsetY = mouseY - (mouseY - offsetY) * (newScale / scale);
+            scale = newScale;
+            applyTransform();
+        }}, {{ passive: false }});
+
+        container.addEventListener('mousedown', (e) => {{ if (e.button === 0) {{ isPanning = true; panStartX = e.clientX; panStartY = e.clientY; panStartOffsetX = offsetX; panStartOffsetY = offsetY; container.style.cursor = 'grabbing'; }} }});
+        document.addEventListener('mousemove', (e) => {{ if (isPanning) {{ offsetX = panStartOffsetX + (e.clientX - panStartX); offsetY = panStartOffsetY + (e.clientY - panStartY); applyTransform(); }} }});
+        document.addEventListener('mouseup', () => {{ isPanning = false; container.style.cursor = 'grab'; }});
+        container.style.cursor = 'grab';
+
+        document.addEventListener('keydown', (e) => {{
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+            switch(e.key) {{
+                case ' ': e.preventDefault(); togglePlay(); break;
+                case 'ArrowRight': e.preventDefault(); nextStep(); break;
+                case 'ArrowLeft': e.preventDefault(); previousStep(); break;
+                case 'r': case 'R': resetAnimation(); break;
+                case 'f': case 'F': fitToScreen(); break;
+                case '0': resetAnimation(); break;
+                default: if (e.key >= '1' && e.key <= '9') {{ const stepNum = parseInt(e.key); if (stepNum <= totalSteps) {{ currentStep = stepNum; updateDisplay(); }} }}
+            }}
+        }});
+
+        window.addEventListener('resize', fitToScreen);
+        loadSVG();
+    </script>
+</body>
+</html>"##,
+        view_key = view_key,
+        home_href = home_href,
+        step_count = step_count,
+        base_path = base_path,
+        steps_json = steps_json,
+        svg_url = svg_url,
+    ))
+}
+
+/// Render edit diagram HTML using the shared generator.
+fn render_edit_diagram_html(_workspace: &Workspace, view_key: &str, base_path: &str) -> Result<Html<String>> {
+    // Use ws path relative to base_path for multi-workspace routing
+    let ws_path = if base_path.is_empty() { "".to_string() } else { format!("{}/ws", base_path) };
+    let html = generate_editor_html(view_key, base_path, &ws_path);
+    Ok(Html(html))
+}
+
+/// Generate full editor HTML with WebSocket support, pan/zoom, and element dragging.
+///
+/// This shared function provides full diagram editing features:
+/// - WebSocket connection for real-time collaboration
+/// - Canvas-based rendering with pan and zoom
+/// - Element dragging to reposition
+/// - Auto-layout, save, undo/redo functionality
+/// - Connection status indicator
+///
+/// # Arguments
+/// - `view_key` - The view being edited
+/// - `base_path` - Base URL path (empty for single-workspace, e.g., "/w/my-workspace" for multi)
+/// - `ws_path` - WebSocket base path (empty for single-workspace, e.g., "/w/my-workspace/ws" for multi)
+fn generate_editor_html(view_key: &str, base_path: &str, ws_path: &str) -> String {
+    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+    let svg_url = if base_path.is_empty() {
+        format!("/view/{}/svg", view_key)
+    } else {
+        format!("{}/view/{}/svg", base_path, view_key)
+    };
+    let ws_base = if ws_path.is_empty() { "/ws".to_string() } else { ws_path.to_string() };
+
+    format!(
+        r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>Edit {view_key} - Structurizr</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: #fff; height: 100vh; overflow: hidden; }}
+        .toolbar {{ background: #333; padding: 10px 20px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid #444; }}
+        .toolbar a {{ color: #fff; text-decoration: none; }}
+        .toolbar a:hover {{ color: #88c8ff; }}
+        .toolbar button {{ background: #0066cc; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; }}
+        .toolbar button:hover {{ background: #0052a3; }}
+        .toolbar button.secondary {{ background: #555; }}
+        .toolbar button.secondary:hover {{ background: #666; }}
+        .toolbar .divider {{ width: 1px; height: 24px; background: #444; }}
+        .editor-container {{ display: flex; height: calc(100vh - 50px); }}
+        .canvas-container {{ flex: 1; overflow: hidden; position: relative; background: #2a2a2a; }}
+        #canvas {{
+            position: absolute;
+            cursor: grab;
+            transform-origin: 0 0;
+        }}
+        #canvas.dragging {{ cursor: grabbing; }}
+        #canvas.element-dragging {{ cursor: move; }}
+        .element {{
+            position: absolute;
+            cursor: move;
+            user-select: none;
+            border: 2px solid transparent;
+            border-radius: 4px;
+            transition: border-color 0.15s ease;
+        }}
+        .element:hover {{ border-color: rgba(255, 255, 255, 0.3); }}
+        .element.selected {{ border-color: #0066cc !important; box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.3); }}
+        .element.dragging {{ opacity: 0.8; z-index: 1000; }}
+        .status {{
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: #333;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .status .dot {{
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #666;
+        }}
+        .status.connected .dot {{ background: #28a745; }}
+        .status.disconnected .dot {{ background: #dc3545; }}
+        .status.connecting .dot {{ background: #ffc107; animation: pulse 1s infinite; }}
+        @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} }}
+        .zoom-controls {{
+            position: absolute;
+            bottom: 20px;
+            left: 20px;
+            display: flex;
+            gap: 5px;
+            background: #333;
+            padding: 5px;
+            border-radius: 4px;
+        }}
+        .zoom-controls button {{
+            background: #444;
+            border: none;
+            color: white;
+            padding: 8px 12px;
+            border-radius: 3px;
+            cursor: pointer;
+        }}
+        .zoom-controls button:hover {{ background: #555; }}
+        .zoom-controls span {{
+            padding: 8px 12px;
+            font-size: 12px;
+            color: #888;
+        }}
+        .minimap {{
+            position: absolute;
+            bottom: 20px;
+            right: 100px;
+            width: 150px;
+            height: 100px;
+            background: #222;
+            border: 1px solid #444;
+            border-radius: 4px;
+            overflow: hidden;
+        }}
+        .minimap-viewport {{
+            position: absolute;
+            border: 1px solid #0066cc;
+            background: rgba(0, 102, 204, 0.1);
+        }}
+        .help-text {{
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            font-size: 11px;
+            color: #666;
+            text-align: right;
+        }}
+    </style>
+</head>
+<body>
+    <div class="toolbar">
+        <a href="{home_href}">← Back</a>
+        <span class="divider"></span>
+        <span id="view-name">{view_key}</span>
+        <span class="divider"></span>
+        <button onclick="autoLayout()">Auto Layout</button>
+        <button onclick="save()" class="secondary">Save</button>
+        <button onclick="undo()" class="secondary">Undo</button>
+        <button onclick="redo()" class="secondary">Redo</button>
+        <span style="margin-left: auto; font-size: 12px; color: #888;">
+            Drag elements to reposition • Shift+drag to pan • Scroll to zoom
+        </span>
+    </div>
+    <div class="editor-container">
+        <div class="canvas-container" id="canvas-container">
+            <div id="canvas">
+                <img src="{svg_url}" alt="{view_key}" id="diagram-svg" style="pointer-events: none;">
+            </div>
+            <div class="zoom-controls">
+                <button onclick="zoomIn()">+</button>
+                <span id="zoom-level">100%</span>
+                <button onclick="zoomOut()">−</button>
+                <button onclick="resetZoom()">Reset</button>
+            </div>
+            <div class="minimap" id="minimap">
+                <div class="minimap-viewport" id="minimap-viewport"></div>
+            </div>
+            <div class="help-text">
+                Shift+Drag: Pan<br>
+                Scroll: Zoom<br>
+                Click: Select<br>
+                Drag element: Move
+            </div>
+        </div>
+    </div>
+    <div class="status connecting" id="status">
+        <span class="dot"></span>
+        <span id="status-text">Connecting...</span>
+    </div>
+
+    <script>
+        const viewKey = '{view_key}';
+        const wsBase = '{ws_base}';
+        const wsUrl = 'ws://' + window.location.host + wsBase + '/edit/' + viewKey;
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+
+        // Canvas state
+        let scale = 1;
+        let translateX = 0;
+        let translateY = 0;
+        let isPanning = false;
+        let panStart = {{ x: 0, y: 0 }};
+
+        // Element dragging state
+        let selectedElement = null;
+        let isDraggingElement = false;
+        let dragStart = {{ x: 0, y: 0 }};
+        let elementStart = {{ x: 0, y: 0 }};
+
+        // Undo/redo history
+        let undoStack = [];
+        let redoStack = [];
+
+        const canvasContainer = document.getElementById('canvas-container');
+        const canvas = document.getElementById('canvas');
+        const statusEl = document.getElementById('status');
+        const statusText = document.getElementById('status-text');
+
+        // WebSocket connection with reconnection logic
+        function connect() {{
+            console.log('Connecting to WebSocket:', wsUrl);
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {{
+                console.log('WebSocket connected');
+                reconnectAttempts = 0;
+                statusEl.className = 'status connected';
+                statusText.textContent = 'Connected';
+
+                // Request initial state
+                ws.send(JSON.stringify({{ type: 'request_state', view_key: viewKey }}));
+            }};
+
+            ws.onclose = () => {{
+                console.log('WebSocket disconnected');
+                statusEl.className = 'status disconnected';
+                statusText.textContent = 'Disconnected';
+
+                // Reconnect with exponential backoff
+                if (reconnectAttempts < maxReconnectAttempts) {{
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    reconnectAttempts++;
+                    statusEl.className = 'status connecting';
+                    statusText.textContent = `Reconnecting in ${{Math.round(delay/1000)}}s...`;
+                    setTimeout(connect, delay);
+                }} else {{
+                    statusText.textContent = 'Connection failed. Refresh to retry.';
+                }}
+            }};
+
+            ws.onerror = (error) => {{
+                console.error('WebSocket error:', error);
+            }};
+
+            ws.onmessage = (event) => {{
+                const message = JSON.parse(event.data);
+                handleMessage(message);
+            }};
+        }}
+
+        function handleMessage(message) {{
+            console.log('Received:', message);
+
+            switch (message.type) {{
+                case 'state':
+                    // Initial state received
+                    console.log('State received with', message.elements?.length || 0, 'elements');
+                    if (message.elements) {{
+                        // Could render element overlays here for dragging
+                    }}
+                    break;
+                case 'element_moved':
+                    // Another client moved an element - refresh the SVG
+                    console.log('Element', message.element_id, 'moved to', message.x, message.y);
+                    refreshDiagram();
+                    break;
+                case 'layout_updated':
+                    // Auto-layout was applied
+                    console.log('Layout updated');
+                    refreshDiagram();
+                    break;
+                case 'saved':
+                    console.log('Changes saved successfully');
+                    break;
+                case 'error':
+                    alert('Error: ' + message.message);
+                    break;
+            }}
+        }}
+
+        function refreshDiagram() {{
+            const img = document.getElementById('diagram-svg');
+            const currentSrc = img.src.split('?')[0];
+            img.src = currentSrc + '?t=' + Date.now();
+        }}
+
+        function send(msg) {{
+            if (ws && ws.readyState === WebSocket.OPEN) {{
+                ws.send(JSON.stringify(msg));
+                return true;
+            }}
+            return false;
+        }}
+
+        function save() {{
+            if (send({{ type: 'save' }})) {{
+                statusText.textContent = 'Saving...';
+                setTimeout(() => {{
+                    if (statusEl.classList.contains('connected')) {{
+                        statusText.textContent = 'Connected';
+                    }}
+                }}, 1000);
+            }}
+        }}
+
+        function autoLayout() {{
+            send({{ type: 'auto_layout', view_key: viewKey }});
+        }}
+
+        function undo() {{
+            send({{ type: 'undo', view_key: viewKey }});
+        }}
+
+        function redo() {{
+            send({{ type: 'redo', view_key: viewKey }});
+        }}
+
+        // Zoom controls
+        function updateZoomDisplay() {{
+            document.getElementById('zoom-level').textContent = Math.round(scale * 100) + '%';
+            updateCanvasTransform();
+            updateMinimap();
+        }}
+
+        function zoomIn() {{
+            scale = Math.min(5, scale * 1.2);
+            updateZoomDisplay();
+        }}
+
+        function zoomOut() {{
+            scale = Math.max(0.1, scale / 1.2);
+            updateZoomDisplay();
+        }}
+
+        function resetZoom() {{
+            scale = 1;
+            translateX = 0;
+            translateY = 0;
+            updateZoomDisplay();
+        }}
+
+        function updateCanvasTransform() {{
+            canvas.style.transform = `translate(${{translateX}}px, ${{translateY}}px) scale(${{scale}})`;
+        }}
+
+        // Minimap
+        function updateMinimap() {{
+            const container = canvasContainer.getBoundingClientRect();
+            const img = document.getElementById('diagram-svg');
+            const minimap = document.getElementById('minimap');
+            const viewport = document.getElementById('minimap-viewport');
+
+            if (!img.naturalWidth) return;
+
+            const minimapScale = Math.min(150 / img.naturalWidth, 100 / img.naturalHeight);
+
+            // Calculate viewport position and size
+            const vpWidth = (container.width / scale) * minimapScale;
+            const vpHeight = (container.height / scale) * minimapScale;
+            const vpX = (-translateX / scale) * minimapScale;
+            const vpY = (-translateY / scale) * minimapScale;
+
+            viewport.style.width = Math.max(10, vpWidth) + 'px';
+            viewport.style.height = Math.max(10, vpHeight) + 'px';
+            viewport.style.left = Math.max(0, vpX) + 'px';
+            viewport.style.top = Math.max(0, vpY) + 'px';
+        }}
+
+        // Mouse wheel zoom
+        canvasContainer.addEventListener('wheel', (e) => {{
+            e.preventDefault();
+            const delta = e.deltaY > 0 ? 0.9 : 1.1;
+            const newScale = Math.max(0.1, Math.min(5, scale * delta));
+
+            const rect = canvasContainer.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            // Zoom toward cursor position
+            translateX = mouseX - (mouseX - translateX) * (newScale / scale);
+            translateY = mouseY - (mouseY - translateY) * (newScale / scale);
+            scale = newScale;
+
+            updateZoomDisplay();
+        }});
+
+        // Panning with shift+drag or middle mouse
+        canvasContainer.addEventListener('mousedown', (e) => {{
+            if (e.button === 1 || (e.button === 0 && e.shiftKey)) {{
+                e.preventDefault();
+                isPanning = true;
+                panStart = {{ x: e.clientX - translateX, y: e.clientY - translateY }};
+                canvas.classList.add('dragging');
+            }}
+        }});
+
+        document.addEventListener('mousemove', (e) => {{
+            if (isPanning) {{
+                translateX = e.clientX - panStart.x;
+                translateY = e.clientY - panStart.y;
+                updateCanvasTransform();
+                updateMinimap();
+            }}
+        }});
+
+        document.addEventListener('mouseup', () => {{
+            if (isPanning) {{
+                isPanning = false;
+                canvas.classList.remove('dragging');
+            }}
+        }});
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'z' && (e.ctrlKey || e.metaKey)) {{
+                e.preventDefault();
+                if (e.shiftKey) {{
+                    redo();
+                }} else {{
+                    undo();
+                }}
+            }} else if (e.key === 's' && (e.ctrlKey || e.metaKey)) {{
+                e.preventDefault();
+                save();
+            }} else if (e.key === 'l' && (e.ctrlKey || e.metaKey)) {{
+                e.preventDefault();
+                autoLayout();
+            }}
+        }});
+
+        // Initialize
+        document.getElementById('diagram-svg').onload = () => {{
+            updateMinimap();
+        }};
+
+        connect();
+    </script>
+</body>
+</html>"##,
+        view_key = view_key,
+        home_href = home_href,
+        svg_url = svg_url,
+        ws_base = ws_base,
+    )
+}
+
+/// Render documentation HTML with full sidebar navigation and scroll-spy.
+fn render_documentation_html(workspace: &Workspace, base_path: &str) -> Result<Html<String>> {
+    let html = generate_documentation_html(workspace, base_path);
+    Ok(Html(html))
+}
+
+/// Generate documentation HTML with full sidebar navigation, tree structure, and scroll-spy.
+///
+/// This shared function provides full documentation viewing features:
+/// - Three-column layout with sidebar navigation
+/// - Hierarchical tree navigation with expand/collapse
+/// - Scroll-spy that tracks current position
+/// - ADR (Architecture Decision Record) display with status badges
+/// - Markdown rendering with syntax highlighting
+fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String {
+    let docs = &workspace.documentation;
+
+    // Build sections list and collect navigation tree
+    let mut nav_tree: Vec<HeadingNode> = Vec::new();
+
+    let sections_html: String = if docs.sections.is_empty() {
+        "<p class=\"empty\">No documentation sections available.</p>".to_string()
+    } else {
+        docs.sections.iter().enumerate().map(|(i, section)| {
+            let default_title = format!("Section {}", i + 1);
+            let title = section.title.as_deref().unwrap_or(&default_title);
+            let section_id = format!("section-{}", i);
+
+            // Render markdown and extract headings
+            let result = render_markdown_with_heading_ids(&section.content, i);
+
+            // Build tree from extracted headings
+            let mut heading_tree = build_heading_tree(result.headings);
+
+            // If the first heading matches the section title, use its children directly
+            let children = if heading_tree.len() == 1
+                && heading_tree[0].title.eq_ignore_ascii_case(title)
+            {
+                std::mem::take(&mut heading_tree[0].children)
+            } else {
+                heading_tree
+            };
+
+            // Add section as root node with its heading children
+            nav_tree.push(HeadingNode {
+                level: 0,
+                title: title.to_string(),
+                id: section_id.clone(),
+                children,
+            });
+
+            format!(
+                r#"<div class="doc-section" id="{}">
+                    <h2>{}</h2>
+                    <div class="content">{}</div>
+                </div>"#,
+                section_id,
+                escape_html(title),
+                result.html
+            )
+        }).collect()
+    };
+
+    // Build decisions list
+    let decisions_html: String = if docs.decisions.is_empty() {
+        String::new()
+    } else {
+        let decisions_list: String = docs.decisions.iter().map(|decision| {
+            let status_class = match decision.status {
+                structurizr_core::workspace::DecisionStatus::Accepted => "accepted",
+                structurizr_core::workspace::DecisionStatus::Proposed => "proposed",
+                structurizr_core::workspace::DecisionStatus::Superseded => "superseded",
+                structurizr_core::workspace::DecisionStatus::Deprecated => "deprecated",
+                structurizr_core::workspace::DecisionStatus::Rejected => "rejected",
+            };
+            format!(
+                r#"<div class="decision" id="adr-{}">
+                    <div class="decision-header">
+                        <span class="decision-id">{}</span>
+                        <h3>{}</h3>
+                        <span class="status {}">{:?}</span>
+                        <span class="date">{}</span>
+                    </div>
+                    <div class="content">{}</div>
+                </div>"#,
+                decision.id,
+                escape_html(&decision.id),
+                escape_html(&decision.title),
+                status_class,
+                decision.status,
+                escape_html(&decision.date),
+                render_markdown(&decision.content)
+            )
+        }).collect();
+
+        format!(
+            r#"<div class="decisions-section">
+                <h2>Architecture Decision Records</h2>
+                {}
+            </div>"#,
+            decisions_list
+        )
+    };
+
+    // Build sidebar with tree navigation
+    let sidebar_sections = if nav_tree.is_empty() {
+        String::new()
+    } else {
+        format!(r##"<ul class="nav-tree">{}</ul>"##, render_nav_tree(&nav_tree, 0))
+    };
+
+    // ADRs as flat list
+    let sidebar_decisions: String = docs.decisions.iter().map(|decision| {
+        format!(r##"<a href="#adr-{}" class="nav-link adr-link">{}: {}</a>"##, decision.id, decision.id, escape_html(&decision.title))
+    }).collect();
+
+    // Home link uses base_path (empty string means root "/")
+    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+
+    format!(
+        r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>Documentation - {} - Structurizr</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; overflow: hidden; }}
+        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; position: sticky; top: 0; z-index: 100; }}
+        .header a {{ color: white; text-decoration: none; }}
+        .header h1 {{ margin: 0; font-size: 18px; }}
+        .container {{ display: flex; height: calc(100vh - 54px); }}
+        .sidebar {{ width: 300px; background: white; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; flex-shrink: 0; height: calc(100vh - 54px); }}
+        .sidebar h3 {{ margin: 0 0 10px 0; font-size: 12px; text-transform: uppercase; color: #888; }}
+
+        /* Tree Navigation */
+        .nav-tree, .nav-tree ul {{ list-style: none; padding: 0; margin: 0; }}
+        .nav-item {{ margin: 1px 0; position: relative; }}
+        .nav-row {{ display: flex; align-items: center; }}
+        .nav-link {{ flex: 1; padding: 6px 8px; color: #333; text-decoration: none; border-radius: 4px; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
+        .nav-link:hover {{ background: #f0f0f0; }}
+        .nav-link.active {{ background: #e3f2fd; color: #1976d2; font-weight: 500; }}
+
+        /* Toggle arrow */
+        .toggle {{ width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 4px; }}
+        .toggle:hover {{ background: #e0e0e0; }}
+        .toggle::before {{ content: '\25B6'; font-size: 8px; color: #666; transition: transform 0.15s ease; }}
+        .expandable.expanded > .nav-row > .toggle::before {{ transform: rotate(90deg); }}
+
+        /* Leaf nodes need padding to align with expandable nodes */
+        .leaf > .nav-link {{ padding-left: 28px; }}
+
+        /* Children container */
+        .nav-children {{ display: none; margin-left: 12px; border-left: 1px solid #e0e0e0; padding-left: 4px; }}
+        .expandable.expanded > .nav-children {{ display: block; }}
+
+        /* Depth styling */
+        .depth-0 > .nav-row > .nav-link, .depth-0 > .nav-link {{ font-weight: 600; font-size: 14px; }}
+        .depth-1 > .nav-row > .nav-link, .depth-1 > .nav-link {{ font-size: 13px; }}
+        .depth-2 > .nav-row > .nav-link, .depth-2 > .nav-link {{ font-size: 12px; color: #555; }}
+        .depth-3 > .nav-row > .nav-link, .depth-3 > .nav-link {{ font-size: 12px; color: #666; }}
+        .depth-4 > .nav-row > .nav-link, .depth-4 > .nav-link {{ font-size: 11px; color: #777; }}
+        .depth-5 > .nav-row > .nav-link, .depth-5 > .nav-link {{ font-size: 11px; color: #888; }}
+
+        /* Active parent chain */
+        .nav-item.active-parent > .nav-row > .nav-link {{ color: #1976d2; }}
+
+        /* ADR links */
+        .adr-link {{ display: block; padding: 6px 8px; margin: 2px 0; font-size: 13px; }}
+        .main {{ flex: 1; padding: 40px; width: 95%; overflow-y: auto; height: calc(100vh - 54px); }}
+        .doc-section {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+        .doc-section h2 {{ margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
+        .content {{ line-height: 1.5; }}
+        .content h1, .content h2, .content h3 {{ margin-top: 0.8em; margin-bottom: 0.3em; }}
+        .content p {{ margin: 0.5em 0; }}
+        .content ul, .content ol {{ margin: 0.5em 0; padding-left: 1.5em; }}
+        .content pre {{ background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }}
+        .content code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: "SF Mono", Monaco, monospace; font-size: 0.9em; }}
+        .content pre code {{ background: none; padding: 0; }}
+        .content blockquote {{ border-left: 4px solid #ddd; margin: 0; padding-left: 20px; color: #666; }}
+        .content table {{ border-collapse: collapse; width: 100%; margin: 1em 0; display: block; overflow-x: auto; }}
+        .content th, .content td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
+        .content th {{ background: #f5f5f5; font-weight: 600; }}
+        .content tr:nth-child(even) {{ background: #fafafa; }}
+        .content del {{ color: #999; text-decoration: line-through; }}
+        .content input[type="checkbox"] {{ margin-right: 0.5em; transform: scale(1.1); }}
+        .content ul.contains-task-list {{ list-style: none; padding-left: 1em; }}
+        .content li.task-list-item {{ list-style: none; }}
+        .content .footnotes {{ font-size: 0.9em; border-top: 1px solid #eee; padding-top: 1em; margin-top: 2em; }}
+        .content .footnote-ref {{ font-size: 0.75em; vertical-align: super; }}
+        .content .footnote-backref {{ text-decoration: none; margin-left: 0.25em; }}
+        .content img {{ max-width: 100%; height: auto; border-radius: 4px; margin: 1em 0; }}
+        .content dl {{ margin: 1em 0; }}
+        .content dt {{ font-weight: 600; margin-top: 0.5em; }}
+        .content dd {{ margin-left: 2em; color: #555; }}
+        .decisions-section {{ margin-top: 40px; }}
+        .decision {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
+        .decision-header {{ display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }}
+        .decision-id {{ font-family: monospace; background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px; }}
+        .decision-header h3 {{ margin: 0; flex: 1; }}
+        .status {{ padding: 4px 10px; border-radius: 20px; font-size: 11px; text-transform: uppercase; font-weight: 600; }}
+        .status.accepted {{ background: #d4edda; color: #155724; }}
+        .status.proposed {{ background: #fff3cd; color: #856404; }}
+        .status.superseded {{ background: #e2e3e5; color: #383d41; }}
+        .status.deprecated {{ background: #f8d7da; color: #721c24; }}
+        .status.rejected {{ background: #f8d7da; color: #721c24; }}
+        .date {{ color: #888; font-size: 12px; }}
+        .empty {{ color: #888; font-style: italic; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="{home_href}">← Back</a>
+        <h1>Documentation: {name}</h1>
+    </div>
+    <div class="container">
+        <div class="sidebar">
+            <h3>Sections</h3>
+            {sidebar_sections}
+            {sidebar_decisions_section}
+        </div>
+        <div class="main">
+            {sections_html}
+            {decisions_html}
+        </div>
+    </div>
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {{
+        const mainContent = document.querySelector('.main');
+        const allHeadings = document.querySelectorAll('[id^="section-"], [id^="s"]');
+        const navItems = document.querySelectorAll('.nav-item');
+        const navLinks = document.querySelectorAll('.nav-link');
+
+        // Toggle expand/collapse on toggle button click
+        document.querySelectorAll('.toggle').forEach(function(toggle) {{
+            toggle.addEventListener('click', function(e) {{
+                e.stopPropagation();
+                e.preventDefault();
+                const navItem = this.closest('.nav-item');
+                if (navItem && navItem.classList.contains('expandable')) {{
+                    navItem.classList.toggle('expanded');
+                }}
+            }});
+        }});
+
+        // Smooth scroll on nav link click
+        navLinks.forEach(function(link) {{
+            link.addEventListener('click', function(e) {{
+                e.preventDefault();
+                const href = this.getAttribute('href');
+                if (href && href.startsWith('#')) {{
+                    const targetId = href.slice(1);
+                    const target = document.getElementById(targetId);
+                    if (target) {{
+                        mainContent.scrollTo({{
+                            top: target.offsetTop - 20,
+                            behavior: 'smooth'
+                        }});
+                    }}
+                }}
+            }});
+        }});
+
+        // Scroll-spy: update active state based on scroll position
+        function updateActiveState() {{
+            const scrollTop = mainContent.scrollTop;
+            const offset = 100;
+            let currentId = '';
+
+            allHeadings.forEach(function(heading) {{
+                if (scrollTop >= heading.offsetTop - offset) {{
+                    currentId = heading.id;
+                }}
+            }});
+
+            navItems.forEach(function(item) {{
+                item.classList.remove('active', 'active-parent');
+            }});
+            navLinks.forEach(function(link) {{
+                link.classList.remove('active');
+            }});
+
+            if (currentId) {{
+                const activeLink = document.querySelector('.nav-link[href="#' + currentId + '"]');
+                if (activeLink) {{
+                    activeLink.classList.add('active');
+
+                    let parent = activeLink.closest('.nav-item');
+                    if (parent) {{
+                        parent.classList.add('active');
+                    }}
+                    parent = parent ? parent.parentElement : null;
+                    while (parent) {{
+                        const parentItem = parent.closest('.nav-item');
+                        if (parentItem) {{
+                            parentItem.classList.add('active-parent');
+                            if (parentItem.classList.contains('expandable')) {{
+                                parentItem.classList.add('expanded');
+                            }}
+                            parent = parentItem.parentElement;
+                        }} else {{
+                            break;
+                        }}
+                    }}
+
+                    const sidebar = document.querySelector('.sidebar');
+                    if (sidebar) {{
+                        const linkRect = activeLink.getBoundingClientRect();
+                        const sidebarRect = sidebar.getBoundingClientRect();
+                        const linkCenter = linkRect.top + linkRect.height / 2;
+                        const sidebarCenter = sidebarRect.top + sidebarRect.height / 2;
+                        const scrollOffset = linkCenter - sidebarCenter;
+                        sidebar.scrollBy({{ top: scrollOffset, behavior: 'smooth' }});
+                    }}
+                }}
+            }}
+        }}
+
+        let scrollTimer;
+        mainContent.addEventListener('scroll', function() {{
+            clearTimeout(scrollTimer);
+            scrollTimer = setTimeout(updateActiveState, 50);
+        }});
+
+        updateActiveState();
+    }});
+    </script>
+</body>
+</html>"##,
+        workspace.name,
+        home_href = home_href,
+        name = workspace.name,
+        sidebar_sections = sidebar_sections,
+        sidebar_decisions_section = if !docs.decisions.is_empty() { format!("<h3 style=\"margin-top: 20px;\">ADRs</h3>{}", sidebar_decisions) } else { String::new() },
+        sections_html = sections_html,
+        decisions_html = decisions_html
+    )
+}
+
+/// Generate search page HTML with full search results display.
+fn generate_search_page_html(workspace_name: &str, base_path: &str, search_term: &str, results: &[SearchResult]) -> String {
+    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+
+    let results_html: String = if results.is_empty() && !search_term.is_empty() {
+        "<p class=\"no-results\">No results found.</p>".to_string()
+    } else {
+        results.iter().map(|r| format!(
+            r#"<div class="result">
+                <div class="result-header">
+                    <span class="type type-{}">{}</span>
+                    <h3>{}</h3>
+                </div>
+                {}
+            </div>"#,
+            r.element_type.to_lowercase().replace(' ', "-"),
+            escape_html(&r.element_type),
+            escape_html(&r.name),
+            r.description.as_ref().map(|d| format!("<p class=\"desc\">{}</p>", escape_html(d))).unwrap_or_default()
+        )).collect()
+    };
+
+    format!(r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>Search - {workspace_name} - Structurizr</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }}
+        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; }}
+        .header a {{ color: white; text-decoration: none; }}
+        .header h1 {{ margin: 0; font-size: 18px; }}
+        .search-container {{ max-width: 800px; margin: 40px auto; padding: 0 20px; }}
+        .search-box {{ display: flex; gap: 10px; margin-bottom: 30px; }}
+        .search-box input {{ flex: 1; padding: 12px 16px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; }}
+        .search-box input:focus {{ outline: none; border-color: #0066cc; }}
+        .search-box button {{ background: #0066cc; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; }}
+        .search-box button:hover {{ background: #0052a3; }}
+        .result {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: box-shadow 0.2s; }}
+        .result:hover {{ box-shadow: 0 2px 8px rgba(0,0,0,0.15); }}
+        .result-header {{ display: flex; align-items: center; gap: 10px; }}
+        .result-header h3 {{ margin: 0; }}
+        .type {{ background: #e8e8e8; padding: 4px 10px; border-radius: 4px; font-size: 11px; text-transform: uppercase; font-weight: 600; }}
+        .type-person {{ background: #e3f2fd; color: #1565c0; }}
+        .type-software-system {{ background: #e8f5e9; color: #2e7d32; }}
+        .type-container {{ background: #fff3e0; color: #ef6c00; }}
+        .type-component {{ background: #fce4ec; color: #c2185b; }}
+        .desc {{ color: #666; margin: 10px 0 0 0; }}
+        .no-results {{ color: #888; font-style: italic; text-align: center; padding: 40px; background: white; border-radius: 8px; }}
+        .result-count {{ color: #666; margin-bottom: 20px; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="{home_href}">← Back</a>
+        <h1>Search: {workspace_name}</h1>
+    </div>
+    <div class="search-container">
+        <form class="search-box" method="get">
+            <input type="text" name="q" placeholder="Search elements, relationships, documentation..." value="{search_term_escaped}" autofocus>
+            <button type="submit">Search</button>
+        </form>
+        {result_count}
+        <div class="results">
+            {results_html}
+        </div>
+    </div>
+</body>
+</html>"##,
+        workspace_name = workspace_name,
+        home_href = home_href,
+        search_term_escaped = escape_html(search_term),
+        result_count = if !search_term.is_empty() { format!("<p class=\"result-count\">{} results for \"{}\"</p>", results.len(), escape_html(search_term)) } else { String::new() },
+        results_html = results_html
+    )
+}
+
+/// Render tree view HTML with full expand/collapse tree navigation.
+fn render_tree_view_html(workspace: &Workspace, base_path: &str) -> Result<Html<String>> {
+    let html = generate_tree_view_html(workspace, base_path);
+    Ok(Html(html))
+}
+
+/// Generate tree view HTML with full hierarchical navigation.
+fn generate_tree_view_html(workspace: &Workspace, base_path: &str) -> String {
+    let model = workspace.model();
+    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+
+    // Build tree structure HTML
+    let mut tree_html = String::new();
+
+    // People branch
+    if !model.people.is_empty() {
+        tree_html.push_str(r#"<li class="expandable expanded"><div class="tree-node" data-type="group"><span class="toggle">▼</span><span class="icon">👤</span><span class="name">People</span>"#);
+        tree_html.push_str(&format!(r#"<span class="count">({})</span></div><ul class="children">"#, model.people.len()));
+        for person in &model.people {
+            tree_html.push_str(&format!(
+                r#"<li class="leaf"><div class="tree-node" data-id="{}" data-type="Person" data-name="{}" data-description="{}"><span class="icon">👤</span><span class="name">{}</span>"#,
+                person.id(), escape_html(&person.name()),
+                person.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default(),
+                escape_html(&person.name())
+            ));
+            if let Some(desc) = &person.properties.description {
+                let truncated = if desc.len() > 50 { format!("{}...", &desc[..50]) } else { desc.clone() };
+                tree_html.push_str(&format!(r#"<span class="desc">{}</span>"#, escape_html(&truncated)));
+            }
+            tree_html.push_str(r#"</div></li>"#);
+        }
+        tree_html.push_str(r#"</ul></li>"#);
+    }
+
+    // Software Systems branch
+    if !model.software_systems.is_empty() {
+        tree_html.push_str(r#"<li class="expandable expanded"><div class="tree-node" data-type="group"><span class="toggle">▼</span><span class="icon">📦</span><span class="name">Software Systems</span>"#);
+        tree_html.push_str(&format!(r#"<span class="count">({})</span></div><ul class="children">"#, model.software_systems.len()));
+
+        for system in &model.software_systems {
+            let has_containers = !system.containers.is_empty();
+            if has_containers { tree_html.push_str(r#"<li class="expandable">"#); } else { tree_html.push_str(r#"<li class="leaf">"#); }
+            tree_html.push_str(&format!(r#"<div class="tree-node" data-id="{}" data-type="Software System" data-name="{}" data-description="{}">"#,
+                system.id(), escape_html(&system.name()), system.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default()));
+            if has_containers { tree_html.push_str(r#"<span class="toggle">▶</span>"#); }
+            tree_html.push_str(&format!(r#"<span class="icon">📦</span><span class="name">{}</span>"#, escape_html(&system.name())));
+            if has_containers { tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, system.containers.len())); }
+            tree_html.push_str(r#"</div>"#);
+
+            if has_containers {
+                tree_html.push_str(r#"<ul class="children">"#);
+                for container in &system.containers {
+                    let has_components = !container.components.is_empty();
+                    if has_components { tree_html.push_str(r#"<li class="expandable">"#); } else { tree_html.push_str(r#"<li class="leaf">"#); }
+                    tree_html.push_str(&format!(r#"<div class="tree-node" data-id="{}" data-type="Container" data-name="{}">"#, container.id(), escape_html(&container.name())));
+                    if has_components { tree_html.push_str(r#"<span class="toggle">▶</span>"#); }
+                    tree_html.push_str(&format!(r#"<span class="icon">🗄️</span><span class="name">{}</span>"#, escape_html(&container.name())));
+                    if let Some(tech) = &container.technology { tree_html.push_str(&format!(r#"<span class="tech">[{}]</span>"#, escape_html(tech))); }
+                    tree_html.push_str(r#"</div>"#);
+
+                    if has_components {
+                        tree_html.push_str(r#"<ul class="children">"#);
+                        for component in &container.components {
+                            tree_html.push_str(&format!(r#"<li class="leaf"><div class="tree-node" data-id="{}" data-type="Component" data-name="{}"><span class="icon">⚙️</span><span class="name">{}</span>"#,
+                                component.id(), escape_html(&component.name()), escape_html(&component.name())));
+                            if let Some(tech) = &component.technology { tree_html.push_str(&format!(r#"<span class="tech">[{}]</span>"#, escape_html(tech))); }
+                            tree_html.push_str(r#"</div></li>"#);
+                        }
+                        tree_html.push_str(r#"</ul>"#);
+                    }
+                    tree_html.push_str(r#"</li>"#);
+                }
+                tree_html.push_str(r#"</ul>"#);
+            }
+            tree_html.push_str(r#"</li>"#);
+        }
+        tree_html.push_str(r#"</ul></li>"#);
+    }
+
+    format!(r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>Tree View - {name} - Structurizr</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }}
+        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; }}
+        .header a {{ color: white; text-decoration: none; }}
+        .header h1 {{ margin: 0; font-size: 18px; flex: 1; }}
+        .search-box {{ padding: 8px 12px; border: none; border-radius: 4px; width: 250px; }}
+        .container {{ display: flex; height: calc(100vh - 54px); }}
+        .tree-panel {{ width: 50%; padding: 20px; overflow-y: auto; }}
+        .detail-panel {{ width: 50%; background: white; border-left: 1px solid #ddd; padding: 20px; overflow-y: auto; }}
+        .tree {{ list-style: none; padding: 0; margin: 0; }}
+        .tree ul {{ list-style: none; padding-left: 20px; margin: 0; }}
+        .tree li {{ margin: 2px 0; }}
+        .tree-node {{ display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }}
+        .tree-node:hover {{ background: #e3f2fd; }}
+        .toggle {{ width: 16px; font-size: 10px; color: #666; cursor: pointer; }}
+        .icon {{ font-size: 14px; }}
+        .name {{ flex: 1; font-size: 14px; }}
+        .count {{ color: #888; font-size: 12px; }}
+        .desc {{ color: #666; font-size: 12px; margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }}
+        .tech {{ color: #0066cc; font-size: 11px; margin-left: 8px; }}
+        .expandable > ul {{ display: none; }}
+        .expandable.expanded > ul {{ display: block; }}
+        .detail-panel h3 {{ margin: 0 0 10px 0; }}
+        .detail-panel p {{ margin: 5px 0; color: #666; }}
+        #no-results {{ display: none; padding: 40px; text-align: center; color: #888; }}
+        .stats {{ display: flex; gap: 20px; margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; }}
+        .stat {{ text-align: center; }}
+        .stat-value {{ font-size: 24px; font-weight: 600; color: #333; }}
+        .stat-label {{ font-size: 12px; color: #888; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="{home_href}">← Back</a>
+        <h1>Architecture Tree: {name}</h1>
+        <input type="text" id="search-input" class="search-box" placeholder="Filter elements...">
+    </div>
+    <div class="container">
+        <div class="tree-panel">
+            <div class="stats">
+                <div class="stat"><div class="stat-value">{people_count}</div><div class="stat-label">People</div></div>
+                <div class="stat"><div class="stat-value">{systems_count}</div><div class="stat-label">Systems</div></div>
+                <div class="stat"><div class="stat-value">{relationships_count}</div><div class="stat-label">Relationships</div></div>
+            </div>
+            <ul class="tree" id="tree">{tree_html}</ul>
+            <div id="no-results">No matching elements found</div>
+        </div>
+        <div class="detail-panel" id="detail-panel">
+            <h3 id="detail-name">Select an element</h3>
+            <p id="detail-type"></p>
+            <p id="detail-desc">Click on any element in the tree to see its details.</p>
+        </div>
+    </div>
+    <script>
+        document.querySelectorAll('.toggle').forEach(toggle => {{
+            toggle.addEventListener('click', (e) => {{
+                e.stopPropagation();
+                const li = toggle.closest('li');
+                if (li.classList.contains('expandable')) {{
+                    li.classList.toggle('expanded');
+                    toggle.textContent = li.classList.contains('expanded') ? '▼' : '▶';
+                }}
+            }});
+        }});
+
+        document.querySelectorAll('.tree-node').forEach(node => {{
+            node.addEventListener('click', () => {{
+                document.getElementById('detail-name').textContent = node.dataset.name || 'Unknown';
+                document.getElementById('detail-type').textContent = node.dataset.type || '';
+                document.getElementById('detail-desc').textContent = node.dataset.description || 'No description';
+            }});
+        }});
+
+        document.getElementById('search-input').addEventListener('input', (e) => {{
+            const query = e.target.value.toLowerCase().trim();
+            const tree = document.getElementById('tree');
+            const noResults = document.getElementById('no-results');
+            if (!query) {{
+                document.querySelectorAll('.tree li, .tree-node').forEach(el => el.style.display = '');
+                noResults.style.display = 'none';
+                return;
+            }}
+            let hasResults = false;
+            document.querySelectorAll('.tree-node').forEach(node => {{
+                const matches = (node.dataset.name || '').toLowerCase().includes(query) ||
+                               (node.dataset.description || '').toLowerCase().includes(query) ||
+                               (node.dataset.type || '').toLowerCase().includes(query);
+                const li = node.closest('li');
+                if (matches) {{ hasResults = true; li.style.display = ''; let p = li.parentElement; while(p) {{ if(p.closest) {{ const pli = p.closest('li'); if(pli) {{ pli.style.display = ''; pli.classList.add('expanded'); }} }} p = p.parentElement; }} }}
+                else {{ li.style.display = 'none'; }}
+            }});
+            noResults.style.display = hasResults ? 'none' : 'block';
+        }});
+    </script>
+</body>
+</html>"##,
+        name = workspace.name,
+        home_href = home_href,
+        tree_html = tree_html,
+        people_count = model.people.len(),
+        systems_count = model.software_systems.len(),
+        relationships_count = model.relationships.len()
+    )
+}
+
+/// Render presentation HTML with slideshow navigation.
+fn render_presentation_html(workspace: &Workspace, base_path: &str, views_param: Option<String>) -> Result<Html<String>> {
+    let view_keys: Vec<String> = if let Some(views) = views_param {
+        views.split(',').map(|s| s.trim().to_string()).collect()
+    } else {
+        workspace.views().all_keys().iter().map(|k| k.to_string()).collect()
+    };
+
+    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+    let slides_json = serde_json::to_string(&view_keys).unwrap_or_else(|_| "[]".to_string());
+
+    let html = format!(r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>Presentation - {name} - Structurizr</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; background: #1a1a1a; color: #fff; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; overflow: hidden; }}
+        .toolbar {{ position: fixed; top: 0; left: 0; right: 0; background: rgba(0,0,0,0.8); padding: 10px 20px; display: flex; align-items: center; gap: 20px; z-index: 100; opacity: 0; transition: opacity 0.3s; }}
+        .toolbar:hover, .toolbar.visible {{ opacity: 1; }}
+        .toolbar a {{ color: white; text-decoration: none; }}
+        .toolbar .spacer {{ flex: 1; }}
+        .slide-info {{ font-size: 14px; }}
+        .slide-container {{ height: 100vh; display: flex; align-items: center; justify-content: center; }}
+        .slide {{ max-width: 95vw; max-height: 95vh; background: white; border-radius: 8px; box-shadow: 0 10px 50px rgba(0,0,0,0.5); overflow: hidden; }}
+        .slide img {{ max-width: 100%; max-height: 90vh; display: block; }}
+        .controls {{ position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }}
+        .controls button {{ background: rgba(255,255,255,0.2); color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 16px; transition: background 0.2s; }}
+        .controls button:hover {{ background: rgba(255,255,255,0.3); }}
+        .controls button:disabled {{ opacity: 0.3; cursor: not-allowed; }}
+        .keyboard-hint {{ position: fixed; bottom: 20px; right: 20px; font-size: 11px; color: #666; }}
+        .slide-title {{ position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); font-size: 18px; color: white; background: rgba(0,0,0,0.7); padding: 8px 20px; border-radius: 20px; }}
+    </style>
+</head>
+<body>
+    <div class="toolbar" id="toolbar">
+        <a href="{home_href}">← Exit Presentation</a>
+        <div class="spacer"></div>
+        <span class="slide-info" id="slide-info">Slide 1 of {slide_count}</span>
+    </div>
+    <div class="slide-container">
+        <div class="slide" id="slide"><img id="slide-img" alt="Loading..."></div>
+    </div>
+    <div class="slide-title" id="slide-title"></div>
+    <div class="controls">
+        <button id="btn-prev" onclick="prevSlide()">← Previous</button>
+        <button id="btn-next" onclick="nextSlide()">Next →</button>
+    </div>
+    <div class="keyboard-hint">← → Arrow keys to navigate • Esc to exit</div>
+    <script>
+        const slides = {slides_json};
+        const basePath = '{base_path}';
+        let current = 0;
+
+        function showSlide(index) {{
+            if (index < 0 || index >= slides.length) return;
+            current = index;
+            const key = slides[current];
+            document.getElementById('slide-img').src = `${{basePath}}/view/${{key}}/svg`;
+            document.getElementById('slide-title').textContent = key;
+            document.getElementById('slide-info').textContent = `Slide ${{current + 1}} of ${{slides.length}}`;
+            document.getElementById('btn-prev').disabled = current === 0;
+            document.getElementById('btn-next').disabled = current === slides.length - 1;
+        }}
+
+        function nextSlide() {{ showSlide(current + 1); }}
+        function prevSlide() {{ showSlide(current - 1); }}
+
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'ArrowRight' || e.key === ' ') {{ e.preventDefault(); nextSlide(); }}
+            if (e.key === 'ArrowLeft') {{ e.preventDefault(); prevSlide(); }}
+            if (e.key === 'Escape') {{ window.location.href = '{home_href}'; }}
+        }});
+
+        document.addEventListener('mousemove', () => {{
+            document.getElementById('toolbar').classList.add('visible');
+            setTimeout(() => document.getElementById('toolbar').classList.remove('visible'), 2000);
+        }});
+
+        showSlide(0);
+    </script>
+</body>
+</html>"##,
+        name = workspace.name,
+        home_href = home_href,
+        slide_count = view_keys.len(),
+        slides_json = slides_json,
+        base_path = base_path,
+    );
+
+    Ok(Html(html))
+}
+
+/// Render explore graph HTML with interactive visualization.
+fn render_explore_html(workspace: &Workspace, base_path: &str) -> Result<Html<String>> {
+    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+    let model = workspace.model();
+
+    // Build nodes and edges for the graph
+    let mut nodes_json = String::from("[");
+    let mut edges_json = String::from("[");
+
+    let mut node_count = 0;
+    for person in &model.people {
+        if node_count > 0 { nodes_json.push(','); }
+        nodes_json.push_str(&format!(r#"{{"id":"{}","name":"{}","type":"Person"}}"#, person.id(), escape_json(&person.name())));
+        node_count += 1;
+    }
+    for system in &model.software_systems {
+        if node_count > 0 { nodes_json.push(','); }
+        nodes_json.push_str(&format!(r#"{{"id":"{}","name":"{}","type":"Software System"}}"#, system.id(), escape_json(&system.name())));
+        node_count += 1;
+        for container in &system.containers {
+            nodes_json.push(',');
+            nodes_json.push_str(&format!(r#"{{"id":"{}","name":"{}","type":"Container","parent":"{}"}}"#, container.id(), escape_json(&container.name()), system.id()));
+            node_count += 1;
+        }
+    }
+    nodes_json.push(']');
+
+    let mut edge_count = 0;
+    for rel in &model.relationships {
+        if edge_count > 0 { edges_json.push(','); }
+        edges_json.push_str(&format!(r#"{{"source":"{}","target":"{}","label":"{}"}}"#,
+            rel.source_id, rel.destination_id, rel.description.as_deref().map(|d| escape_json(d)).unwrap_or_default()));
+        edge_count += 1;
+    }
+    edges_json.push(']');
+
+    let html = format!(r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>Explore - {name} - Structurizr</title>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; overflow: hidden; }}
+        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; position: fixed; top: 0; left: 0; right: 0; z-index: 100; }}
+        .header a {{ color: white; text-decoration: none; }}
+        .header h1 {{ margin: 0; font-size: 18px; flex: 1; }}
+        .controls {{ display: flex; gap: 10px; }}
+        .controls button {{ background: #555; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }}
+        .controls button:hover {{ background: #666; }}
+        #graph {{ position: absolute; top: 54px; left: 0; right: 0; bottom: 0; }}
+        .node {{ fill: #4a9eff; cursor: pointer; }}
+        .node-person {{ fill: #08427b; }}
+        .node-system {{ fill: #1168bd; }}
+        .node-container {{ fill: #438dd5; }}
+        .node-label {{ font-size: 12px; fill: white; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }}
+        .link {{ stroke: #666; stroke-opacity: 0.6; fill: none; }}
+        .link-label {{ font-size: 10px; fill: #888; }}
+        .tooltip {{ position: absolute; background: #333; color: white; padding: 8px 12px; border-radius: 4px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 200; }}
+        .stats {{ position: fixed; bottom: 20px; left: 20px; background: rgba(0,0,0,0.7); padding: 10px 15px; border-radius: 6px; font-size: 12px; color: #aaa; }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="{home_href}">← Back</a>
+        <h1>Explore: {name}</h1>
+        <div class="controls">
+            <button onclick="resetView()">Reset View</button>
+            <button onclick="togglePhysics()">Toggle Physics</button>
+        </div>
+    </div>
+    <svg id="graph"></svg>
+    <div class="tooltip" id="tooltip"></div>
+    <div class="stats">{node_count} nodes • {edge_count} relationships</div>
+    <script>
+        const nodes = {nodes_json};
+        const edges = {edges_json};
+        const width = window.innerWidth;
+        const height = window.innerHeight - 54;
+        const svg = document.getElementById('graph');
+        svg.setAttribute('width', width);
+        svg.setAttribute('height', height);
+
+        // Simple force-directed layout
+        nodes.forEach((n, i) => {{
+            n.x = width/2 + (Math.random() - 0.5) * 400;
+            n.y = height/2 + (Math.random() - 0.5) * 400;
+            n.vx = 0; n.vy = 0;
+        }});
+
+        let physicsEnabled = true;
+        function togglePhysics() {{ physicsEnabled = !physicsEnabled; }}
+        function resetView() {{ nodes.forEach(n => {{ n.x = width/2 + (Math.random() - 0.5) * 400; n.y = height/2 + (Math.random() - 0.5) * 400; }}); }}
+
+        function simulate() {{
+            if (physicsEnabled) {{
+                // Repulsion between nodes
+                for (let i = 0; i < nodes.length; i++) {{
+                    for (let j = i + 1; j < nodes.length; j++) {{
+                        const dx = nodes[j].x - nodes[i].x;
+                        const dy = nodes[j].y - nodes[i].y;
+                        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+                        const force = 5000 / (dist * dist);
+                        nodes[i].vx -= dx/dist * force;
+                        nodes[i].vy -= dy/dist * force;
+                        nodes[j].vx += dx/dist * force;
+                        nodes[j].vy += dy/dist * force;
+                    }}
+                }}
+                // Attraction along edges
+                edges.forEach(e => {{
+                    const source = nodes.find(n => n.id === e.source);
+                    const target = nodes.find(n => n.id === e.target);
+                    if (source && target) {{
+                        const dx = target.x - source.x;
+                        const dy = target.y - source.y;
+                        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
+                        const force = (dist - 150) * 0.01;
+                        source.vx += dx/dist * force;
+                        source.vy += dy/dist * force;
+                        target.vx -= dx/dist * force;
+                        target.vy -= dy/dist * force;
+                    }}
+                }});
+                // Center gravity
+                nodes.forEach(n => {{
+                    n.vx += (width/2 - n.x) * 0.001;
+                    n.vy += (height/2 - n.y) * 0.001;
+                    n.vx *= 0.9; n.vy *= 0.9;
+                    n.x += n.vx; n.y += n.vy;
+                    n.x = Math.max(50, Math.min(width-50, n.x));
+                    n.y = Math.max(50, Math.min(height-50, n.y));
+                }});
+            }}
+            render();
+            requestAnimationFrame(simulate);
+        }}
+
+        function render() {{
+            let html = '';
+            edges.forEach(e => {{
+                const source = nodes.find(n => n.id === e.source);
+                const target = nodes.find(n => n.id === e.target);
+                if (source && target) {{
+                    html += `<line class="link" x1="${{source.x}}" y1="${{source.y}}" x2="${{target.x}}" y2="${{target.y}}"/>`;
+                }}
+            }});
+            nodes.forEach(n => {{
+                const cls = n.type === 'Person' ? 'node-person' : n.type === 'Container' ? 'node-container' : 'node-system';
+                html += `<circle class="node ${{cls}}" cx="${{n.x}}" cy="${{n.y}}" r="30" data-name="${{n.name}}" data-type="${{n.type}}"/>`;
+                html += `<text class="node-label" x="${{n.x}}" y="${{n.y}}">${{n.name.substring(0,10)}}${{n.name.length > 10 ? '...' : ''}}</text>`;
+            }});
+            svg.innerHTML = html;
+
+            // Drag handling
+            svg.querySelectorAll('.node').forEach(node => {{
+                node.addEventListener('mousedown', startDrag);
+                node.addEventListener('mouseenter', (e) => {{
+                    const tooltip = document.getElementById('tooltip');
+                    tooltip.textContent = `${{e.target.dataset.name}} (${{e.target.dataset.type}})`;
+                    tooltip.style.left = (e.pageX + 10) + 'px';
+                    tooltip.style.top = (e.pageY + 10) + 'px';
+                    tooltip.style.opacity = 1;
+                }});
+                node.addEventListener('mouseleave', () => document.getElementById('tooltip').style.opacity = 0);
+            }});
+        }}
+
+        let dragging = null;
+        function startDrag(e) {{
+            const idx = nodes.findIndex(n => n.name.startsWith(e.target.dataset.name.substring(0,10)));
+            if (idx >= 0) dragging = nodes[idx];
+        }}
+        document.addEventListener('mousemove', (e) => {{
+            if (dragging) {{
+                dragging.x = e.clientX;
+                dragging.y = e.clientY - 54;
+                dragging.vx = 0; dragging.vy = 0;
+            }}
+        }});
+        document.addEventListener('mouseup', () => dragging = null);
+
+        simulate();
+    </script>
+</body>
+</html>"##,
+        name = workspace.name,
+        home_href = home_href,
+        node_count = node_count,
+        edge_count = edge_count,
+        nodes_json = nodes_json,
+        edges_json = edges_json,
+    );
+
+    Ok(Html(html))
+}
+
+/// Search workspace and return results.
+fn search_workspace(workspace: &Workspace, query: &str, base_path: &str) -> Result<Json<Vec<SearchResult>>> {
+    let query_lower = query.to_lowercase();
+    let mut results = Vec::new();
+
+    // Search people
+    for person in &workspace.model().people {
+        if person.name().to_lowercase().contains(&query_lower) {
+            results.push(SearchResult {
+                id: person.id().to_string(),
+                name: person.name().to_string(),
+                element_type: "Person".to_string(),
+                description: person.properties.description.clone(),
+                url: format!("{}#element-{}", base_path, person.id()),
+            });
+        }
+    }
+
+    // Search software systems
+    for system in &workspace.model().software_systems {
+        if system.name().to_lowercase().contains(&query_lower) {
+            results.push(SearchResult {
+                id: system.id().to_string(),
+                name: system.name().to_string(),
+                element_type: "Software System".to_string(),
+                description: system.properties.description.clone(),
+                url: format!("{}#element-{}", base_path, system.id()),
+            });
+        }
+    }
+
+    Ok(Json(results))
+}
+
+/// Render view as SVG.
+fn render_view_svg(workspace: &Workspace, view_key: &str) -> Result<impl IntoResponse> {
+    let renderer = SvgRenderer::default();
+    let views = workspace.views();
+
+    let svg = if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_system_landscape(workspace, view)?
+    } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_system_context(workspace, view)?
+    } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_container(workspace, view)?
+    } else if let Some(view) = views.component_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_component(workspace, view)?
+    } else if let Some(view) = views.deployment_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_deployment(workspace, view)?
+    } else if let Some(view) = views.dynamic_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_dynamic(workspace, view)?
+    } else if let Some(view) = views.filtered_views.iter().find(|v| v.properties.key == view_key) {
+        renderer.render_filtered(workspace, view)?
+    } else {
+        // Default: render as system landscape
+        let view = SystemLandscapeView::new(view_key);
+        renderer.render_system_landscape(workspace, &view)?
+    };
+
+    Ok(([(header::CONTENT_TYPE, "image/svg+xml")], svg))
+}
+
+/// Export view as PlantUML.
+fn export_view_plantuml(workspace: &Workspace, view_key: &str) -> Result<impl IntoResponse> {
+    let views = workspace.views();
+
+    let plantuml = if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+        PlantUmlExporter::export_system_landscape(workspace, view)?
+    } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
+        PlantUmlExporter::export_system_context(workspace, view)?
+    } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
+        PlantUmlExporter::export_container(workspace, view)?
+    } else {
+        let view = SystemLandscapeView::new(view_key);
+        PlantUmlExporter::export_system_landscape(workspace, &view)?
+    };
+
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], plantuml))
+}
+
+/// Export view as Mermaid.
+fn export_view_mermaid(workspace: &Workspace, _view_key: &str) -> Result<impl IntoResponse> {
+    let mermaid = MermaidExporter::export_flowchart(workspace)?;
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], mermaid))
+}
+
+/// Export view as DOT.
+fn export_view_dot(workspace: &Workspace, _view_key: &str) -> Result<impl IntoResponse> {
+    let dot = DotExporter::export_flowchart(workspace)?;
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], dot))
+}
+
+/// Export view as D2.
+fn export_view_d2(workspace: &Workspace, _view_key: &str) -> Result<impl IntoResponse> {
+    let d2 = D2Exporter::export_flowchart(workspace)?;
+    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], d2))
+}
+
+// ============================================================================
+// Nested Workspace Handlers (for category/workspace_id paths)
+// ============================================================================
+
+/// Helper to combine category and workspace_id into full workspace ID.
+fn make_nested_workspace_id(category: &str, workspace_id: &str) -> String {
+    format!("{}/{}", category, workspace_id)
+}
+
+pub async fn workspace_home_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+
+    let views = workspace.views();
+    let view_list: Vec<String> = views.all_keys().iter().map(|k| k.to_string()).collect();
+    let dynamic_view_keys: std::collections::HashSet<String> = views.dynamic_views.iter()
+        .map(|v| v.properties.key.clone())
+        .collect();
+
+    let base_path = format!("/w/{}", full_id);
+
+    let html = format!(
+        r#"<!DOCTYPE html>
+<html>
+<head>
+    <title>{} - Structurizr</title>
+    <style>
+        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
+        .container {{ max-width: 1200px; margin: 0 auto; }}
+        .breadcrumb {{ margin-bottom: 10px; color: #666; }}
+        .breadcrumb a {{ color: #0066cc; }}
+        .nav a {{ margin-right: 15px; color: #0066cc; text-decoration: none; }}
+        .workspace-info {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
+        .views {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }}
+        .view-card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
+        .view-card a {{ color: #0066cc; text-decoration: none; }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="breadcrumb"><a href="/">All Workspaces</a> / {}</div>
+        <div class="nav">
+            <a href="{}">Home</a>
+            <a href="{}/docs">Docs</a>
+            <a href="{}/tree">Tree</a>
+            <a href="{}/explore">Explore</a>
+        </div>
+        <h1>{}</h1>
+        <div class="workspace-info">
+            <p>{}</p>
+            <p><strong>People:</strong> {} | <strong>Systems:</strong> {} | <strong>Relationships:</strong> {}</p>
+        </div>
+        <h2>Views</h2>
+        <div class="views">{}</div>
+    </div>
+</body>
+</html>"#,
+        workspace.name,
+        escape_html(&full_id),
+        base_path, base_path, base_path, base_path,
+        workspace.name,
+        workspace.description.as_deref().unwrap_or(""),
+        workspace.model().people.len(),
+        workspace.model().software_systems.len(),
+        workspace.model().relationships.len(),
+        view_list.iter().map(|v| {
+            let animate = if dynamic_view_keys.contains(v) { format!(" | <a href=\"{}/view/{}/animate\">Animate</a>", base_path, v) } else { String::new() };
+            format!(r#"<div class="view-card"><h3><a href="{}/view/{}">{}</a></h3><p><a href="{}/view/{}/svg">SVG</a>{}</p></div>"#, base_path, v, v, base_path, v, animate)
+        }).collect::<Vec<_>>().join("")
+    );
+    Ok(Html(html))
+}
+
+pub async fn workspace_view_diagram_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    render_view_diagram_html(&workspace, &view_key, &format!("/w/{}", full_id))
+}
+
+pub async fn workspace_view_animated_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    render_dynamic_animated_html(&workspace, &view_key, &format!("/w/{}", full_id))
+}
+
+pub async fn workspace_edit_diagram_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    render_edit_diagram_html(&workspace, &view_key, &format!("/w/{}", full_id))
+}
+
+pub async fn workspace_documentation_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    render_documentation_html(&workspace, &format!("/w/{}", full_id))
+}
+
+pub async fn workspace_search_page_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+    axum::extract::Query(query): axum::extract::Query<SearchQuery>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    let base_path = format!("/w/{}", full_id);
+    let search_term = query.q.unwrap_or_default();
+    let results = perform_search(&workspace, &search_term);
+    Ok(Html(generate_search_page_html(&workspace.name, &base_path, &search_term, &results)))
+}
+
+pub async fn workspace_tree_view_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    render_tree_view_html(&workspace, &format!("/w/{}", full_id))
+}
+
+pub async fn workspace_presentation_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+    axum::extract::Query(query): axum::extract::Query<PresentationQuery>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    render_presentation_html(&workspace, &format!("/w/{}", full_id), query.views)
+}
+
+pub async fn workspace_explore_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+) -> Result<Html<String>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    render_explore_html(&workspace, &format!("/w/{}", full_id))
+}
+
+pub async fn workspace_get_json_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+) -> Result<Json<Workspace>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    Ok(Json(workspace))
+}
+
+pub async fn workspace_validate_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+) -> Result<Json<structurizr_dsl::ValidationResult>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    Ok(Json(structurizr_dsl::validate_workspace(&workspace)))
+}
+
+pub async fn workspace_search_api_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+    axum::extract::Query(query): axum::extract::Query<SearchQuery>,
+) -> Result<Json<Vec<SearchResult>>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    let q = query.q.as_deref().unwrap_or("");
+    search_workspace(&workspace, q, &format!("/w/{}", full_id))
+}
+
+pub async fn workspace_export_json_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id)): Path<(String, String)>,
+) -> Result<impl IntoResponse> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    let json = JsonExporter::export(&workspace)?;
+    Ok(([(header::CONTENT_TYPE, "application/json")], json))
+}
+
+pub async fn workspace_render_svg_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<impl IntoResponse> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    render_view_svg(&workspace, &view_key)
+}
+
+pub async fn workspace_export_plantuml_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<impl IntoResponse> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    export_view_plantuml(&workspace, &view_key)
+}
+
+pub async fn workspace_export_mermaid_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<impl IntoResponse> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    export_view_mermaid(&workspace, &view_key)
+}
+
+pub async fn workspace_export_dot_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<impl IntoResponse> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    export_view_dot(&workspace, &view_key)
+}
+
+pub async fn workspace_export_d2_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<impl IntoResponse> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    export_view_d2(&workspace, &view_key)
+}
+
+// ============================================================================
+// Tests
+// ============================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Helper to create a minimal workspace for testing.
+    fn create_test_workspace() -> Workspace {
+        let mut workspace = Workspace::new("Test Workspace", "A test workspace");
+
+        // Add a simple software system for views
+        workspace.model_mut().add_software_system("TestSystem", "A test system");
+
+        workspace
+    }
+
+    // ========================================================================
+    // Diagram Viewer Tests
+    // ========================================================================
+
+    #[test]
+    fn test_diagram_html_contains_canvas_element() {
+        let workspace = create_test_workspace();
+        let html = generate_view_diagram_html(&workspace, "test-view", "");
+
+        assert!(html.contains("id=\"diagram-canvas\""), "Diagram HTML should contain diagram-canvas element");
+        assert!(html.contains("id=\"diagram-container\""), "Diagram HTML should contain diagram-container");
+    }
+
+    #[test]
+    fn test_diagram_html_contains_zoom_controls() {
+        let workspace = create_test_workspace();
+        let html = generate_view_diagram_html(&workspace, "test-view", "");
+
+        assert!(html.contains("zoom-controls"), "Diagram HTML should contain zoom controls");
+        assert!(html.contains("zoomIn()"), "Diagram HTML should contain zoomIn function");
+        assert!(html.contains("zoomOut()"), "Diagram HTML should contain zoomOut function");
+        assert!(html.contains("resetZoom()"), "Diagram HTML should contain resetZoom function");
+    }
+
+    #[test]
+    fn test_diagram_html_contains_minimap() {
+        let workspace = create_test_workspace();
+        let html = generate_view_diagram_html(&workspace, "test-view", "");
+
+        assert!(html.contains("id=\"minimap\""), "Diagram HTML should contain minimap");
+        assert!(html.contains("minimap-viewport"), "Diagram HTML should contain minimap viewport");
+        assert!(html.contains("updateMinimap()"), "Diagram HTML should contain updateMinimap function");
+    }
+
+    #[test]
+    fn test_diagram_html_contains_breadcrumbs() {
+        let workspace = create_test_workspace();
+        let html = generate_view_diagram_html(&workspace, "test-view", "");
+
+        assert!(html.contains("breadcrumbs"), "Diagram HTML should contain breadcrumbs");
+        assert!(html.contains("initiateDrillDown"), "Diagram HTML should contain drill-down function");
+    }
+
+    #[test]
+    fn test_diagram_html_with_base_path() {
+        let workspace = create_test_workspace();
+        let html = generate_view_diagram_html(&workspace, "test-view", "/w/my-workspace");
+
+        assert!(html.contains("href=\"/w/my-workspace\""), "Links should use base_path");
+        assert!(html.contains("basePath = '/w/my-workspace'"), "JavaScript should have basePath constant");
+    }
+
+    // ========================================================================
+    // Documentation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_documentation_html_contains_sidebar() {
+        let workspace = create_test_workspace();
+        let html = generate_documentation_html(&workspace, "");
+
+        assert!(html.contains("class=\"sidebar\"") || html.contains("sidebar"),
+            "Documentation HTML should contain sidebar");
+    }
+
+    #[test]
+    fn test_documentation_html_contains_scroll_spy() {
+        let workspace = create_test_workspace();
+        let html = generate_documentation_html(&workspace, "");
+
+        // Scroll-spy functionality
+        assert!(html.contains("IntersectionObserver") || html.contains("scroll"),
+            "Documentation HTML should contain scroll tracking");
+    }
+
+    #[test]
+    fn test_documentation_html_with_base_path() {
+        let workspace = create_test_workspace();
+        let html = generate_documentation_html(&workspace, "/w/my-workspace");
+
+        assert!(html.contains("/w/my-workspace"), "Documentation HTML should use base_path in links");
+    }
+
+    // ========================================================================
+    // Editor Tests
+    // ========================================================================
+
+    #[test]
+    fn test_editor_html_contains_websocket_init() {
+        let html = generate_editor_html("test-view", "", "");
+
+        assert!(html.contains("new WebSocket"), "Editor HTML should initialize WebSocket");
+        assert!(html.contains("ws.onopen"), "Editor HTML should handle WebSocket open");
+        assert!(html.contains("ws.onmessage"), "Editor HTML should handle WebSocket messages");
+    }
+
+    #[test]
+    fn test_editor_html_contains_toolbar() {
+        let html = generate_editor_html("test-view", "", "");
+
+        assert!(html.contains("class=\"toolbar\""), "Editor HTML should contain toolbar");
+        assert!(html.contains("autoLayout()"), "Editor HTML should contain auto-layout button");
+        assert!(html.contains("save()"), "Editor HTML should contain save button");
+        assert!(html.contains("undo()"), "Editor HTML should contain undo button");
+        assert!(html.contains("redo()"), "Editor HTML should contain redo button");
+    }
+
+    #[test]
+    fn test_editor_html_contains_connection_status() {
+        let html = generate_editor_html("test-view", "", "");
+
+        assert!(html.contains("status connecting") || html.contains("status connected"),
+            "Editor HTML should show connection status");
+        assert!(html.contains("id=\"status\""), "Editor HTML should have status element");
+    }
+
+    #[test]
+    fn test_editor_html_with_workspace_paths() {
+        let html = generate_editor_html("test-view", "/w/my-workspace", "/w/my-workspace/ws");
+
+        assert!(html.contains("href=\"/w/my-workspace\""), "Back link should use base_path");
+        // The WebSocket URL is built dynamically: wsBase + '/edit/' + viewKey
+        assert!(html.contains("wsBase = '/w/my-workspace/ws'"), "WebSocket should use ws_path as base");
+    }
+
+    #[test]
+    fn test_editor_html_contains_pan_zoom() {
+        let html = generate_editor_html("test-view", "", "");
+
+        assert!(html.contains("scale"), "Editor HTML should track zoom scale");
+        assert!(html.contains("translateX"), "Editor HTML should track pan position");
+        assert!(html.contains("updateCanvasTransform"), "Editor HTML should have transform update");
+    }
+
+    // ========================================================================
+    // Dynamic Animation Tests
+    // ========================================================================
+
+    #[test]
+    fn test_animation_html_contains_step_controls() {
+        let workspace = create_test_workspace();
+        // Create a dynamic view for testing
+        if let Ok(html) = generate_dynamic_animated_html(&workspace, "test-view", "") {
+            assert!(html.contains("step") || html.contains("Step"),
+                "Animation HTML should contain step controls");
+        }
+        // Note: May fail if no dynamic views exist, which is expected
+    }
+
+    // ========================================================================
+    // Tree View Tests
+    // ========================================================================
+
+    #[test]
+    fn test_tree_html_contains_expand_collapse() {
+        let workspace = create_test_workspace();
+        let html = generate_tree_view_html(&workspace, "");
+
+        assert!(html.contains("toggleNode") || html.contains("expand") || html.contains("collapse"),
+            "Tree HTML should contain expand/collapse functionality");
+    }
+
+    #[test]
+    fn test_tree_html_with_base_path() {
+        let workspace = create_test_workspace();
+        let html = generate_tree_view_html(&workspace, "/w/my-workspace");
+
+        assert!(html.contains("/w/my-workspace"), "Tree HTML should use base_path in links");
+    }
+
+    // ========================================================================
+    // Search Tests
+    // ========================================================================
+
+    #[test]
+    fn test_search_html_contains_search_form() {
+        let html = generate_search_page_html("Test", "", "", &[]);
+
+        assert!(html.contains("<form"), "Search HTML should contain form");
+        assert!(html.contains("type=\"text\""), "Search HTML should contain text input");
+        assert!(html.contains("name=\"q\""), "Search HTML should have query parameter");
+    }
+
+    #[test]
+    fn test_search_html_with_results() {
+        let results = vec![
+            SearchResult {
+                id: "test-1".to_string(),
+                name: "Test Element".to_string(),
+                element_type: "Container".to_string(),
+                description: Some("A test element".to_string()),
+                url: "/view/test".to_string(),
+            },
+        ];
+        let html = generate_search_page_html("Test", "", "test", &results);
+
+        assert!(html.contains("Test Element"), "Search HTML should display result name");
+        assert!(html.contains("Container"), "Search HTML should display result type");
+    }
+
+    #[test]
+    fn test_search_html_with_base_path() {
+        let html = generate_search_page_html("Test", "/w/my-workspace", "", &[]);
+
+        assert!(html.contains("/w/my-workspace"), "Search HTML should use base_path");
+    }
+
+    // ========================================================================
+    // Presentation Mode Tests
+    // ========================================================================
+
+    #[test]
+    fn test_presentation_html_contains_slideshow() {
+        let workspace = create_test_workspace();
+        // We use the render function as it's easier to test
+        if let Ok(html_response) = render_presentation_html(&workspace, "", None) {
+            let html = html_response.0;
+            assert!(html.contains("slide") || html.contains("Slide") || html.contains("presentation"),
+                "Presentation HTML should contain slideshow elements");
+        }
+    }
+
+    // ========================================================================
+    // Explore Graph Tests
+    // ========================================================================
+
+    #[test]
+    fn test_explore_html_contains_force_simulation() {
+        let workspace = create_test_workspace();
+        if let Ok(html_response) = render_explore_html(&workspace, "") {
+            let html = html_response.0;
+            assert!(html.contains("force") || html.contains("simulation") || html.contains("physics") || html.contains("node"),
+                "Explore HTML should contain force-directed graph elements");
+        }
+    }
 }

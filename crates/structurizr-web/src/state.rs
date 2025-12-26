@@ -7,14 +7,24 @@ use tokio::sync::RwLock;
 use structurizr_core::Workspace;
 use structurizr_core::workspace::{DocumentationSection, DocumentationFormat, Decision, DecisionStatus};
 
+use crate::discovery::WorkspaceRegistry;
 use crate::editor::EditorState;
 use crate::watcher::FileWatcher;
+
+/// Workspace mode - single workspace or multi-workspace.
+#[derive(Debug, Clone)]
+pub enum WorkspaceMode {
+    /// Single workspace mode (legacy) - serves a single workspace from a directory.
+    Single(PathBuf),
+    /// Multi-workspace mode - discovers and serves multiple workspaces.
+    Multi(PathBuf),
+}
 
 /// Configuration for the web server.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Directory containing workspace files.
-    pub data_dir: PathBuf,
+    /// Workspace mode (single or multi).
+    pub mode: WorkspaceMode,
     /// Port to listen on.
     pub port: u16,
     /// Host to bind to.
@@ -28,7 +38,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            data_dir: PathBuf::from("."),
+            mode: WorkspaceMode::Single(PathBuf::from(".")),
             port: 8080,
             host: "127.0.0.1".to_string(),
             auto_save_interval: 5000,
@@ -38,8 +48,42 @@ impl Default for Config {
 }
 
 impl Config {
+    /// Create a new config with single workspace mode.
+    pub fn single(data_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            mode: WorkspaceMode::Single(data_dir.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Create a new config with multi-workspace mode.
+    pub fn multi(workspaces_dir: impl Into<PathBuf>) -> Self {
+        Self {
+            mode: WorkspaceMode::Multi(workspaces_dir.into()),
+            ..Default::default()
+        }
+    }
+
+    /// Get the data directory (for single workspace mode).
+    pub fn data_dir(&self) -> &PathBuf {
+        match &self.mode {
+            WorkspaceMode::Single(path) => path,
+            WorkspaceMode::Multi(path) => path,
+        }
+    }
+
+    /// Check if in multi-workspace mode.
+    pub fn is_multi_workspace(&self) -> bool {
+        matches!(self.mode, WorkspaceMode::Multi(_))
+    }
+
     pub fn with_data_dir(mut self, path: impl Into<PathBuf>) -> Self {
-        self.data_dir = path.into();
+        self.mode = WorkspaceMode::Single(path.into());
+        self
+    }
+
+    pub fn with_workspaces_dir(mut self, path: impl Into<PathBuf>) -> Self {
+        self.mode = WorkspaceMode::Multi(path.into());
         self
     }
 
@@ -62,8 +106,12 @@ impl Config {
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
+    /// Single workspace (for single-workspace mode).
     pub workspace: Arc<RwLock<Option<Workspace>>>,
+    /// Path to single workspace file.
     pub workspace_path: Arc<RwLock<Option<PathBuf>>>,
+    /// Workspace registry (for multi-workspace mode).
+    pub registry: Arc<RwLock<Option<WorkspaceRegistry>>>,
     pub editor: EditorState,
     pub watcher: Arc<RwLock<FileWatcher>>,
 }
@@ -74,15 +122,34 @@ impl AppState {
             config,
             workspace: Arc::new(RwLock::new(None)),
             workspace_path: Arc::new(RwLock::new(None)),
+            registry: Arc::new(RwLock::new(None)),
             editor: EditorState::new(),
             watcher: Arc::new(RwLock::new(FileWatcher::new())),
         }
     }
 
-    /// Load workspace from the data directory.
-    pub async fn load_workspace(&self) -> crate::Result<()> {
-        let data_dir = &self.config.data_dir;
+    /// Initialize the state based on workspace mode.
+    pub async fn initialize(&self) -> crate::Result<()> {
+        match &self.config.mode {
+            WorkspaceMode::Single(data_dir) => {
+                self.load_single_workspace(data_dir).await
+            }
+            WorkspaceMode::Multi(workspaces_dir) => {
+                self.init_multi_workspace(workspaces_dir).await
+            }
+        }
+    }
 
+    /// Initialize multi-workspace mode by discovering workspaces.
+    async fn init_multi_workspace(&self, workspaces_dir: &PathBuf) -> crate::Result<()> {
+        let mut registry = WorkspaceRegistry::new(workspaces_dir);
+        registry.discover().await?;
+        *self.registry.write().await = Some(registry);
+        Ok(())
+    }
+
+    /// Load a single workspace from a directory (legacy mode).
+    async fn load_single_workspace(&self, data_dir: &PathBuf) -> crate::Result<()> {
         // Look for workspace.dsl first, then workspace.json
         let dsl_path = data_dir.join("workspace.dsl");
         let json_path = data_dir.join("workspace.json");
@@ -110,6 +177,58 @@ impl AppState {
         Ok(())
     }
 
+    /// Load workspace from the data directory (legacy method for compatibility).
+    pub async fn load_workspace(&self) -> crate::Result<()> {
+        if let WorkspaceMode::Single(data_dir) = &self.config.mode {
+            self.load_single_workspace(data_dir).await
+        } else {
+            Ok(())
+        }
+    }
+
+    /// Get a workspace by ID (for multi-workspace mode) or the single workspace.
+    pub async fn get_workspace_by_id(&self, id: &str) -> Option<Workspace> {
+        let registry = self.registry.read().await;
+        if let Some(reg) = registry.as_ref() {
+            reg.get_workspace(id).await.ok().flatten()
+        } else {
+            None
+        }
+    }
+
+    /// Get workspace info by ID.
+    pub async fn get_workspace_info(&self, id: &str) -> Option<crate::discovery::WorkspaceInfo> {
+        let registry = self.registry.read().await;
+        registry.as_ref()?.get_info(id).cloned()
+    }
+
+    /// List all workspaces (for multi-workspace mode).
+    pub async fn list_workspaces(&self) -> Vec<crate::discovery::WorkspaceInfo> {
+        let registry = self.registry.read().await;
+        if let Some(reg) = registry.as_ref() {
+            reg.list().into_iter().cloned().collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Invalidate a workspace from the cache.
+    pub async fn invalidate_workspace(&self, id: &str) {
+        let registry = self.registry.read().await;
+        if let Some(reg) = registry.as_ref() {
+            reg.invalidate(id).await;
+        }
+    }
+
+    /// Rediscover workspaces (for multi-workspace mode).
+    pub async fn rediscover_workspaces(&self) -> crate::Result<()> {
+        let mut registry = self.registry.write().await;
+        if let Some(reg) = registry.as_mut() {
+            reg.discover().await?;
+        }
+        Ok(())
+    }
+
     /// Save workspace to the data directory.
     pub async fn save_workspace(&self) -> crate::Result<()> {
         let workspace = self.workspace.read().await;
@@ -129,17 +248,27 @@ impl AppState {
         self.workspace.read().await.clone()
     }
 
-    /// Start the file watcher for auto-reload.
+    /// Start the file watcher for auto-reload (single-workspace mode).
     pub async fn start_watcher(&self) -> crate::Result<()> {
         let path = self.workspace_path.read().await;
 
         if let Some(p) = path.as_ref() {
             let watch_path = p.parent()
                 .map(|parent| parent.to_path_buf())
-                .unwrap_or_else(|| self.config.data_dir.clone());
+                .unwrap_or_else(|| self.config.data_dir().clone());
 
             let mut watcher = self.watcher.write().await;
             watcher.start(watch_path, self.clone())?;
+        }
+
+        Ok(())
+    }
+
+    /// Start the file watcher for auto-reload (multi-workspace mode).
+    pub async fn start_multi_watcher(&self) -> crate::Result<()> {
+        if let WorkspaceMode::Multi(ref workspaces_dir) = self.config.mode {
+            let mut watcher = self.watcher.write().await;
+            watcher.start_multi(workspaces_dir.clone(), self.clone())?;
         }
 
         Ok(())
@@ -227,7 +356,7 @@ fn extract_adr_id(filename: &str) -> String {
 }
 
 /// Load documentation files from the directory specified by !docs and !adrs directives.
-async fn load_documentation(workspace: &mut Workspace, data_dir: &std::path::Path) -> crate::Result<()> {
+pub async fn load_documentation(workspace: &mut Workspace, data_dir: &std::path::Path) -> crate::Result<()> {
     // Load docs if !docs directive was specified
     if let Some(docs_path) = workspace.get_property("structurizr.docs").cloned() {
         let docs_dir = data_dir.join(&docs_path);

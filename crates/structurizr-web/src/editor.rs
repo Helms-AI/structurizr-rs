@@ -960,3 +960,229 @@ mod tests {
         assert!(elem1_pos.x < elem2_pos.x);
     }
 }
+
+// ============================================================================
+// Multi-Workspace Mode Editor Handlers
+// ============================================================================
+
+/// Helper function to extract workspace_id from wildcard path.
+fn extract_workspace_id(path: &str) -> String {
+    path.trim_start_matches('/').to_string()
+}
+
+/// Workspace-scoped: Get element positions for a view.
+pub async fn workspace_get_positions(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<Json<Vec<ElementPosition>>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let _workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| crate::error::Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let positions = state.editor.get_positions(&view_key).await;
+    Ok(Json(positions.values().cloned().collect()))
+}
+
+/// Workspace-scoped: Batch update element positions.
+pub async fn workspace_batch_update_positions(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+    Json(req): Json<BatchUpdatePositionsRequest>,
+) -> Result<Json<Vec<ElementPosition>>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let _workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| crate::error::Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    for pos in &req.positions {
+        state.editor.update_position(&view_key, &pos.id, pos.x, pos.y).await;
+
+        state.editor.broadcast(EditorMessage::ElementMoved {
+            view_key: view_key.clone(),
+            element_id: pos.id.clone(),
+            x: pos.x,
+            y: pos.y,
+        });
+    }
+
+    Ok(Json(req.positions))
+}
+
+/// Nested workspace: Get element positions.
+pub async fn workspace_get_positions_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<Json<Vec<ElementPosition>>> {
+    let full_id = format!("{}/{}", category, workspace_id);
+    let _workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| crate::error::Error::WorkspaceNotFound(full_id.clone()))?;
+    let positions = state.editor.get_positions(&view_key).await;
+    Ok(Json(positions.values().cloned().collect()))
+}
+
+/// Nested workspace: Batch update positions.
+pub async fn workspace_batch_update_positions_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+    Json(req): Json<BatchUpdatePositionsRequest>,
+) -> Result<Json<Vec<ElementPosition>>> {
+    let full_id = format!("{}/{}", category, workspace_id);
+    let _workspace = state.get_workspace_by_id(&full_id).await
+        .ok_or_else(|| crate::error::Error::WorkspaceNotFound(full_id.clone()))?;
+    for pos in &req.positions {
+        state.editor.update_position(&view_key, &pos.id, pos.x, pos.y).await;
+        state.editor.broadcast(EditorMessage::ElementMoved {
+            view_key: view_key.clone(),
+            element_id: pos.id.clone(),
+            x: pos.x,
+            y: pos.y,
+        });
+    }
+    Ok(Json(req.positions))
+}
+
+// ============================================================================
+// Multi-Workspace WebSocket Handlers
+// ============================================================================
+
+/// WebSocket handler for multi-workspace editor (single-level: /w/:workspace_id/ws/edit/:key).
+pub async fn workspace_editor_ws(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> impl IntoResponse {
+    ws.on_upgrade(move |socket| handle_workspace_editor_socket(socket, state, workspace_id, view_key))
+}
+
+/// WebSocket handler for multi-workspace editor (nested: /w/:category/:workspace_id/ws/edit/:key).
+pub async fn workspace_editor_ws_nested(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> impl IntoResponse {
+    let full_id = format!("{}/{}", category, workspace_id);
+    ws.on_upgrade(move |socket| handle_workspace_editor_socket(socket, state, full_id, view_key))
+}
+
+/// Handle WebSocket connection for multi-workspace mode.
+async fn handle_workspace_editor_socket(
+    mut socket: WebSocket,
+    state: AppState,
+    workspace_id: String,
+    view_key: String,
+) {
+    info!("Editor WebSocket connected for workspace: {}, view: {}", workspace_id, view_key);
+
+    let editor = state.editor.clone();
+    let mut receiver = editor.broadcast.subscribe();
+
+    // Send initial state
+    if let Some(_workspace) = state.get_workspace_by_id(&workspace_id).await {
+        let positions = editor.get_positions(&view_key).await;
+        let elements: Vec<ElementPosition> = positions.values().cloned().collect();
+
+        let initial = EditorMessage::State {
+            view_key: view_key.clone(),
+            elements,
+            relationships: vec![],
+        };
+
+        if let Ok(json) = serde_json::to_string(&initial) {
+            let _ = socket.send(Message::Text(json.into())).await;
+        }
+    }
+
+    loop {
+        tokio::select! {
+            // Handle incoming messages from client
+            Some(msg) = socket.recv() => {
+                match msg {
+                    Ok(Message::Text(text)) => {
+                        if let Ok(editor_msg) = serde_json::from_str::<EditorMessage>(&text) {
+                            handle_workspace_editor_message(&state, &workspace_id, &editor_msg).await;
+                        }
+                    }
+                    Ok(Message::Close(_)) => {
+                        info!("Editor WebSocket closed for workspace: {}, view: {}", workspace_id, view_key);
+                        break;
+                    }
+                    Err(e) => {
+                        warn!("WebSocket error: {}", e);
+                        break;
+                    }
+                    _ => {}
+                }
+            }
+            // Broadcast updates to this client
+            Ok(broadcast_msg) = receiver.recv() => {
+                // Only send messages for this view
+                let should_send = match &broadcast_msg {
+                    EditorMessage::ElementMoved { view_key: vk, .. } => vk == &view_key,
+                    EditorMessage::State { view_key: vk, .. } => vk == &view_key,
+                    EditorMessage::SelectionChanged { view_key: vk, .. } => vk == &view_key,
+                    _ => true,
+                };
+
+                if should_send {
+                    if let Ok(json) = serde_json::to_string(&broadcast_msg) {
+                        if socket.send(Message::Text(json.into())).await.is_err() {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Handle an editor message for multi-workspace mode.
+async fn handle_workspace_editor_message(state: &AppState, workspace_id: &str, message: &EditorMessage) {
+    let editor = &state.editor;
+
+    match message {
+        EditorMessage::ElementMoved { view_key, element_id, x, y } => {
+            debug!("Element {} moved to ({}, {}) in workspace {}", element_id, x, y, workspace_id);
+            editor.update_position(view_key, element_id, *x, *y).await;
+
+            // Update workspace
+            if let Some(mut workspace) = state.get_workspace_by_id(workspace_id).await {
+                update_element_position_in_workspace(&mut workspace, view_key, element_id, *x, *y);
+                // Note: Multi-workspace mode doesn't persist changes back to registry
+                // This would require additional registry support
+            }
+
+            // Broadcast to other clients
+            editor.broadcast(message.clone());
+        }
+        EditorMessage::Save => {
+            debug!("Save requested for workspace {}", workspace_id);
+            // Save not yet implemented for multi-workspace mode
+            // Would need to update the workspace file in the discovered directory
+        }
+        EditorMessage::AutoLayout { view_key } => {
+            debug!("Auto-layout requested for view {} in workspace {}", view_key, workspace_id);
+            if let Some(workspace) = state.get_workspace_by_id(workspace_id).await {
+                if let Some(positions) = handle_auto_layout(&workspace, view_key).await {
+                    // Update all positions in the editor state
+                    for pos in &positions {
+                        editor.update_position(view_key, &pos.id, pos.x, pos.y).await;
+                    }
+                    // Broadcast the layout update
+                    editor.broadcast(EditorMessage::State {
+                        view_key: view_key.clone(),
+                        elements: positions,
+                        relationships: vec![],
+                    });
+                }
+            }
+        }
+        EditorMessage::Undo { view_key } => {
+            debug!("Undo requested for view {} in workspace {}", view_key, workspace_id);
+            // Undo not yet implemented for multi-workspace mode
+        }
+        EditorMessage::Redo { view_key } => {
+            debug!("Redo requested for view {} in workspace {}", view_key, workspace_id);
+            // Redo not yet implemented for multi-workspace mode
+        }
+        _ => {}
+    }
+}
