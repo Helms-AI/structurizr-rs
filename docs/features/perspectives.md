@@ -96,7 +96,7 @@ curl http://localhost:8080/view/SystemLandscape/svg?perspective=Security
 
 ## Example
 
-See `examples/perspectives_example.rs` for a complete working example:
+See `workspaces/perspectives_example.rs` for a complete working example:
 
 ```bash
 cargo run --example perspectives_example

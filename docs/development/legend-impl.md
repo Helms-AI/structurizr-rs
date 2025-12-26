@@ -183,17 +183,17 @@ Example: A diagram with 4 elements and 3 relationships adds ~1025 bytes to the S
 
 Three example files were created:
 
-1. **`examples/render_with_legend.rs`**
+1. **`workspaces/render_with_legend.rs`**
    - Demonstrates programmatic usage
    - Shows comparison between with/without legend
    - Saves output to files for inspection
 
-2. **`examples/legend_example.dsl`**
+2. **`workspaces/legend_example.dsl`**
    - Sample workspace with multiple element types
    - Demonstrates various relationship styles
    - Shows how custom tags affect legend labels
 
-3. **`examples/README_legend.md`**
+3. **`workspaces/README_legend.md`**
    - Comprehensive documentation
    - Usage examples
    - Implementation details
@@ -211,9 +211,9 @@ Three example files were created:
 
 ## Files Created
 
-1. `/Users/kon1790/GitHub/structurizr-rs/examples/render_with_legend.rs`
-2. `/Users/kon1790/GitHub/structurizr-rs/examples/legend_example.dsl`
-3. `/Users/kon1790/GitHub/structurizr-rs/examples/README_legend.md`
+1. `/Users/kon1790/GitHub/structurizr-rs/workspaces/render_with_legend.rs`
+2. `/Users/kon1790/GitHub/structurizr-rs/workspaces/legend_example.dsl`
+3. `/Users/kon1790/GitHub/structurizr-rs/workspaces/README_legend.md`
 4. `/Users/kon1790/GitHub/structurizr-rs/LEGEND_IMPLEMENTATION.md` (this file)
 
 ## Build Verification

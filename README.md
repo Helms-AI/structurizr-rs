@@ -228,12 +228,12 @@ structurizr-rs/
     └── structurizr-web/     # Web server and handlers
 ```
 
-## Examples
+## Workspaces
 
-The `examples/` directory contains sample workspaces of varying complexity:
+The `workspaces/` directory contains sample workspaces of varying complexity:
 
 ```
-examples/
+workspaces/
 ├── small/           # 5-10 elements
 │   ├── startup-saas/
 │   └── clinic-management/
@@ -245,10 +245,14 @@ examples/
     └── manufacturing-iot/
 ```
 
-Run an example:
+Run all workspaces with multi-workspace mode:
 
 ```bash
-cargo run -- serve --workspace examples/small/startup-saas/workspace.dsl
+# Serves all workspaces with an index page
+cargo run -- serve --workspaces-dir workspaces
+
+# Or run a single workspace
+cargo run -- serve --data-dir workspaces/small/startup-saas
 ```
 
 ## Configuration

@@ -156,7 +156,7 @@ All 16 tests pass:
 ## Examples
 
 ### Example DSL File
-- `/Users/kon1790/GitHub/structurizr-rs/examples/directives_example.dsl`
+- `/Users/kon1790/GitHub/structurizr-rs/workspaces/directives_example.dsl`
   - Demonstrates all directive features
   - Shows constants, implied relationships, and property storage
 

@@ -32,9 +32,13 @@ struct Cli {
 enum Commands {
     /// Start the web server
     Serve {
-        /// Directory containing workspace files
-        #[arg(short, long, default_value = ".")]
-        data_dir: PathBuf,
+        /// Directory containing a single workspace (legacy mode)
+        #[arg(short, long)]
+        data_dir: Option<PathBuf>,
+
+        /// Directory containing multiple workspaces (multi-workspace mode)
+        #[arg(long)]
+        workspaces_dir: Option<PathBuf>,
 
         /// Port to listen on
         #[arg(short, long, default_value = "8080")]
@@ -109,14 +113,42 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     match cli.command {
-        Commands::Serve { data_dir, port, host } => {
-            let config = Config::default()
-                .with_data_dir(&data_dir)
-                .with_port(port)
-                .with_host(&host);
+        Commands::Serve { data_dir, workspaces_dir, port, host } => {
+            // Determine workspace mode
+            let config = if let Some(ws_dir) = workspaces_dir {
+                // Explicit multi-workspace mode
+                println!("Starting Structurizr server in multi-workspace mode...");
+                println!("  Workspaces directory: {}", ws_dir.display());
+                Config::multi(&ws_dir)
+                    .with_port(port)
+                    .with_host(&host)
+            } else if let Some(dir) = data_dir {
+                // Explicit single-workspace mode
+                println!("Starting Structurizr server in single-workspace mode...");
+                println!("  Data directory: {}", dir.display());
+                Config::single(&dir)
+                    .with_port(port)
+                    .with_host(&host)
+            } else {
+                // Auto-detect: check for workspaces/ directory
+                let workspaces_path = PathBuf::from("workspaces");
+                if workspaces_path.exists() && workspaces_path.is_dir() {
+                    println!("Starting Structurizr server in multi-workspace mode...");
+                    println!("  Workspaces directory: {}", workspaces_path.display());
+                    Config::multi(&workspaces_path)
+                        .with_port(port)
+                        .with_host(&host)
+                } else {
+                    // Default to single-workspace mode with current directory
+                    let current_dir = PathBuf::from(".");
+                    println!("Starting Structurizr server in single-workspace mode...");
+                    println!("  Data directory: {}", current_dir.display());
+                    Config::single(&current_dir)
+                        .with_port(port)
+                        .with_host(&host)
+                }
+            };
 
-            println!("Starting Structurizr server...");
-            println!("  Data directory: {}", data_dir.display());
             println!("  URL: http://{}:{}", host, port);
             println!();
 

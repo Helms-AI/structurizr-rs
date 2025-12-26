@@ -119,7 +119,7 @@ Comprehensive documentation including:
 - Use cases for different stakeholder types
 - Future enhancement ideas
 
-#### `/Users/kon1790/GitHub/structurizr-rs/examples/perspectives_example.rs`
+#### `/Users/kon1790/GitHub/structurizr-rs/workspaces/perspectives_example.rs`
 
 Working example demonstrating:
 - Creating an e-commerce system
@@ -231,7 +231,7 @@ Potential improvements identified during implementation:
 
 ### Created:
 1. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/perspective_tests.rs`
-2. `/Users/kon1790/GitHub/structurizr-rs/examples/perspectives_example.rs`
+2. `/Users/kon1790/GitHub/structurizr-rs/workspaces/perspectives_example.rs`
 3. `/Users/kon1790/GitHub/structurizr-rs/PERSPECTIVES.md`
 4. `/Users/kon1790/GitHub/structurizr-rs/PERSPECTIVES_IMPLEMENTATION.md` (this file)
 

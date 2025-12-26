@@ -5,7 +5,7 @@ Welcome to the documentation for **structurizr-rs**, a Rust implementation of St
 ## Quick Links
 
 - [Demo Workspace](../demo/README.md) - Get started with the demo
-- [Examples](../examples/) - Example DSL files and code
+- [Examples](../workspaces/) - Example DSL files and code
 
 ---
 
@@ -52,7 +52,7 @@ structurizr-rs/
 │   └── structurizr-web/    # Axum-based web server
 ├── docs/                   # This documentation
 ├── demo/                   # Demo workspace
-├── examples/               # Example files
+├── workspaces/               # Example files
 └── assets/                 # Diagrams, images, exports
 ```
 
