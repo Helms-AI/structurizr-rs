@@ -4453,14 +4453,16 @@ fn generate_export_viewer_html(
 /// Generate Mermaid viewer HTML.
 fn generate_mermaid_viewer_html(workspace: &Workspace, view_key: &str, base_path: &str, code: &str) -> String {
     // Strip markdown fence markers from Mermaid output
-    let clean_code = code
-        .trim()
-        .strip_prefix("```mermaid")
-        .unwrap_or(code)
-        .strip_prefix("```")
-        .unwrap_or(code)
-        .strip_suffix("```")
-        .unwrap_or(code)
+    // Chain each operation properly so we don't fall back to the original
+    let trimmed = code.trim();
+    let clean_code = trimmed
+        .strip_prefix("```mermaid\n")
+        .or_else(|| trimmed.strip_prefix("```mermaid"))
+        .unwrap_or(trimmed);
+    let clean_code = clean_code
+        .strip_suffix("\n```")
+        .or_else(|| clean_code.strip_suffix("```"))
+        .unwrap_or(clean_code)
         .trim();
 
     let escaped_for_js = clean_code
