@@ -229,12 +229,14 @@ fn generate_breadcrumb(config: &LayoutConfig) -> String {
     match (config.workspace_id, config.workspace_name) {
         (Some(id), Some(_name)) => {
             // Multi-workspace mode: "All Workspaces / {workspace-id}"
+            // The workspace name links back to the workspace index page
             format!(
                 r#"<div class="breadcrumb">
                     <a href="/">All Workspaces</a>
                     <span class="separator">/</span>
-                    <span class="current">{}</span>
+                    <a href="/w/{}" class="workspace-link">{}</a>
                 </div>"#,
+                escape_html(id),
                 escape_html(id),
             )
         }
@@ -244,16 +246,17 @@ fn generate_breadcrumb(config: &LayoutConfig) -> String {
                 r#"<div class="breadcrumb">
                     <a href="/">All Workspaces</a>
                     <span class="separator">/</span>
-                    <span class="current">{}</span>
+                    <a href="/w/{}" class="workspace-link">{}</a>
                 </div>"#,
+                escape_html(id),
                 escape_html(id),
             )
         }
         (None, Some(name)) => {
-            // Single-workspace mode: just show workspace name
+            // Single-workspace mode: just show workspace name (no link needed, already on home)
             format!(
                 r#"<div class="breadcrumb">
-                    <span class="current">{}</span>
+                    <a href="/" class="workspace-link">{}</a>
                 </div>"#,
                 escape_html(name)
             )
@@ -367,6 +370,11 @@ fn generate_base_css() -> &'static str {
 
         .breadcrumb a {
             color: var(--link-color);
+            text-decoration: none;
+        }
+
+        .breadcrumb a:hover {
+            text-decoration: underline;
         }
 
         .breadcrumb .separator {
@@ -374,8 +382,13 @@ fn generate_base_css() -> &'static str {
             margin: 0 8px;
         }
 
-        .breadcrumb .current {
+        .breadcrumb .workspace-link {
             color: var(--header-text);
+            font-weight: 500;
+        }
+
+        .breadcrumb .workspace-link:hover {
+            color: var(--link-color);
         }
 
         .nav-links {

@@ -1,11 +1,18 @@
 //! HTTP request handlers.
 
 use axum::{
-    extract::{Path, State},
+    extract::{Path, Query, State},
     http::header,
     response::{Html, IntoResponse},
     Json,
 };
+
+/// Query parameters for export endpoints.
+#[derive(Debug, serde::Deserialize)]
+pub struct ExportQuery {
+    /// If true, return raw code instead of rendered HTML viewer.
+    pub raw: Option<bool>,
+}
 
 use structurizr_core::model::ElementId;
 use structurizr_core::navigation::NavigationIndex;
@@ -1892,48 +1899,84 @@ pub async fn workspace_render_svg(
 pub async fn workspace_export_plantuml(
     State(state): State<AppState>,
     Path((workspace_id, view_key)): Path<(String, String)>,
-) -> Result<impl IntoResponse> {
+    Query(query): Query<ExportQuery>,
+) -> Result<axum::response::Response> {
     let workspace_id = extract_workspace_id(&workspace_id);
     let workspace = state.get_workspace_by_id(&workspace_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
 
-    export_view_plantuml(&workspace, &view_key)
+    let code = get_export_code(&workspace, &view_key, "plantuml")?;
+
+    if query.raw.unwrap_or(false) {
+        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+    } else {
+        let base_path = format!("/w/{}", workspace_id);
+        let html = generate_plantuml_viewer_html(&workspace, &view_key, &base_path, &code);
+        Ok(Html(html).into_response())
+    }
 }
 
 /// Workspace-scoped Mermaid export handler.
 pub async fn workspace_export_mermaid(
     State(state): State<AppState>,
     Path((workspace_id, view_key)): Path<(String, String)>,
-) -> Result<impl IntoResponse> {
+    Query(query): Query<ExportQuery>,
+) -> Result<axum::response::Response> {
     let workspace_id = extract_workspace_id(&workspace_id);
     let workspace = state.get_workspace_by_id(&workspace_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
 
-    export_view_mermaid(&workspace, &view_key)
+    let code = get_export_code(&workspace, &view_key, "mermaid")?;
+
+    if query.raw.unwrap_or(false) {
+        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+    } else {
+        let base_path = format!("/w/{}", workspace_id);
+        let html = generate_mermaid_viewer_html(&workspace, &view_key, &base_path, &code);
+        Ok(Html(html).into_response())
+    }
 }
 
 /// Workspace-scoped DOT export handler.
 pub async fn workspace_export_dot(
     State(state): State<AppState>,
     Path((workspace_id, view_key)): Path<(String, String)>,
-) -> Result<impl IntoResponse> {
+    Query(query): Query<ExportQuery>,
+) -> Result<axum::response::Response> {
     let workspace_id = extract_workspace_id(&workspace_id);
     let workspace = state.get_workspace_by_id(&workspace_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
 
-    export_view_dot(&workspace, &view_key)
+    let code = get_export_code(&workspace, &view_key, "dot")?;
+
+    if query.raw.unwrap_or(false) {
+        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+    } else {
+        let base_path = format!("/w/{}", workspace_id);
+        let html = generate_dot_viewer_html(&workspace, &view_key, &base_path, &code);
+        Ok(Html(html).into_response())
+    }
 }
 
 /// Workspace-scoped D2 export handler.
 pub async fn workspace_export_d2(
     State(state): State<AppState>,
     Path((workspace_id, view_key)): Path<(String, String)>,
-) -> Result<impl IntoResponse> {
+    Query(query): Query<ExportQuery>,
+) -> Result<axum::response::Response> {
     let workspace_id = extract_workspace_id(&workspace_id);
     let workspace = state.get_workspace_by_id(&workspace_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
 
-    export_view_d2(&workspace, &view_key)
+    let code = get_export_code(&workspace, &view_key, "d2")?;
+
+    if query.raw.unwrap_or(false) {
+        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+    } else {
+        let base_path = format!("/w/{}", workspace_id);
+        let html = generate_d2_viewer_html(&workspace, &view_key, &base_path, &code);
+        Ok(Html(html).into_response())
+    }
 }
 
 // ============================================================================
@@ -4076,40 +4119,507 @@ fn render_view_svg(workspace: &Workspace, view_key: &str) -> Result<impl IntoRes
     Ok(([(header::CONTENT_TYPE, "image/svg+xml")], svg))
 }
 
-/// Export view as PlantUML.
-fn export_view_plantuml(workspace: &Workspace, view_key: &str) -> Result<impl IntoResponse> {
+// ============================================================================
+// Export Viewer HTML Generators
+// ============================================================================
+
+/// Get the raw code for an export format (shared by viewer generators).
+fn get_export_code(workspace: &Workspace, view_key: &str, format: &str) -> Result<String> {
     let views = workspace.views();
 
-    let plantuml = if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_system_landscape(workspace, view)?
-    } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_system_context(workspace, view)?
-    } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_container(workspace, view)?
+    match format {
+        "plantuml" => {
+            if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(PlantUmlExporter::export_system_landscape(workspace, view)?)
+            } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(PlantUmlExporter::export_system_context(workspace, view)?)
+            } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(PlantUmlExporter::export_container(workspace, view)?)
+            } else if let Some(view) = views.component_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(PlantUmlExporter::export_component(workspace, view)?)
+            } else if let Some(view) = views.dynamic_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(PlantUmlExporter::export_dynamic(workspace, view)?)
+            } else if let Some(view) = views.deployment_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(PlantUmlExporter::export_deployment(workspace, view)?)
+            } else {
+                let view = SystemLandscapeView::new(view_key);
+                Ok(PlantUmlExporter::export_system_landscape(workspace, &view)?)
+            }
+        },
+        "mermaid" => {
+            if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(MermaidExporter::export_system_landscape(workspace, view)?)
+            } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(MermaidExporter::export_system_context(workspace, view)?)
+            } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(MermaidExporter::export_container(workspace, view)?)
+            } else if let Some(view) = views.component_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(MermaidExporter::export_component(workspace, view)?)
+            } else if let Some(view) = views.dynamic_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(MermaidExporter::export_dynamic(workspace, view)?)
+            } else if let Some(view) = views.deployment_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(MermaidExporter::export_deployment(workspace, view)?)
+            } else {
+                Ok(MermaidExporter::export_flowchart(workspace)?)
+            }
+        },
+        "dot" => {
+            if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(DotExporter::export_system_landscape(workspace, view)?)
+            } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(DotExporter::export_system_context(workspace, view)?)
+            } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(DotExporter::export_container(workspace, view)?)
+            } else if let Some(view) = views.component_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(DotExporter::export_component(workspace, view)?)
+            } else {
+                Ok(DotExporter::export_flowchart(workspace)?)
+            }
+        },
+        "d2" => {
+            if let Some(view) = views.system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(D2Exporter::export_system_landscape(workspace, view)?)
+            } else if let Some(view) = views.system_context_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(D2Exporter::export_system_context(workspace, view)?)
+            } else if let Some(view) = views.container_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(D2Exporter::export_container(workspace, view)?)
+            } else if let Some(view) = views.component_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(D2Exporter::export_component(workspace, view)?)
+            } else if let Some(view) = views.dynamic_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(D2Exporter::export_dynamic(workspace, view)?)
+            } else if let Some(view) = views.deployment_views.iter().find(|v| v.properties.key == view_key) {
+                Ok(D2Exporter::export_deployment(workspace, view)?)
+            } else {
+                Ok(D2Exporter::export_flowchart(workspace)?)
+            }
+        },
+        _ => Ok(String::new()),
+    }
+}
+
+/// Generate export viewer HTML page.
+fn generate_export_viewer_html(
+    workspace: &Workspace,
+    view_key: &str,
+    base_path: &str,
+    format_name: &str,
+    code: &str,
+    render_script: &str,
+) -> String {
+    let workspace_id = if base_path.starts_with("/w/") {
+        Some(&base_path[3..])
     } else {
-        let view = SystemLandscapeView::new(view_key);
-        PlantUmlExporter::export_system_landscape(workspace, &view)?
+        None
     };
 
-    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], plantuml))
+    let title = format!("{} - {} ({})", view_key, workspace.name, format_name);
+    let escaped_code = escape_html(code);
+    let raw_url = format!("{}/view/{}/{}?raw=true", base_path, view_key, format_name.to_lowercase());
+    let view_url = format!("{}/view/{}", base_path, view_key);
+
+    let extra_styles = r##"<style>
+        .export-viewer {
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }
+        .export-toolbar {
+            background: var(--toolbar-bg);
+            color: var(--toolbar-text);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            border-bottom: 1px solid var(--toolbar-border);
+            flex-shrink: 0;
+        }
+        .export-toolbar a, .export-toolbar button {
+            color: var(--link-color);
+            text-decoration: none;
+            background: none;
+            border: none;
+            cursor: pointer;
+            font-size: inherit;
+            font-family: inherit;
+            padding: 0;
+        }
+        .export-toolbar a:hover, .export-toolbar button:hover {
+            text-decoration: underline;
+        }
+        .export-toolbar .separator {
+            border-left: 1px solid var(--border-color);
+            height: 20px;
+        }
+        .export-toolbar .format-badge {
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .export-content {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+        .render-panel {
+            flex: 1;
+            overflow: auto;
+            padding: 20px;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            background: var(--canvas-bg);
+        }
+        .render-panel svg {
+            max-width: 100%;
+            height: auto;
+        }
+        .render-panel .mermaid {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+        }
+        .code-panel {
+            width: 450px;
+            background: var(--bg-secondary);
+            border-left: 1px solid var(--border-color);
+            overflow: auto;
+            display: none;
+            flex-direction: column;
+        }
+        .code-panel.visible {
+            display: flex;
+        }
+        .code-panel-header {
+            background: var(--bg-tertiary);
+            padding: 10px 15px;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            font-size: 13px;
+            flex-shrink: 0;
+        }
+        .code-panel pre {
+            margin: 0;
+            padding: 15px;
+            font-size: 12px;
+            line-height: 1.5;
+            white-space: pre-wrap;
+            word-break: break-word;
+            flex: 1;
+            overflow: auto;
+            background: var(--pre-bg);
+        }
+        .code-panel code {
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            color: var(--code-text);
+        }
+        .render-error {
+            background: var(--status-deprecated-bg);
+            color: var(--status-deprecated-text);
+            padding: 20px 30px;
+            border-radius: 8px;
+            text-align: center;
+            max-width: 500px;
+        }
+        .render-error h3 {
+            margin: 0 0 10px 0;
+        }
+        .render-error p {
+            margin: 0 0 15px 0;
+        }
+        .render-error button {
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .render-loading {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            color: var(--text-secondary);
+        }
+        .render-loading .spinner {
+            width: 40px;
+            height: 40px;
+            border: 3px solid var(--border-color);
+            border-top-color: var(--link-color);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        .copy-feedback {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            background: var(--status-accepted-bg);
+            color: var(--status-accepted-text);
+            padding: 10px 20px;
+            border-radius: 6px;
+            opacity: 0;
+            transition: opacity 0.3s;
+            z-index: 1000;
+        }
+        .copy-feedback.visible {
+            opacity: 1;
+        }
+    </style>"##;
+
+    let content = format!(r##"
+        <div class="export-viewer">
+            <div class="export-toolbar">
+                <a href="{view_url}">Back to Diagram</a>
+                <div class="separator"></div>
+                <span class="format-badge">{format_name}</span>
+                <div class="separator"></div>
+                <button onclick="toggleCode()">Toggle Code</button>
+                <button onclick="copyCode()">Copy Code</button>
+                <a href="{raw_url}" download="{view_key}.{ext}">Download</a>
+            </div>
+            <div class="export-content">
+                <div class="render-panel" id="render-panel">
+                    <div class="render-loading" id="loading">
+                        <div class="spinner"></div>
+                        <span>Rendering {format_name}...</span>
+                    </div>
+                </div>
+                <div class="code-panel" id="code-panel">
+                    <div class="code-panel-header">{format_name} Code</div>
+                    <pre><code id="source-code">{escaped_code}</code></pre>
+                </div>
+            </div>
+        </div>
+        <div class="copy-feedback" id="copy-feedback">Copied to clipboard!</div>
+    "##,
+        view_url = view_url,
+        format_name = format_name,
+        raw_url = raw_url,
+        view_key = view_key,
+        ext = format_name.to_lowercase(),
+        escaped_code = escaped_code,
+    );
+
+    let extra_scripts = format!(r##"<script>
+        const sourceCode = document.getElementById('source-code').textContent;
+
+        function toggleCode() {{
+            document.getElementById('code-panel').classList.toggle('visible');
+        }}
+
+        function copyCode() {{
+            navigator.clipboard.writeText(sourceCode).then(() => {{
+                const feedback = document.getElementById('copy-feedback');
+                feedback.classList.add('visible');
+                setTimeout(() => feedback.classList.remove('visible'), 2000);
+            }});
+        }}
+
+        function showError(message) {{
+            document.getElementById('loading').style.display = 'none';
+            document.getElementById('render-panel').innerHTML = `
+                <div class="render-error">
+                    <h3>Rendering Failed</h3>
+                    <p>${{message}}</p>
+                    <button onclick="toggleCode()">View Source Code</button>
+                </div>
+            `;
+            document.getElementById('code-panel').classList.add('visible');
+        }}
+
+        {render_script}
+    </script>"##, render_script = render_script);
+
+    let layout_config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(workspace.name.as_str()),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Export,
+        content_type: ContentType::FullViewport,
+        extra_head: extra_styles,
+        extra_body_end: &extra_scripts,
+    };
+
+    generate_page_layout(&layout_config, &content)
 }
 
-/// Export view as Mermaid.
-fn export_view_mermaid(workspace: &Workspace, _view_key: &str) -> Result<impl IntoResponse> {
-    let mermaid = MermaidExporter::export_flowchart(workspace)?;
-    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], mermaid))
+/// Generate Mermaid viewer HTML.
+fn generate_mermaid_viewer_html(workspace: &Workspace, view_key: &str, base_path: &str, code: &str) -> String {
+    // Strip markdown fence markers from Mermaid output
+    let clean_code = code
+        .trim()
+        .strip_prefix("```mermaid")
+        .unwrap_or(code)
+        .strip_prefix("```")
+        .unwrap_or(code)
+        .strip_suffix("```")
+        .unwrap_or(code)
+        .trim();
+
+    let escaped_for_js = clean_code
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("${", "\\${");
+
+    let render_script = format!(r##"
+        (async function() {{
+            try {{
+                const {{ default: mermaid }} = await import('https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.esm.min.mjs');
+
+                const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+                mermaid.initialize({{
+                    startOnLoad: false,
+                    theme: isDark ? 'dark' : 'default',
+                    securityLevel: 'loose',
+                    flowchart: {{ useMaxWidth: true }},
+                    c4: {{ useMaxWidth: true }}
+                }});
+
+                const code = `{escaped_code}`;
+                const {{ svg }} = await mermaid.render('mermaid-diagram', code);
+
+                document.getElementById('loading').style.display = 'none';
+                const container = document.createElement('div');
+                container.className = 'mermaid';
+                container.innerHTML = svg;
+                document.getElementById('render-panel').appendChild(container);
+            }} catch (error) {{
+                showError('Failed to render Mermaid diagram: ' + error.message);
+            }}
+        }})();
+    "##, escaped_code = escaped_for_js);
+
+    generate_export_viewer_html(workspace, view_key, base_path, "Mermaid", code, &render_script)
 }
 
-/// Export view as DOT.
-fn export_view_dot(workspace: &Workspace, _view_key: &str) -> Result<impl IntoResponse> {
-    let dot = DotExporter::export_flowchart(workspace)?;
-    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], dot))
+/// Generate DOT/Graphviz viewer HTML.
+fn generate_dot_viewer_html(workspace: &Workspace, view_key: &str, base_path: &str, code: &str) -> String {
+    let escaped_for_js = code
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("${", "\\${");
+
+    let render_script = format!(r##"
+        (async function() {{
+            try {{
+                const {{ instance }} = await import('https://cdn.jsdelivr.net/npm/@viz-js/viz@3.2.4/+esm');
+
+                const viz = await instance();
+                const code = `{escaped_code}`;
+                const svg = viz.renderSVGElement(code);
+
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('render-panel').appendChild(svg);
+            }} catch (error) {{
+                showError('Failed to render DOT diagram: ' + error.message);
+            }}
+        }})();
+    "##, escaped_code = escaped_for_js);
+
+    generate_export_viewer_html(workspace, view_key, base_path, "DOT", code, &render_script)
 }
 
-/// Export view as D2.
-fn export_view_d2(workspace: &Workspace, _view_key: &str) -> Result<impl IntoResponse> {
-    let d2 = D2Exporter::export_flowchart(workspace)?;
-    Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], d2))
+/// Generate PlantUML viewer HTML (uses Kroki.io for rendering).
+fn generate_plantuml_viewer_html(workspace: &Workspace, view_key: &str, base_path: &str, code: &str) -> String {
+    let escaped_for_js = code
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("${", "\\${");
+
+    let render_script = format!(r##"
+        (async function() {{
+            try {{
+                // Load pako for compression
+                const pako = await import('https://cdn.jsdelivr.net/npm/pako@2.1.0/+esm');
+
+                const code = `{escaped_code}`;
+                const data = new TextEncoder().encode(code);
+                const compressed = pako.default.deflate(data, {{ level: 9 }});
+
+                // Base64 encode for URL
+                let binary = '';
+                for (let i = 0; i < compressed.length; i++) {{
+                    binary += String.fromCharCode(compressed[i]);
+                }}
+                const encoded = btoa(binary)
+                    .replace(/\+/g, '-')
+                    .replace(/\//g, '_');
+
+                const url = `https://kroki.io/plantuml/svg/${{encoded}}`;
+                const response = await fetch(url);
+
+                if (!response.ok) {{
+                    throw new Error(`Kroki.io returned ${{response.status}}: ${{response.statusText}}`);
+                }}
+
+                const svg = await response.text();
+                document.getElementById('loading').style.display = 'none';
+
+                const container = document.createElement('div');
+                container.innerHTML = svg;
+                document.getElementById('render-panel').appendChild(container);
+            }} catch (error) {{
+                showError('Failed to render PlantUML diagram: ' + error.message);
+            }}
+        }})();
+    "##, escaped_code = escaped_for_js);
+
+    generate_export_viewer_html(workspace, view_key, base_path, "PlantUML", code, &render_script)
+}
+
+/// Generate D2 viewer HTML (uses Kroki.io for rendering).
+fn generate_d2_viewer_html(workspace: &Workspace, view_key: &str, base_path: &str, code: &str) -> String {
+    let escaped_for_js = code
+        .replace('\\', "\\\\")
+        .replace('`', "\\`")
+        .replace("${", "\\${");
+
+    let render_script = format!(r##"
+        (async function() {{
+            try {{
+                // Load pako for compression
+                const pako = await import('https://cdn.jsdelivr.net/npm/pako@2.1.0/+esm');
+
+                const code = `{escaped_code}`;
+                const data = new TextEncoder().encode(code);
+                const compressed = pako.default.deflate(data, {{ level: 9 }});
+
+                // Base64 encode for URL
+                let binary = '';
+                for (let i = 0; i < compressed.length; i++) {{
+                    binary += String.fromCharCode(compressed[i]);
+                }}
+                const encoded = btoa(binary)
+                    .replace(/\+/g, '-')
+                    .replace(/\//g, '_');
+
+                const url = `https://kroki.io/d2/svg/${{encoded}}`;
+                const response = await fetch(url);
+
+                if (!response.ok) {{
+                    throw new Error(`Kroki.io returned ${{response.status}}: ${{response.statusText}}`);
+                }}
+
+                const svg = await response.text();
+                document.getElementById('loading').style.display = 'none';
+
+                const container = document.createElement('div');
+                container.innerHTML = svg;
+                document.getElementById('render-panel').appendChild(container);
+            }} catch (error) {{
+                showError('Failed to render D2 diagram: ' + error.message);
+            }}
+        }})();
+    "##, escaped_code = escaped_for_js);
+
+    generate_export_viewer_html(workspace, view_key, base_path, "D2", code, &render_script)
 }
 
 // ============================================================================
@@ -4278,41 +4788,81 @@ pub async fn workspace_render_svg_nested(
 pub async fn workspace_export_plantuml_nested(
     State(state): State<AppState>,
     Path((category, workspace_id, view_key)): Path<(String, String, String)>,
-) -> Result<impl IntoResponse> {
+    Query(query): Query<ExportQuery>,
+) -> Result<axum::response::Response> {
     let full_id = make_nested_workspace_id(&category, &workspace_id);
     let workspace = state.get_workspace_by_id(&full_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
-    export_view_plantuml(&workspace, &view_key)
+
+    let code = get_export_code(&workspace, &view_key, "plantuml")?;
+
+    if query.raw.unwrap_or(false) {
+        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+    } else {
+        let base_path = format!("/w/{}", full_id);
+        let html = generate_plantuml_viewer_html(&workspace, &view_key, &base_path, &code);
+        Ok(Html(html).into_response())
+    }
 }
 
 pub async fn workspace_export_mermaid_nested(
     State(state): State<AppState>,
     Path((category, workspace_id, view_key)): Path<(String, String, String)>,
-) -> Result<impl IntoResponse> {
+    Query(query): Query<ExportQuery>,
+) -> Result<axum::response::Response> {
     let full_id = make_nested_workspace_id(&category, &workspace_id);
     let workspace = state.get_workspace_by_id(&full_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
-    export_view_mermaid(&workspace, &view_key)
+
+    let code = get_export_code(&workspace, &view_key, "mermaid")?;
+
+    if query.raw.unwrap_or(false) {
+        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+    } else {
+        let base_path = format!("/w/{}", full_id);
+        let html = generate_mermaid_viewer_html(&workspace, &view_key, &base_path, &code);
+        Ok(Html(html).into_response())
+    }
 }
 
 pub async fn workspace_export_dot_nested(
     State(state): State<AppState>,
     Path((category, workspace_id, view_key)): Path<(String, String, String)>,
-) -> Result<impl IntoResponse> {
+    Query(query): Query<ExportQuery>,
+) -> Result<axum::response::Response> {
     let full_id = make_nested_workspace_id(&category, &workspace_id);
     let workspace = state.get_workspace_by_id(&full_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
-    export_view_dot(&workspace, &view_key)
+
+    let code = get_export_code(&workspace, &view_key, "dot")?;
+
+    if query.raw.unwrap_or(false) {
+        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+    } else {
+        let base_path = format!("/w/{}", full_id);
+        let html = generate_dot_viewer_html(&workspace, &view_key, &base_path, &code);
+        Ok(Html(html).into_response())
+    }
 }
 
 pub async fn workspace_export_d2_nested(
     State(state): State<AppState>,
     Path((category, workspace_id, view_key)): Path<(String, String, String)>,
-) -> Result<impl IntoResponse> {
+    Query(query): Query<ExportQuery>,
+) -> Result<axum::response::Response> {
     let full_id = make_nested_workspace_id(&category, &workspace_id);
     let workspace = state.get_workspace_by_id(&full_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
-    export_view_d2(&workspace, &view_key)
+
+    let code = get_export_code(&workspace, &view_key, "d2")?;
+
+    if query.raw.unwrap_or(false) {
+        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+    } else {
+        let base_path = format!("/w/{}", full_id);
+        let html = generate_d2_viewer_html(&workspace, &view_key, &base_path, &code);
+        Ok(Html(html).into_response())
+    }
 }
 
 // ============================================================================
