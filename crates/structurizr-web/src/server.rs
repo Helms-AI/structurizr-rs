@@ -1,7 +1,7 @@
 //! Web server implementation.
 
 use axum::{
-    routing::{get, post, put},
+    routing::{get, put},
     Router,
 };
 use tower_http::cors::CorsLayer;
@@ -11,7 +11,7 @@ use tracing::info;
 use crate::editor;
 use crate::error::Result;
 use crate::handlers;
-use crate::state::{AppState, Config, WorkspaceMode};
+use crate::state::{AppState, Config};
 
 /// Structurizr web server.
 pub struct Server {
@@ -24,58 +24,9 @@ impl Server {
         Self { config }
     }
 
-    /// Create a server with default configuration.
-    pub fn with_data_dir(data_dir: impl Into<std::path::PathBuf>) -> Self {
-        Self::new(Config::default().with_data_dir(data_dir))
-    }
-
-    /// Build the router for single-workspace mode.
-    fn build_single_router(state: AppState) -> Router {
-        Router::new()
-            // Pages
-            .route("/", get(handlers::index))
-            .route("/view/:key", get(handlers::view_diagram))
-            .route("/view/:key/animate", get(handlers::view_dynamic_animated))
-            .route("/edit/:key", get(handlers::edit_diagram))
-            .route("/docs", get(handlers::documentation))
-            .route("/search", get(handlers::search_page))
-            .route("/tree", get(handlers::tree_view))
-            .route("/presentation", get(handlers::presentation_mode))
-            .route("/explore", get(handlers::explore_view))
-
-            // API endpoints
-            .route("/api/workspace", get(handlers::get_workspace))
-            .route("/api/validate", get(handlers::validate_workspace))
-            .route("/api/save", post(editor::save))
-            .route("/api/search", get(handlers::search_api))
-            .route("/health", get(handlers::health))
-
-            // Editor API endpoints
-            .route("/api/view/:view_key/positions", get(editor::get_positions))
-            .route(
-                "/api/view/:view_key/positions",
-                put(editor::batch_update_positions),
-            )
-            .route(
-                "/api/view/:view_key/element/:element_id/position",
-                put(editor::update_position),
-            )
-
-            // WebSocket endpoint for real-time updates
-            .route("/ws/edit/:key", get(editor::editor_ws))
-
-            // Export endpoints
-            .route("/export/json", get(handlers::export_json))
-            .route("/view/:key/svg", get(handlers::render_svg))
-            .route("/view/:key/plantuml", get(handlers::export_plantuml))
-            .route("/view/:key/mermaid", get(handlers::export_mermaid))
-            .route("/view/:key/dot", get(handlers::export_dot))
-            .route("/view/:key/d2", get(handlers::export_d2))
-
-            // Middleware
-            .layer(TraceLayer::new_for_http())
-            .layer(CorsLayer::permissive())
-            .with_state(state)
+    /// Create a server with default configuration for a workspaces directory.
+    pub fn with_workspaces_dir(workspaces_dir: impl Into<std::path::PathBuf>) -> Self {
+        Self::new(Config::default().with_workspaces_dir(workspaces_dir))
     }
 
     /// Build the router for multi-workspace mode.
@@ -145,46 +96,25 @@ impl Server {
     pub async fn run(self) -> Result<()> {
         let state = AppState::new(self.config.clone());
 
-        // Initialize based on mode
-        match &self.config.mode {
-            WorkspaceMode::Single(data_dir) => {
-                info!("Starting in single-workspace mode");
-                info!("Loading workspace from {:?}", data_dir);
-                if let Err(e) = state.initialize().await {
-                    tracing::warn!("Failed to load workspace: {}. Starting with empty workspace.", e);
-                }
-
-                // Start file watcher for auto-reload
-                if let Err(e) = state.start_watcher().await {
-                    tracing::warn!("Failed to start file watcher: {}. Auto-reload disabled.", e);
-                } else {
-                    info!("File watcher started - workspace will auto-reload on changes");
-                }
-            }
-            WorkspaceMode::Multi(workspaces_dir) => {
-                info!("Starting in multi-workspace mode");
-                info!("Discovering workspaces in {:?}", workspaces_dir);
-                if let Err(e) = state.initialize().await {
-                    tracing::error!("Failed to discover workspaces: {}", e);
-                } else {
-                    let count = state.list_workspaces().await.len();
-                    info!("Discovered {} workspace(s)", count);
-                }
-
-                // Start file watcher for auto-reload
-                if let Err(e) = state.start_multi_watcher().await {
-                    tracing::warn!("Failed to start file watcher: {}. Auto-reload disabled.", e);
-                } else {
-                    info!("Multi-workspace file watcher started - workspaces will auto-reload on changes");
-                }
-            }
+        // Initialize multi-workspace mode
+        let workspaces_dir = self.config.workspaces_dir();
+        info!("Starting in multi-workspace mode");
+        info!("Discovering workspaces in {:?}", workspaces_dir);
+        if let Err(e) = state.initialize().await {
+            tracing::error!("Failed to discover workspaces: {}", e);
+        } else {
+            let count = state.list_workspaces().await.len();
+            info!("Discovered {} workspace(s)", count);
         }
 
-        let app = if self.config.is_multi_workspace() {
-            Self::build_multi_router(state)
+        // Start file watcher for auto-reload
+        if let Err(e) = state.start_multi_watcher().await {
+            tracing::warn!("Failed to start file watcher: {}. Auto-reload disabled.", e);
         } else {
-            Self::build_single_router(state)
-        };
+            info!("File watcher started - workspaces will auto-reload on changes");
+        }
+
+        let app = Self::build_multi_router(state);
 
         let addr = self.config.address();
         info!("Starting Structurizr server at http://{}", addr);
@@ -196,9 +126,9 @@ impl Server {
     }
 
     /// Run the server on a specific port.
-    pub async fn run_on_port(data_dir: impl Into<std::path::PathBuf>, port: u16) -> Result<()> {
+    pub async fn run_on_port(workspaces_dir: impl Into<std::path::PathBuf>, port: u16) -> Result<()> {
         let config = Config::default()
-            .with_data_dir(data_dir)
+            .with_workspaces_dir(workspaces_dir)
             .with_port(port);
 
         Server::new(config).run().await

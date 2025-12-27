@@ -32,11 +32,7 @@ struct Cli {
 enum Commands {
     /// Start the web server
     Serve {
-        /// Directory containing a single workspace (single-workspace mode)
-        #[arg(short, long)]
-        data_dir: Option<PathBuf>,
-
-        /// Directory containing multiple workspaces (multi-workspace mode)
+        /// Directory containing workspaces
         #[arg(long, default_value = "workspaces")]
         workspaces_dir: PathBuf,
 
@@ -113,35 +109,21 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     match cli.command {
-        Commands::Serve { data_dir, workspaces_dir, port, host } => {
-            // Determine workspace mode
-            // Priority: --data-dir (single-workspace) > --workspaces-dir (multi-workspace, defaults to "workspaces")
-            let config = if let Some(dir) = data_dir {
-                // Explicit single-workspace mode
-                println!("Starting Structurizr server in single-workspace mode...");
-                println!("  Data directory: {}", dir.display());
-                Config::single(&dir)
-                    .with_port(port)
-                    .with_host(&host)
-            } else if workspaces_dir.exists() && workspaces_dir.is_dir() {
-                // Multi-workspace mode (uses default "workspaces" or user-specified directory)
-                println!("Starting Structurizr server in multi-workspace mode...");
-                println!("  Workspaces directory: {}", workspaces_dir.display());
-                Config::multi(&workspaces_dir)
-                    .with_port(port)
-                    .with_host(&host)
-            } else {
-                // Fallback to single-workspace mode with current directory
-                let current_dir = PathBuf::from(".");
-                println!("Starting Structurizr server in single-workspace mode...");
-                println!("  Data directory: {}", current_dir.display());
-                Config::single(&current_dir)
-                    .with_port(port)
-                    .with_host(&host)
-            };
+        Commands::Serve { workspaces_dir, port, host } => {
+            if !workspaces_dir.exists() {
+                eprintln!("Error: Workspaces directory '{}' does not exist.", workspaces_dir.display());
+                eprintln!("Create the directory and add workspace subdirectories, or use --workspaces-dir to specify a different path.");
+                std::process::exit(1);
+            }
 
+            println!("Starting Structurizr server...");
+            println!("  Workspaces directory: {}", workspaces_dir.display());
             println!("  URL: http://{}:{}", host, port);
             println!();
+
+            let config = Config::new(&workspaces_dir)
+                .with_port(port)
+                .with_host(&host);
 
             Server::new(config).run().await?;
         }

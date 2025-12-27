@@ -11,20 +11,11 @@ use crate::discovery::WorkspaceRegistry;
 use crate::editor::EditorState;
 use crate::watcher::FileWatcher;
 
-/// Workspace mode - single workspace or multi-workspace.
-#[derive(Debug, Clone)]
-pub enum WorkspaceMode {
-    /// Single workspace mode (legacy) - serves a single workspace from a directory.
-    Single(PathBuf),
-    /// Multi-workspace mode - discovers and serves multiple workspaces.
-    Multi(PathBuf),
-}
-
 /// Configuration for the web server.
 #[derive(Debug, Clone)]
 pub struct Config {
-    /// Workspace mode (single or multi).
-    pub mode: WorkspaceMode,
+    /// Directory containing workspaces.
+    pub workspaces_dir: PathBuf,
     /// Port to listen on.
     pub port: u16,
     /// Host to bind to.
@@ -38,7 +29,7 @@ pub struct Config {
 impl Default for Config {
     fn default() -> Self {
         Self {
-            mode: WorkspaceMode::Single(PathBuf::from(".")),
+            workspaces_dir: PathBuf::from("workspaces"),
             port: 8080,
             host: "127.0.0.1".to_string(),
             auto_save_interval: 5000,
@@ -48,42 +39,21 @@ impl Default for Config {
 }
 
 impl Config {
-    /// Create a new config with single workspace mode.
-    pub fn single(data_dir: impl Into<PathBuf>) -> Self {
+    /// Create a new config with a workspaces directory.
+    pub fn new(workspaces_dir: impl Into<PathBuf>) -> Self {
         Self {
-            mode: WorkspaceMode::Single(data_dir.into()),
+            workspaces_dir: workspaces_dir.into(),
             ..Default::default()
         }
     }
 
-    /// Create a new config with multi-workspace mode.
-    pub fn multi(workspaces_dir: impl Into<PathBuf>) -> Self {
-        Self {
-            mode: WorkspaceMode::Multi(workspaces_dir.into()),
-            ..Default::default()
-        }
-    }
-
-    /// Get the data directory (for single workspace mode).
-    pub fn data_dir(&self) -> &PathBuf {
-        match &self.mode {
-            WorkspaceMode::Single(path) => path,
-            WorkspaceMode::Multi(path) => path,
-        }
-    }
-
-    /// Check if in multi-workspace mode.
-    pub fn is_multi_workspace(&self) -> bool {
-        matches!(self.mode, WorkspaceMode::Multi(_))
-    }
-
-    pub fn with_data_dir(mut self, path: impl Into<PathBuf>) -> Self {
-        self.mode = WorkspaceMode::Single(path.into());
-        self
+    /// Get the workspaces directory.
+    pub fn workspaces_dir(&self) -> &PathBuf {
+        &self.workspaces_dir
     }
 
     pub fn with_workspaces_dir(mut self, path: impl Into<PathBuf>) -> Self {
-        self.mode = WorkspaceMode::Multi(path.into());
+        self.workspaces_dir = path.into();
         self
     }
 
@@ -106,11 +76,7 @@ impl Config {
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
-    /// Single workspace (for single-workspace mode).
-    pub workspace: Arc<RwLock<Option<Workspace>>>,
-    /// Path to single workspace file.
-    pub workspace_path: Arc<RwLock<Option<PathBuf>>>,
-    /// Workspace registry (for multi-workspace mode).
+    /// Workspace registry for discovering and managing workspaces.
     pub registry: Arc<RwLock<Option<WorkspaceRegistry>>>,
     pub editor: EditorState,
     pub watcher: Arc<RwLock<FileWatcher>>,
@@ -120,73 +86,21 @@ impl AppState {
     pub fn new(config: Config) -> Self {
         Self {
             config,
-            workspace: Arc::new(RwLock::new(None)),
-            workspace_path: Arc::new(RwLock::new(None)),
             registry: Arc::new(RwLock::new(None)),
             editor: EditorState::new(),
             watcher: Arc::new(RwLock::new(FileWatcher::new())),
         }
     }
 
-    /// Initialize the state based on workspace mode.
+    /// Initialize the state by discovering workspaces.
     pub async fn initialize(&self) -> crate::Result<()> {
-        match &self.config.mode {
-            WorkspaceMode::Single(data_dir) => {
-                self.load_single_workspace(data_dir).await
-            }
-            WorkspaceMode::Multi(workspaces_dir) => {
-                self.init_multi_workspace(workspaces_dir).await
-            }
-        }
-    }
-
-    /// Initialize multi-workspace mode by discovering workspaces.
-    async fn init_multi_workspace(&self, workspaces_dir: &PathBuf) -> crate::Result<()> {
-        let mut registry = WorkspaceRegistry::new(workspaces_dir);
+        let mut registry = WorkspaceRegistry::new(&self.config.workspaces_dir);
         registry.discover().await?;
         *self.registry.write().await = Some(registry);
         Ok(())
     }
 
-    /// Load a single workspace from a directory (legacy mode).
-    async fn load_single_workspace(&self, data_dir: &PathBuf) -> crate::Result<()> {
-        // Look for workspace.dsl first, then workspace.json
-        let dsl_path = data_dir.join("workspace.dsl");
-        let json_path = data_dir.join("workspace.json");
-
-        let (mut workspace, path) = if dsl_path.exists() {
-            let content = tokio::fs::read_to_string(&dsl_path).await?;
-            let ws = structurizr_dsl::parse_with_base_path(&content, Some(data_dir))?;
-            (ws, dsl_path)
-        } else if json_path.exists() {
-            let content = tokio::fs::read_to_string(&json_path).await?;
-            let ws = Workspace::from_json(&content)?;
-            (ws, json_path)
-        } else {
-            // Create a default workspace
-            let ws = Workspace::new("Untitled", "A new workspace");
-            (ws, dsl_path)
-        };
-
-        // Load documentation and ADRs from disk if !docs or !adrs directives were specified
-        load_documentation(&mut workspace, data_dir).await?;
-
-        *self.workspace.write().await = Some(workspace);
-        *self.workspace_path.write().await = Some(path);
-
-        Ok(())
-    }
-
-    /// Load workspace from the data directory (legacy method for compatibility).
-    pub async fn load_workspace(&self) -> crate::Result<()> {
-        if let WorkspaceMode::Single(data_dir) = &self.config.mode {
-            self.load_single_workspace(data_dir).await
-        } else {
-            Ok(())
-        }
-    }
-
-    /// Get a workspace by ID (for multi-workspace mode) or the single workspace.
+    /// Get a workspace by ID.
     pub async fn get_workspace_by_id(&self, id: &str) -> Option<Workspace> {
         let registry = self.registry.read().await;
         if let Some(reg) = registry.as_ref() {
@@ -202,7 +116,7 @@ impl AppState {
         registry.as_ref()?.get_info(id).cloned()
     }
 
-    /// List all workspaces (for multi-workspace mode).
+    /// List all workspaces.
     pub async fn list_workspaces(&self) -> Vec<crate::discovery::WorkspaceInfo> {
         let registry = self.registry.read().await;
         if let Some(reg) = registry.as_ref() {
@@ -220,7 +134,7 @@ impl AppState {
         }
     }
 
-    /// Rediscover workspaces (for multi-workspace mode).
+    /// Rediscover workspaces.
     pub async fn rediscover_workspaces(&self) -> crate::Result<()> {
         let mut registry = self.registry.write().await;
         if let Some(reg) = registry.as_mut() {
@@ -229,48 +143,10 @@ impl AppState {
         Ok(())
     }
 
-    /// Save workspace to the data directory.
-    pub async fn save_workspace(&self) -> crate::Result<()> {
-        let workspace = self.workspace.read().await;
-        let path = self.workspace_path.read().await;
-
-        if let (Some(ws), Some(p)) = (workspace.as_ref(), path.as_ref()) {
-            let json = ws.to_json()?;
-            let json_path = p.with_extension("json");
-            tokio::fs::write(json_path, json).await?;
-        }
-
-        Ok(())
-    }
-
-    /// Get a clone of the current workspace.
-    pub async fn get_workspace(&self) -> Option<Workspace> {
-        self.workspace.read().await.clone()
-    }
-
-    /// Start the file watcher for auto-reload (single-workspace mode).
-    pub async fn start_watcher(&self) -> crate::Result<()> {
-        let path = self.workspace_path.read().await;
-
-        if let Some(p) = path.as_ref() {
-            let watch_path = p.parent()
-                .map(|parent| parent.to_path_buf())
-                .unwrap_or_else(|| self.config.data_dir().clone());
-
-            let mut watcher = self.watcher.write().await;
-            watcher.start(watch_path, self.clone())?;
-        }
-
-        Ok(())
-    }
-
-    /// Start the file watcher for auto-reload (multi-workspace mode).
+    /// Start the file watcher for auto-reload.
     pub async fn start_multi_watcher(&self) -> crate::Result<()> {
-        if let WorkspaceMode::Multi(ref workspaces_dir) = self.config.mode {
-            let mut watcher = self.watcher.write().await;
-            watcher.start_multi(workspaces_dir.clone(), self.clone())?;
-        }
-
+        let mut watcher = self.watcher.write().await;
+        watcher.start_multi(self.config.workspaces_dir.clone(), self.clone())?;
         Ok(())
     }
 

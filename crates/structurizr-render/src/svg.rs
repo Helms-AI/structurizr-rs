@@ -888,9 +888,9 @@ impl SvgRenderer {
             default_rel_style.color, default_rel_style.color
         ));
 
-        // Background
+        // Background - transparent to allow CSS theming
         svg.push_str(&format!(
-            r##"  <rect width="{:.0}" height="{:.0}" fill="#ffffff"/>"##,
+            r##"  <rect width="{:.0}" height="{:.0}" fill="transparent"/>"##,
             view_width, view_height
         ));
         svg.push('\n');
@@ -1326,9 +1326,9 @@ impl SvgRenderer {
         ));
         svg.push('\n');
 
-        // Background
+        // Background - transparent to allow CSS theming
         svg.push_str(&format!(
-            r##"  <rect width="{}" height="{}" fill="#ffffff"/>"##,
+            r##"  <rect width="{}" height="{}" fill="transparent"/>"##,
             self.width, self.height
         ));
         svg.push('\n');
@@ -1575,9 +1575,9 @@ impl SvgRenderer {
             default_rel_style.color, default_rel_style.color
         ));
 
-        // Background - cover the full viewBox area
+        // Background - transparent to allow CSS theming (covers the full viewBox area)
         svg.push_str(&format!(
-            r##"  <rect x="{:.0}" y="{:.0}" width="{:.0}" height="{:.0}" fill="#ffffff"/>"##,
+            r##"  <rect x="{:.0}" y="{:.0}" width="{:.0}" height="{:.0}" fill="transparent"/>"##,
             bounds.min_x, bounds.min_y, view_width, view_height
         ));
         svg.push('\n');

@@ -16,53 +16,89 @@ use structurizr_render::SvgRenderer;
 use structurizr_render::layout::{GridLayout, LayoutEdge};
 
 use crate::error::{Error, Result};
+use crate::layout::{ContentType, LayoutConfig, NavItem, generate_page_layout};
 use crate::markdown::{escape_html, render_markdown, render_markdown_with_heading_ids, ExtractedHeading};
 use crate::state::AppState;
 
-/// Home page handler.
-pub async fn index(State(state): State<AppState>) -> Result<Html<String>> {
-    let workspace = state.get_workspace().await;
 
-    let html = if let Some(ws) = workspace {
-        let views = ws.views();
-        let view_list: Vec<String> = views.all_keys().iter().map(|k| k.to_string()).collect();
+/// Generate home page HTML content (shared between single and multi-workspace modes).
+fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option<&str>) -> String {
+    let views = ws.views();
+    let view_list: Vec<String> = views.all_keys().iter().map(|k| k.to_string()).collect();
 
-        // Check which views are dynamic views
-        let dynamic_view_keys: std::collections::HashSet<String> = views.dynamic_views.iter()
-            .map(|v| v.properties.key.clone())
-            .collect();
+    // Check which views are dynamic views
+    let dynamic_view_keys: std::collections::HashSet<String> = views.dynamic_views.iter()
+        .map(|v| v.properties.key.clone())
+        .collect();
 
+    // Page-specific styles
+    let extra_styles = r##"<style>
+        h1 { margin-top: 0; }
+        .workspace-info {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px var(--shadow);
+        }
+        .workspace-info p { margin: 8px 0; }
+        .views {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+        .view-card {
+            background: var(--card-bg);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px var(--shadow);
+            transition: box-shadow 0.2s ease;
+        }
+        .view-card:hover {
+            box-shadow: 0 4px 8px var(--shadow-medium);
+        }
+        .view-card h3 { margin-top: 0; }
+        .view-card p {
+            font-size: 13px;
+            color: var(--text-secondary);
+        }
+    </style>"##;
+
+    // Build view cards
+    let view_cards: String = view_list.iter().map(|v| {
+        let bp = base_path;
+        let animate_link = if dynamic_view_keys.contains(v) {
+            format!(r#" | <a href="{}/view/{}/animate">Animate</a>"#, bp, v)
+        } else {
+            String::new()
+        };
         format!(
-            r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>{} - Structurizr</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        h1 {{ color: #333; }}
-        .workspace-info {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        .views {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }}
-        .view-card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        .view-card h3 {{ margin-top: 0; }}
-        .view-card a {{ color: #0066cc; text-decoration: none; }}
-        .view-card a:hover {{ text-decoration: underline; }}
-        .nav {{ margin-bottom: 20px; }}
-        .nav a {{ margin-right: 15px; color: #0066cc; text-decoration: none; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="nav">
-            <a href="/">Home</a>
-            <a href="/tree">Tree View</a>
-            <a href="/docs">Documentation</a>
-            <a href="/search">Search</a>
-            <a href="/explore">Explore Graph</a>            <a href="/presentation">Presentation Mode</a>
-            <a href="/api/workspace">API</a>
-            <a href="/export/json">Export JSON</a>
-        </div>
-        <h1>{}</h1>
+            r#"<div class="view-card">
+                <h3><a href="{}/view/{}">{}</a></h3>
+                <p>
+                    <a href="{}/edit/{}">Edit</a> |
+                    <a href="{}/presentation?views={}">Present</a>{}
+                    | <a href="{}/view/{}/svg">SVG</a>
+                    | <a href="{}/view/{}/plantuml">PlantUML</a>
+                    | <a href="{}/view/{}/mermaid">Mermaid</a>
+                    | <a href="{}/view/{}/dot">DOT</a>
+                    | <a href="{}/view/{}/d2">D2</a>
+                </p>
+            </div>"#,
+            bp, v, escape_html(v),
+            bp, v,
+            bp, v, animate_link,
+            bp, v,
+            bp, v,
+            bp, v,
+            bp, v,
+            bp, v
+        )
+    }).collect::<Vec<_>>().join("\n");
+
+    // Build content
+    let content = format!(
+        r#"<h1>{}</h1>
         <div class="workspace-info">
             <p>{}</p>
             <p><strong>People:</strong> {}</p>
@@ -72,87 +108,29 @@ pub async fn index(State(state): State<AppState>) -> Result<Html<String>> {
         <h2>Views</h2>
         <div class="views">
             {}
-        </div>
-    </div>
-</body>
-</html>"#,
-            ws.name,
-            ws.name,
-            ws.description.as_deref().unwrap_or(""),
-            ws.model().people.len(),
-            ws.model().software_systems.len(),
-            ws.model().relationships.len(),
-            view_list.iter().map(|v| {
-                let animate_link = if dynamic_view_keys.contains(v) {
-                    format!(r#" | <a href="/view/{}/animate">Animate</a>"#, v)
-                } else {
-                    String::new()
-                };
-                format!(
-                    r#"<div class="view-card"><h3><a href="/view/{}">{}</a></h3><p><a href="/edit/{}">Edit</a> | <a href="/presentation?views={}">Present</a>{} | <a href="/view/{}/svg">SVG</a> | <a href="/view/{}/plantuml">PlantUML</a> | <a href="/view/{}/mermaid">Mermaid</a> | <a href="/view/{}/dot">DOT</a> | <a href="/view/{}/d2">D2</a></p></div>"#,
-                    v, v, v, v, animate_link, v, v, v, v, v
-                )
-            }).collect::<Vec<_>>().join("\n            ")
-        )
-    } else {
-        r#"<!DOCTYPE html>
-<html>
-<head><title>Structurizr</title></head>
-<body>
-    <h1>No workspace loaded</h1>
-    <p>Create a workspace.dsl file in the data directory.</p>
-</body>
-</html>"#.to_string()
+        </div>"#,
+        escape_html(&ws.name),
+        ws.description.as_deref().map(escape_html).unwrap_or_default(),
+        ws.model().people.len(),
+        ws.model().software_systems.len(),
+        ws.model().relationships.len(),
+        view_cards
+    );
+
+    let config = LayoutConfig {
+        title: &ws.name,
+        workspace_name: Some(&ws.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Home,
+        content_type: ContentType::Standard,
+        extra_head: extra_styles,
+        extra_body_end: "",
     };
 
-    Ok(Html(html))
+    generate_page_layout(&config, &content)
 }
 
-/// Get workspace as JSON.
-pub async fn get_workspace(State(state): State<AppState>) -> Result<Json<structurizr_core::Workspace>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    Ok(Json(workspace))
-}
-
-/// Validate workspace and return issues.
-pub async fn validate_workspace(State(state): State<AppState>) -> Result<Json<structurizr_dsl::ValidationResult>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    let validation_result = structurizr_dsl::validate_workspace(&workspace);
-    Ok(Json(validation_result))
-}
-
-/// Export workspace as JSON.
-pub async fn export_json(State(state): State<AppState>) -> Result<impl IntoResponse> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    let json = JsonExporter::export(&workspace)?;
-
-    Ok((
-        [(header::CONTENT_TYPE, "application/json")],
-        json
-    ))
-}
-
-/// View a diagram.
-pub async fn view_diagram(
-    State(state): State<AppState>,
-    Path(view_key): Path<String>,
-) -> Result<Html<String>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    // Use shared function with empty base_path for single-workspace mode
-    let html = generate_view_diagram_html(&workspace, &view_key, "");
-    Ok(Html(html))
-}
-
-// Legacy view_diagram implementation has been consolidated into generate_view_diagram_html().
-// The 900+ lines of duplicated functionality are now shared via generate_view_diagram_html().
 
 /// Escape special characters for JSON strings.
 fn escape_json(s: &str) -> String {
@@ -261,296 +239,6 @@ fn render_nav_tree(nodes: &[HeadingNode], depth: usize) -> String {
     }).collect()
 }
 
-/// Documentation viewer page.
-pub async fn documentation(
-    State(state): State<AppState>,
-) -> Result<Html<String>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    // Use shared function with empty base_path for single-workspace mode
-    let html = generate_documentation_html(&workspace, "");
-    Ok(Html(html))
-}
-
-// Legacy documentation implementation has been consolidated into generate_documentation_html().
-// The 340+ lines of duplicated functionality are now shared via generate_documentation_html().
-
-/// Helper function to check if an element should be visible for a given perspective.
-/// Elements with no perspectives specified are visible in all perspectives.
-/// Elements with perspectives specified are only visible when the requested perspective matches.
-fn element_matches_perspective(element_perspectives: &[String], requested_perspective: Option<&str>) -> bool {
-    match requested_perspective {
-        None => true, // No perspective filter, show all elements
-        Some(perspective) => {
-            // If element has no perspectives, it's visible in all perspectives
-            if element_perspectives.is_empty() {
-                true
-            } else {
-                // Element has perspectives, check if requested perspective is in the list
-                element_perspectives.iter().any(|p| p == perspective)
-            }
-        }
-    }
-}
-
-/// Filter workspace by perspective.
-/// Returns a cloned workspace with only elements that match the perspective.
-fn filter_workspace_by_perspective(workspace: &Workspace, perspective: Option<&str>) -> Workspace {
-    if perspective.is_none() {
-        // No filtering needed
-        return workspace.clone();
-    }
-
-    let mut filtered = workspace.clone();
-
-    // Filter people
-    filtered.model.people.retain(|p| {
-        element_matches_perspective(&p.properties.perspectives, perspective)
-    });
-
-    // Filter software systems and their containers/components
-    filtered.model.software_systems.retain_mut(|sys| {
-        // First filter containers
-        sys.containers.retain_mut(|container| {
-            // Filter components
-            container.components.retain(|comp| {
-                element_matches_perspective(&comp.properties.perspectives, perspective)
-            });
-
-            element_matches_perspective(&container.properties.perspectives, perspective)
-        });
-
-        element_matches_perspective(&sys.properties.perspectives, perspective)
-    });
-
-    // Filter deployment nodes recursively
-    fn filter_deployment_nodes(
-        nodes: &mut Vec<structurizr_core::DeploymentNode>,
-        perspective: Option<&str>,
-    ) {
-        nodes.retain_mut(|node| {
-            // Filter children recursively
-            filter_deployment_nodes(&mut node.children, perspective);
-
-            // Filter infrastructure nodes
-            node.infrastructure_nodes.retain(|infra| {
-                element_matches_perspective(&infra.properties.perspectives, perspective)
-            });
-
-            element_matches_perspective(&node.properties.perspectives, perspective)
-        });
-    }
-
-    filter_deployment_nodes(&mut filtered.model.deployment_nodes, perspective);
-
-    // Filter relationships - keep only those where both source and destination still exist
-    let all_element_ids: std::collections::HashSet<_> = {
-        let mut ids = std::collections::HashSet::new();
-
-        for person in &filtered.model.people {
-            ids.insert(person.id());
-        }
-
-        for system in &filtered.model.software_systems {
-            ids.insert(system.id());
-            for container in &system.containers {
-                ids.insert(container.id());
-                for component in &container.components {
-                    ids.insert(component.id());
-                }
-            }
-        }
-
-        fn collect_deployment_ids(
-            nodes: &[structurizr_core::DeploymentNode],
-            ids: &mut std::collections::HashSet<structurizr_core::ElementId>,
-        ) {
-            for node in nodes {
-                ids.insert(node.id());
-                collect_deployment_ids(&node.children, ids);
-                for infra in &node.infrastructure_nodes {
-                    ids.insert(infra.id());
-                }
-            }
-        }
-
-        collect_deployment_ids(&filtered.model.deployment_nodes, &mut ids);
-
-        ids
-    };
-
-    filtered.model.relationships.retain(|rel| {
-        all_element_ids.contains(&rel.source_id) && all_element_ids.contains(&rel.destination_id)
-    });
-
-    filtered
-}
-
-/// Perspective query parameters.
-#[derive(Debug, serde::Deserialize)]
-pub struct PerspectiveQuery {
-    pub perspective: Option<String>,
-}
-
-/// Render view as SVG.
-pub async fn render_svg(
-    State(state): State<AppState>,
-    Path(view_key): Path<String>,
-    axum::extract::Query(query): axum::extract::Query<PerspectiveQuery>,
-) -> Result<impl IntoResponse> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    // Apply perspective filter if requested
-    let filtered_workspace = filter_workspace_by_perspective(
-        &workspace,
-        query.perspective.as_deref()
-    );
-
-    let renderer = SvgRenderer::default();
-
-    // Try to find the view by key
-    let svg = if let Some(view) = filtered_workspace.views().system_landscape_views.iter().find(|v| v.properties.key == view_key) {
-        renderer.render_system_landscape(&filtered_workspace, view)?
-    } else if let Some(view) = filtered_workspace.views().system_context_views.iter().find(|v| v.properties.key == view_key) {
-        renderer.render_system_context(&filtered_workspace, view)?
-    } else if let Some(view) = filtered_workspace.views().container_views.iter().find(|v| v.properties.key == view_key) {
-        renderer.render_container(&filtered_workspace, view)?
-    } else if let Some(view) = filtered_workspace.views().component_views.iter().find(|v| v.properties.key == view_key) {
-        renderer.render_component(&filtered_workspace, view)?
-    } else if let Some(view) = filtered_workspace.views().dynamic_views.iter().find(|v| v.properties.key == view_key) {
-        renderer.render_dynamic(&filtered_workspace, view)?
-    } else if let Some(view) = filtered_workspace.views().deployment_views.iter().find(|v| v.properties.key == view_key) {
-        renderer.render_deployment(&filtered_workspace, view)?
-    } else {
-        // Default: render a system landscape view
-        let view = SystemLandscapeView::new(&view_key);
-        renderer.render_system_landscape(&filtered_workspace, &view)?
-    };
-
-    Ok((
-        [(header::CONTENT_TYPE, "image/svg+xml")],
-        svg
-    ))
-}
-
-/// Export view as PlantUML.
-pub async fn export_plantuml(
-    State(state): State<AppState>,
-    Path(view_key): Path<String>,
-) -> Result<impl IntoResponse> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    let puml = if let Some(view) = workspace.views().system_landscape_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_system_landscape(&workspace, view)?
-    } else if let Some(view) = workspace.views().system_context_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_system_context(&workspace, view)?
-    } else if let Some(view) = workspace.views().container_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_container(&workspace, view)?
-    } else if let Some(view) = workspace.views().component_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_component(&workspace, view)?
-    } else if let Some(view) = workspace.views().dynamic_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_dynamic(&workspace, view)?
-    } else if let Some(view) = workspace.views().deployment_views.iter().find(|v| v.properties.key == view_key) {
-        PlantUmlExporter::export_deployment(&workspace, view)?
-    } else {
-        PlantUmlExporter::export_flowchart(&workspace)?
-    };
-
-    Ok((
-        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-        puml
-    ))
-}
-
-/// Export view as Mermaid.
-pub async fn export_mermaid(
-    State(state): State<AppState>,
-    Path(view_key): Path<String>,
-) -> Result<impl IntoResponse> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    let mermaid = if let Some(view) = workspace.views().system_landscape_views.iter().find(|v| v.properties.key == view_key) {
-        MermaidExporter::export_system_landscape(&workspace, view)?
-    } else if let Some(view) = workspace.views().system_context_views.iter().find(|v| v.properties.key == view_key) {
-        MermaidExporter::export_system_context(&workspace, view)?
-    } else if let Some(view) = workspace.views().container_views.iter().find(|v| v.properties.key == view_key) {
-        MermaidExporter::export_container(&workspace, view)?
-    } else if let Some(view) = workspace.views().component_views.iter().find(|v| v.properties.key == view_key) {
-        MermaidExporter::export_component(&workspace, view)?
-    } else if let Some(view) = workspace.views().dynamic_views.iter().find(|v| v.properties.key == view_key) {
-        MermaidExporter::export_dynamic(&workspace, view)?
-    } else if let Some(view) = workspace.views().deployment_views.iter().find(|v| v.properties.key == view_key) {
-        MermaidExporter::export_deployment(&workspace, view)?
-    } else {
-        MermaidExporter::export_flowchart(&workspace)?
-    };
-
-    Ok((
-        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-        mermaid
-    ))
-}
-
-/// Export view as DOT/Graphviz.
-pub async fn export_dot(
-    State(state): State<AppState>,
-    Path(view_key): Path<String>,
-) -> Result<impl IntoResponse> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    let dot = if let Some(view) = workspace.views().system_landscape_views.iter().find(|v| v.properties.key == view_key) {
-        DotExporter::export_system_landscape(&workspace, view)?
-    } else if let Some(view) = workspace.views().system_context_views.iter().find(|v| v.properties.key == view_key) {
-        DotExporter::export_system_context(&workspace, view)?
-    } else if let Some(view) = workspace.views().container_views.iter().find(|v| v.properties.key == view_key) {
-        DotExporter::export_container(&workspace, view)?
-    } else if let Some(view) = workspace.views().component_views.iter().find(|v| v.properties.key == view_key) {
-        DotExporter::export_component(&workspace, view)?
-    } else {
-        DotExporter::export_flowchart(&workspace)?
-    };
-
-    Ok((
-        [(header::CONTENT_TYPE, "text/vnd.graphviz; charset=utf-8")],
-        dot
-    ))
-}
-
-/// Export view as D2.
-pub async fn export_d2(
-    State(state): State<AppState>,
-    Path(view_key): Path<String>,
-) -> Result<impl IntoResponse> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    let d2 = if let Some(view) = workspace.views().system_landscape_views.iter().find(|v| v.properties.key == view_key) {
-        D2Exporter::export_system_landscape(&workspace, view)?
-    } else if let Some(view) = workspace.views().system_context_views.iter().find(|v| v.properties.key == view_key) {
-        D2Exporter::export_system_context(&workspace, view)?
-    } else if let Some(view) = workspace.views().container_views.iter().find(|v| v.properties.key == view_key) {
-        D2Exporter::export_container(&workspace, view)?
-    } else if let Some(view) = workspace.views().component_views.iter().find(|v| v.properties.key == view_key) {
-        D2Exporter::export_component(&workspace, view)?
-    } else if let Some(view) = workspace.views().dynamic_views.iter().find(|v| v.properties.key == view_key) {
-        D2Exporter::export_dynamic(&workspace, view)?
-    } else if let Some(view) = workspace.views().deployment_views.iter().find(|v| v.properties.key == view_key) {
-        D2Exporter::export_deployment(&workspace, view)?
-    } else {
-        D2Exporter::export_flowchart(&workspace)?
-    };
-
-    Ok((
-        [(header::CONTENT_TYPE, "text/plain; charset=utf-8")],
-        d2
-    ))
-}
-
 /// Health check endpoint.
 pub async fn health() -> &'static str {
     "OK"
@@ -560,490 +248,6 @@ pub async fn health() -> &'static str {
 #[derive(Debug, serde::Deserialize)]
 pub struct PresentationQuery {
     pub views: Option<String>, // Comma-separated list of view keys
-}
-
-/// Presentation mode handler - full-screen slideshow of diagrams.
-pub async fn presentation_mode(
-    State(state): State<AppState>,
-    axum::extract::Query(query): axum::extract::Query<PresentationQuery>,
-) -> Result<Html<String>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    // Get view keys - either from query params or all views
-    let view_keys: Vec<String> = if let Some(views_param) = query.views {
-        views_param.split(',').map(|s| s.trim().to_string()).collect()
-    } else {
-        workspace.views().all_keys().iter().map(|k| k.to_string()).collect()
-    };
-
-    if view_keys.is_empty() {
-        return Ok(Html(
-            r#"<!DOCTYPE html>
-<html>
-<head><title>Presentation Mode - No Views</title></head>
-<body style="background: #000; color: #fff; display: flex; align-items: center; justify-content: center; height: 100vh; font-family: sans-serif;">
-    <div style="text-align: center;">
-        <h1>No Views Available</h1>
-        <p>Create some views in your workspace to use presentation mode.</p>
-        <p><a href="/" style="color: #0066cc;">← Back to Home</a></p>
-    </div>
-</body>
-</html>"#.to_string()
-        ));
-    }
-
-    // Build slides data - for each view, get its SVG URL and title
-    let slides_json: String = view_keys.iter().enumerate().map(|(i, key)| {
-        let title = escape_json(key);
-        let svg_url = format!("/view/{}/svg", key);
-        if i > 0 {
-            format!(r#",{{"title":"{}","svg":"{}"}}"#, title, svg_url)
-        } else {
-            format!(r#"{{"title":"{}","svg":"{}"}}"#, title, svg_url)
-        }
-    }).collect();
-
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Presentation Mode - {} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; margin: 0; padding: 0; }}
-        body {{
-            background: #000;
-            color: #fff;
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            overflow: hidden;
-            height: 100vh;
-            width: 100vw;
-        }}
-
-        .presentation-container {{
-            position: relative;
-            height: 100vh;
-            width: 100vw;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }}
-
-        .slide {{
-            display: none;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100%;
-            width: 100%;
-            padding: 40px;
-            opacity: 0;
-            transition: opacity 0.3s ease-in-out;
-        }}
-
-        .slide.active {{
-            display: flex;
-            opacity: 1;
-        }}
-
-        .slide-content {{
-            max-width: 90%;
-            max-height: 85%;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }}
-
-        .slide-content img {{
-            max-width: 100%;
-            max-height: 100%;
-            object-fit: contain;
-            background: #fff;
-            box-shadow: 0 10px 50px rgba(0,0,0,0.5);
-            border-radius: 4px;
-        }}
-
-        .slide-title {{
-            margin-top: 30px;
-            font-size: 24px;
-            font-weight: 500;
-            color: #ccc;
-            text-align: center;
-        }}
-
-        .slide-counter {{
-            position: fixed;
-            bottom: 30px;
-            right: 30px;
-            font-size: 18px;
-            color: #666;
-            background: rgba(255,255,255,0.1);
-            padding: 10px 20px;
-            border-radius: 20px;
-            backdrop-filter: blur(10px);
-        }}
-
-        .controls {{
-            position: fixed;
-            bottom: 30px;
-            left: 30px;
-            display: flex;
-            gap: 10px;
-            opacity: 0;
-            transition: opacity 0.3s ease;
-        }}
-
-        body:hover .controls {{
-            opacity: 1;
-        }}
-
-        .control-btn {{
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: #fff;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            backdrop-filter: blur(10px);
-            transition: all 0.2s ease;
-        }}
-
-        .control-btn:hover {{
-            background: rgba(255,255,255,0.2);
-            border-color: rgba(255,255,255,0.3);
-        }}
-
-        .control-btn:active {{
-            transform: scale(0.95);
-        }}
-
-        .help-overlay {{
-            position: fixed;
-            top: 30px;
-            left: 50%;
-            transform: translateX(-50%);
-            background: rgba(0,0,0,0.8);
-            color: #fff;
-            padding: 20px 30px;
-            border-radius: 8px;
-            backdrop-filter: blur(10px);
-            opacity: 0;
-            transition: opacity 0.3s ease;
-            pointer-events: none;
-            z-index: 1000;
-        }}
-
-        .help-overlay.show {{
-            opacity: 1;
-        }}
-
-        .help-overlay h3 {{
-            margin-bottom: 15px;
-            font-size: 16px;
-        }}
-
-        .help-overlay ul {{
-            list-style: none;
-            padding: 0;
-        }}
-
-        .help-overlay li {{
-            margin: 8px 0;
-            font-size: 14px;
-            color: #ccc;
-        }}
-
-        .help-overlay kbd {{
-            background: rgba(255,255,255,0.1);
-            padding: 3px 8px;
-            border-radius: 3px;
-            font-family: monospace;
-            font-size: 12px;
-            border: 1px solid rgba(255,255,255,0.2);
-        }}
-
-        .loading {{
-            position: fixed;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            font-size: 20px;
-            color: #666;
-        }}
-
-        .exit-button {{
-            position: fixed;
-            top: 30px;
-            right: 30px;
-            background: rgba(255,255,255,0.1);
-            border: 1px solid rgba(255,255,255,0.2);
-            color: #fff;
-            padding: 10px 20px;
-            border-radius: 6px;
-            cursor: pointer;
-            font-size: 14px;
-            backdrop-filter: blur(10px);
-            transition: all 0.2s ease;
-            opacity: 0;
-        }}
-
-        body:hover .exit-button {{
-            opacity: 1;
-        }}
-
-        .exit-button:hover {{
-            background: rgba(255,255,255,0.2);
-            border-color: rgba(255,255,255,0.3);
-        }}
-    </style>
-</head>
-<body>
-    <div class="presentation-container">
-        <div class="loading" id="loading">Loading presentation...</div>
-        <div id="slides-container"></div>
-        <div class="slide-counter" id="counter">1 / 1</div>
-        <button class="exit-button" onclick="exitPresentation()">Exit (Esc)</button>
-    </div>
-
-    <div class="controls">
-        <button class="control-btn" onclick="prevSlide()">← Previous</button>
-        <button class="control-btn" onclick="nextSlide()">Next →</button>
-        <button class="control-btn" onclick="toggleHelp()">Help (?)</button>
-        <button class="control-btn" onclick="toggleFullscreen()">Fullscreen (F)</button>
-    </div>
-
-    <div class="help-overlay" id="help">
-        <h3>Keyboard Shortcuts</h3>
-        <ul>
-            <li><kbd>→</kbd> <kbd>Space</kbd> <kbd>Enter</kbd> - Next slide</li>
-            <li><kbd>←</kbd> <kbd>Backspace</kbd> - Previous slide</li>
-            <li><kbd>Home</kbd> - First slide</li>
-            <li><kbd>End</kbd> - Last slide</li>
-            <li><kbd>F</kbd> - Toggle fullscreen</li>
-            <li><kbd>?</kbd> - Toggle this help</li>
-            <li><kbd>Esc</kbd> - Exit presentation</li>
-        </ul>
-    </div>
-
-    <script>
-        const slides = [{}];
-        let currentSlide = 0;
-        let imagesLoaded = 0;
-        let helpVisible = false;
-
-        // Preload all images
-        function preloadImages() {{
-            const promises = slides.map((slide, index) => {{
-                return new Promise((resolve, reject) => {{
-                    const img = new Image();
-                    img.onload = () => {{
-                        imagesLoaded++;
-                        updateLoadingProgress();
-                        resolve({{ index, img }});
-                    }};
-                    img.onerror = () => reject(new Error(`Failed to load slide ${{index + 1}}`));
-                    img.src = slide.svg;
-                }});
-            }});
-
-            Promise.all(promises)
-                .then(loadedImages => {{
-                    renderSlides(loadedImages);
-                    document.getElementById('loading').style.display = 'none';
-                    showSlide(0);
-                }})
-                .catch(err => {{
-                    console.error('Error loading images:', err);
-                    document.getElementById('loading').textContent = 'Error loading slides';
-                }});
-        }}
-
-        function updateLoadingProgress() {{
-            const progress = Math.round((imagesLoaded / slides.length) * 100);
-            document.getElementById('loading').textContent = `Loading presentation... ${{progress}}%`;
-        }}
-
-        function renderSlides(loadedImages) {{
-            const container = document.getElementById('slides-container');
-            loadedImages.forEach(({{ index, img }}) => {{
-                const slideDiv = document.createElement('div');
-                slideDiv.className = 'slide';
-                slideDiv.id = `slide-${{index}}`;
-
-                const content = document.createElement('div');
-                content.className = 'slide-content';
-
-                const imgClone = img.cloneNode();
-                content.appendChild(imgClone);
-
-                const title = document.createElement('div');
-                title.className = 'slide-title';
-                title.textContent = slides[index].title;
-                content.appendChild(title);
-
-                slideDiv.appendChild(content);
-                container.appendChild(slideDiv);
-            }});
-        }}
-
-        function showSlide(index) {{
-            // Hide all slides
-            document.querySelectorAll('.slide').forEach(slide => {{
-                slide.classList.remove('active');
-            }});
-
-            // Show current slide
-            const slide = document.getElementById(`slide-${{index}}`);
-            if (slide) {{
-                slide.classList.add('active');
-                currentSlide = index;
-                updateCounter();
-            }}
-        }}
-
-        function updateCounter() {{
-            const counter = document.getElementById('counter');
-            counter.textContent = `${{currentSlide + 1}} / ${{slides.length}}`;
-        }}
-
-        function nextSlide() {{
-            if (currentSlide < slides.length - 1) {{
-                showSlide(currentSlide + 1);
-            }}
-        }}
-
-        function prevSlide() {{
-            if (currentSlide > 0) {{
-                showSlide(currentSlide - 1);
-            }}
-        }}
-
-        function firstSlide() {{
-            showSlide(0);
-        }}
-
-        function lastSlide() {{
-            showSlide(slides.length - 1);
-        }}
-
-        function toggleFullscreen() {{
-            if (!document.fullscreenElement) {{
-                document.documentElement.requestFullscreen().catch(err => {{
-                    console.error('Error entering fullscreen:', err);
-                }});
-            }} else {{
-                if (document.exitFullscreen) {{
-                    document.exitFullscreen();
-                }}
-            }}
-        }}
-
-        function toggleHelp() {{
-            helpVisible = !helpVisible;
-            const helpOverlay = document.getElementById('help');
-            if (helpVisible) {{
-                helpOverlay.classList.add('show');
-            }} else {{
-                helpOverlay.classList.remove('show');
-            }}
-        }}
-
-        function exitPresentation() {{
-            window.location.href = '/';
-        }}
-
-        // Keyboard navigation
-        document.addEventListener('keydown', (e) => {{
-            switch(e.key) {{
-                case 'ArrowRight':
-                case ' ':
-                case 'Enter':
-                    e.preventDefault();
-                    nextSlide();
-                    break;
-                case 'ArrowLeft':
-                case 'Backspace':
-                    e.preventDefault();
-                    prevSlide();
-                    break;
-                case 'Home':
-                    e.preventDefault();
-                    firstSlide();
-                    break;
-                case 'End':
-                    e.preventDefault();
-                    lastSlide();
-                    break;
-                case 'f':
-                case 'F':
-                    e.preventDefault();
-                    toggleFullscreen();
-                    break;
-                case '?':
-                    e.preventDefault();
-                    toggleHelp();
-                    break;
-                case 'Escape':
-                    e.preventDefault();
-                    if (document.fullscreenElement) {{
-                        document.exitFullscreen();
-                    }} else {{
-                        exitPresentation();
-                    }}
-                    break;
-            }}
-        }});
-
-        // Auto-hide help after 5 seconds on first show
-        let helpTimeout;
-        function toggleHelp() {{
-            helpVisible = !helpVisible;
-            const helpOverlay = document.getElementById('help');
-            if (helpVisible) {{
-                helpOverlay.classList.add('show');
-                clearTimeout(helpTimeout);
-                helpTimeout = setTimeout(() => {{
-                    helpVisible = false;
-                    helpOverlay.classList.remove('show');
-                }}, 5000);
-            }} else {{
-                helpOverlay.classList.remove('show');
-            }}
-        }}
-
-        // Show help briefly on load
-        window.addEventListener('load', () => {{
-            setTimeout(() => {{
-                toggleHelp();
-            }}, 500);
-        }});
-
-        // Initialize
-        preloadImages();
-    </script>
-</body>
-</html>"##,
-        workspace.name,
-        slides_json
-    );
-
-    Ok(Html(html))
-}
-
-/// Interactive diagram editor page.
-pub async fn edit_diagram(
-    State(state): State<AppState>,
-    Path(view_key): Path<String>,
-) -> Result<Html<String>> {
-    let _workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    // Use the shared editor generator with empty base_path for single-workspace mode
-    let html = generate_editor_html(&view_key, "", "");
-    Ok(Html(html))
 }
 
 /// Search query parameters.
@@ -1062,16 +266,9 @@ pub struct SearchResult {
     pub url: String,
 }
 
-/// Search page.
-pub async fn search_page(
-    State(state): State<AppState>,
-    axum::extract::Query(query): axum::extract::Query<SearchQuery>,
-) -> Result<Html<String>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    let search_term = query.q.unwrap_or_default();
-    let results = perform_search(&workspace, &search_term);
+/// Generate search page HTML content (shared between single and multi-workspace modes).
+fn generate_search_page_html(workspace: &Workspace, base_path: &str, workspace_id: Option<&str>, search_term: &str) -> String {
+    let results = perform_search(workspace, search_term);
 
     let results_html: String = if results.is_empty() && !search_term.is_empty() {
         "<p class=\"no-results\">No results found.</p>".to_string()
@@ -1090,70 +287,58 @@ pub async fn search_page(
         )).collect()
     };
 
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Search - {} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }}
-        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; }}
-        .header a {{ color: white; text-decoration: none; }}
-        .header h1 {{ margin: 0; font-size: 18px; }}
-        .search-container {{ max-width: 800px; margin: 40px auto; padding: 0 20px; }}
-        .search-box {{ display: flex; gap: 10px; margin-bottom: 30px; }}
-        .search-box input {{ flex: 1; padding: 12px 16px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; }}
-        .search-box input:focus {{ outline: none; border-color: #0066cc; }}
-        .search-box button {{ background: #0066cc; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; }}
-        .search-box button:hover {{ background: #0052a3; }}
-        .result {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        .result-header {{ display: flex; align-items: center; gap: 10px; }}
-        .result-header h3 {{ margin: 0; }}
-        .type {{ background: #e8e8e8; padding: 4px 10px; border-radius: 4px; font-size: 11px; text-transform: uppercase; font-weight: 600; }}
-        .desc {{ color: #666; margin: 10px 0 0 0; }}
-        .no-results {{ color: #888; font-style: italic; text-align: center; padding: 40px; }}
-        .result-count {{ color: #666; margin-bottom: 20px; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <a href="/">← Back</a>
-        <h1>Search</h1>
-    </div>
-    <div class="search-container">
-        <form class="search-box" method="get">
-            <input type="text" name="q" placeholder="Search elements, relationships, documentation..." value="{}" autofocus>
-            <button type="submit">Search</button>
-        </form>
-        {}
-        <div class="results">
+    // Page-specific styles
+    let extra_styles = r##"<style>
+        .search-container { max-width: 800px; margin: 0 auto; }
+        .search-box { display: flex; gap: 10px; margin-bottom: 30px; }
+        .search-box input { flex: 1; padding: 12px 16px; font-size: 16px; border: 2px solid var(--border-color); border-radius: 8px; background: var(--bg-secondary); color: var(--text-primary); }
+        .search-box input:focus { outline: none; border-color: var(--link-color); }
+        .search-box button { background: var(--link-color); color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; }
+        .search-box button:hover { background: var(--link-hover); }
+        .result { background: var(--card-bg); padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px var(--shadow); }
+        .result-header { display: flex; align-items: center; gap: 10px; }
+        .result-header h3 { margin: 0; }
+        .type { background: var(--bg-tertiary); padding: 4px 10px; border-radius: 4px; font-size: 11px; text-transform: uppercase; font-weight: 600; }
+        .desc { color: var(--text-secondary); margin: 10px 0 0 0; }
+        .no-results { color: var(--text-muted); font-style: italic; text-align: center; padding: 40px; }
+        .result-count { color: var(--text-secondary); margin-bottom: 20px; }
+    </style>"##;
+
+    let result_count_html = if !search_term.is_empty() {
+        format!("<p class=\"result-count\">{} results for \"{}\"</p>", results.len(), escape_html(search_term))
+    } else {
+        String::new()
+    };
+
+    let content = format!(
+        r#"<div class="search-container">
+            <form class="search-box" method="get">
+                <input type="text" name="q" placeholder="Search elements, relationships, documentation..." value="{}" autofocus>
+                <button type="submit">Search</button>
+            </form>
             {}
-        </div>
-    </div>
-</body>
-</html>"##,
-        workspace.name,
-        escape_html(&search_term),
-        if !search_term.is_empty() { format!("<p class=\"result-count\">{} results for \"{}\"</p>", results.len(), escape_html(&search_term)) } else { String::new() },
+            <div class="results">
+                {}
+            </div>
+        </div>"#,
+        escape_html(search_term),
+        result_count_html,
         results_html
     );
 
-    Ok(Html(html))
-}
+    let title = format!("Search - {}", workspace.name);
+    let config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(&workspace.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Search,
+        content_type: ContentType::Standard,
+        extra_head: extra_styles,
+        extra_body_end: "",
+    };
 
-/// Search API endpoint.
-pub async fn search_api(
-    State(state): State<AppState>,
-    axum::extract::Query(query): axum::extract::Query<SearchQuery>,
-) -> Result<Json<Vec<SearchResult>>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    let search_term = query.q.unwrap_or_default();
-    let results = perform_search(&workspace, &search_term);
-
-    Ok(Json(results))
+    generate_page_layout(&config, &content)
 }
 
 /// Perform search across workspace elements.
@@ -1263,11 +448,8 @@ fn matches_search(text: &str, query: &str) -> bool {
     text.to_lowercase().contains(query)
 }
 
-/// Force-directed graph exploration view.
-pub async fn explore_view(State(state): State<AppState>) -> Result<Html<String>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
+/// Generate explore page HTML (shared between single and multi-workspace modes).
+fn generate_explore_page_html(workspace: &Workspace, base_path: &str, workspace_id: Option<&str>) -> String {
     let model = workspace.model();
 
     // Build nodes JSON
@@ -1359,75 +541,86 @@ pub async fn explore_view(State(state): State<AppState>) -> Result<Html<String>>
     }
     links_json.push(']');
 
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Explore - {} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: #fff; height: 100vh; overflow: hidden; }}
-        .toolbar {{ background: #333; padding: 10px 20px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid #444; }}
-        .toolbar a {{ color: #fff; text-decoration: none; }}
-        .toolbar a:hover {{ text-decoration: underline; }}
-        .toolbar button {{ background: #555; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }}
-        .toolbar button:hover {{ background: #666; }}
-        .toolbar .separator {{ border-left: 1px solid #555; height: 20px; }}
-        .canvas-container {{ height: calc(100vh - 50px); position: relative; }}
-        svg {{ width: 100%; height: 100%; cursor: grab; }}
-        svg.dragging {{ cursor: grabbing; }}
-        .node {{ cursor: pointer; }}
-        .node circle {{ transition: r 0.2s, fill 0.2s; }}
-        .node:hover circle {{ r: 35; }}
-        .node text {{ pointer-events: none; user-select: none; fill: #fff; }}
-        .link {{ stroke: #666; stroke-width: 1.5; fill: none; }}
-        .link-label {{ fill: #999; font-size: 10px; pointer-events: none; user-select: none; }}
-        .tooltip {{ position: fixed; background: #333; color: white; padding: 12px 16px; border-radius: 6px; font-size: 13px; max-width: 300px; z-index: 1000; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.5); display: none; }}
-        .tooltip h4 {{ margin: 0 0 6px 0; font-size: 14px; }}
-        .tooltip .type {{ color: #888; font-size: 11px; margin-bottom: 8px; }}
-        .tooltip .desc {{ line-height: 1.4; }}
-        .tooltip .tech {{ color: #6af; margin-top: 6px; font-size: 12px; }}
-        .info {{ position: fixed; bottom: 20px; left: 20px; background: #333; padding: 12px 16px; border-radius: 6px; font-size: 12px; color: #999; }}
-        .controls {{ display: flex; gap: 10px; align-items: center; }}
-        .controls label {{ font-size: 12px; color: #ccc; display: flex; align-items: center; gap: 5px; }}
-        .controls input[type="range"] {{ width: 100px; }}
-    </style>
-</head>
-<body>
-    <div class="toolbar">
-        <a href="/">← Back</a>
-        <span>Explore Graph</span>
-        <div class="separator"></div>
-        <div class="controls">
-            <button onclick="resetSimulation()">Reset</button>
-            <button onclick="centerGraph()">Center</button>
-            <label>
-                Charge: <input type="range" id="charge-slider" min="50" max="500" value="300" step="10">
-                <span id="charge-value">-300</span>
-            </label>
-            <label>
-                Link Distance: <input type="range" id="link-slider" min="30" max="200" value="100" step="10">
-                <span id="link-value">100</span>
-            </label>
-        </div>
-    </div>
-    <div class="canvas-container">
-        <svg id="canvas"></svg>
-    </div>
-    <div class="tooltip" id="tooltip"></div>
-    <div class="info">
-        <div>Nodes: <span id="node-count">0</span> | Links: <span id="link-count">0</span></div>
-        <div style="margin-top: 4px; font-size: 11px; color: #666;">Drag nodes • Scroll to zoom • Drag canvas to pan</div>
-    </div>
+    let title = format!("Explore - {}", workspace.name);
 
-    <script>
+    let extra_styles = r##"<style>
+        .explore-toolbar {
+            background: var(--toolbar-bg);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 1px solid var(--toolbar-border);
+        }
+        .explore-toolbar span { color: var(--toolbar-text); }
+        .explore-toolbar button {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .explore-toolbar button:hover { background: var(--card-hover); }
+        .explore-toolbar .separator { border-left: 1px solid var(--border-color); height: 20px; }
+        .canvas-container { flex: 1; position: relative; background: var(--canvas-bg); }
+        svg { width: 100%; height: 100%; cursor: grab; }
+        svg.dragging { cursor: grabbing; }
+        .node { cursor: pointer; }
+        .node circle { transition: r 0.2s, fill 0.2s; }
+        .node:hover circle { r: 35; }
+        .node text { pointer-events: none; user-select: none; fill: #fff; }
+        .link { stroke: var(--text-muted); stroke-width: 1.5; fill: none; }
+        .link-label { fill: var(--text-muted); font-size: 10px; pointer-events: none; user-select: none; }
+        .tooltip {
+            position: fixed;
+            background: var(--card-bg);
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            max-width: 300px;
+            z-index: 1000;
+            pointer-events: none;
+            box-shadow: 0 4px 12px var(--shadow-medium);
+            border: 1px solid var(--border-color);
+            display: none;
+        }
+        .tooltip h4 { margin: 0 0 6px 0; font-size: 14px; }
+        .tooltip .type { color: var(--text-muted); font-size: 11px; margin-bottom: 8px; }
+        .tooltip .desc { line-height: 1.4; }
+        .tooltip .tech { color: var(--link-color); margin-top: 6px; font-size: 12px; }
+        .info {
+            position: fixed;
+            bottom: 20px;
+            left: 20px;
+            background: var(--card-bg);
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 12px;
+            color: var(--text-muted);
+            border: 1px solid var(--border-color);
+        }
+        .controls { display: flex; gap: 10px; align-items: center; }
+        .controls label {
+            font-size: 12px;
+            color: var(--text-secondary);
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        .controls input[type="range"] { width: 100px; }
+    </style>"##;
+
+    let extra_scripts = format!(r##"<script>
         const nodes = {{}};
         const links = {{}};
 
         // Create SVG and groups
         const svg = document.getElementById('canvas');
-        const width = window.innerWidth;
-        const height = window.innerHeight - 50;
+        const container = document.querySelector('.canvas-container');
+        const width = container.clientWidth;
+        const height = container.clientHeight;
 
         svg.setAttribute('viewBox', `0 0 ${{width}} ${{height}}`);
 
@@ -1509,8 +702,8 @@ pub async fn explore_view(State(state): State<AppState>) -> Result<Html<String>>
 
         // Load data
         const data = {{
-            nodes: {},
-            links: {}
+            nodes: {nodes_json},
+            links: {links_json}
         }};
 
         // Create node elements
@@ -1520,9 +713,9 @@ pub async fn explore_view(State(state): State<AppState>) -> Result<Html<String>>
             node.vx = 0;
             node.vy = 0;
 
-            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            g.setAttribute('class', 'node');
-            g.setAttribute('data-id', node.id);
+            const nodeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+            nodeG.setAttribute('class', 'node');
+            nodeG.setAttribute('data-id', node.id);
 
             const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
             circle.setAttribute('r', 30);
@@ -1536,18 +729,18 @@ pub async fn explore_view(State(state): State<AppState>) -> Result<Html<String>>
             text.setAttribute('font-size', '12');
             text.textContent = node.name.length > 15 ? node.name.substring(0, 13) + '...' : node.name;
 
-            g.appendChild(circle);
-            g.appendChild(text);
-            nodeGroup.appendChild(g);
+            nodeG.appendChild(circle);
+            nodeG.appendChild(text);
+            nodeGroup.appendChild(nodeG);
 
-            node.element = g;
+            node.element = nodeG;
             nodes[node.id] = node;
 
             // Drag handlers
             let isDragging = false;
             let dragStart = {{ x: 0, y: 0 }};
 
-            g.addEventListener('mousedown', (e) => {{
+            nodeG.addEventListener('mousedown', (e) => {{
                 e.stopPropagation();
                 isDragging = true;
                 dragStart = {{ x: e.clientX / transform.k - node.x, y: e.clientY / transform.k - node.y }};
@@ -1571,7 +764,7 @@ pub async fn explore_view(State(state): State<AppState>) -> Result<Html<String>>
             }});
 
             // Tooltip
-            g.addEventListener('mouseenter', (e) => {{
+            nodeG.addEventListener('mouseenter', (e) => {{
                 const tooltip = document.getElementById('tooltip');
                 let html = `<h4>${{escapeHtml(node.name)}}</h4><div class="type">${{node.type}}</div>`;
                 if (node.description) {{
@@ -1584,13 +777,13 @@ pub async fn explore_view(State(state): State<AppState>) -> Result<Html<String>>
                 tooltip.style.display = 'block';
             }});
 
-            g.addEventListener('mousemove', (e) => {{
+            nodeG.addEventListener('mousemove', (e) => {{
                 const tooltip = document.getElementById('tooltip');
                 tooltip.style.left = (e.clientX + 15) + 'px';
                 tooltip.style.top = (e.clientY + 15) + 'px';
             }});
 
-            g.addEventListener('mouseleave', () => {{
+            nodeG.addEventListener('mouseleave', () => {{
                 document.getElementById('tooltip').style.display = 'none';
             }});
         }});
@@ -1759,42 +952,58 @@ pub async fn explore_view(State(state): State<AppState>) -> Result<Html<String>>
 
         // Handle window resize
         window.addEventListener('resize', () => {{
-            const newWidth = window.innerWidth;
-            const newHeight = window.innerHeight - 50;
+            const newWidth = container.clientWidth;
+            const newHeight = container.clientHeight;
             svg.setAttribute('viewBox', `0 0 ${{newWidth}} ${{newHeight}}`);
         }});
 
         // Start simulation
         tick();
-    </script>
-</body>
-</html>"##,
-        workspace.name,
-        nodes_json,
-        links_json
-    );
+    </script>"##, nodes_json = nodes_json, links_json = links_json);
 
-    Ok(Html(html))
+    let content = r#"
+        <div class="explore-toolbar">
+            <span>Explore Graph</span>
+            <div class="separator"></div>
+            <div class="controls">
+                <button onclick="resetSimulation()">Reset</button>
+                <button onclick="centerGraph()">Center</button>
+                <label>
+                    Charge: <input type="range" id="charge-slider" min="50" max="500" value="300" step="10">
+                    <span id="charge-value">-300</span>
+                </label>
+                <label>
+                    Link Distance: <input type="range" id="link-slider" min="30" max="200" value="100" step="10">
+                    <span id="link-value">100</span>
+                </label>
+            </div>
+        </div>
+        <div class="canvas-container">
+            <svg id="canvas"></svg>
+        </div>
+        <div class="tooltip" id="tooltip"></div>
+        <div class="info">
+            <div>Nodes: <span id="node-count">0</span> | Links: <span id="link-count">0</span></div>
+            <div style="margin-top: 4px; font-size: 11px;">Drag nodes • Scroll to zoom • Drag canvas to pan</div>
+        </div>
+    "#;
+
+    let config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(&workspace.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Explore,
+        content_type: ContentType::ToolbarViewport,
+        extra_head: extra_styles,
+        extra_body_end: &extra_scripts,
+    };
+
+    generate_page_layout(&config, content)
 }
 
-/// Animated dynamic view handler.
-pub async fn view_dynamic_animated(
-    State(state): State<AppState>,
-    Path(view_key): Path<String>,
-) -> Result<Html<String>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
-    // Use shared function with empty base_path for single-workspace mode
-    let html = generate_dynamic_animated_html(&workspace, &view_key, "")?;
-    Ok(Html(html))
-}
-
-/// Tree view handler - hierarchical explorer of workspace elements.
-pub async fn tree_view(State(state): State<AppState>) -> Result<Html<String>> {
-    let workspace = state.get_workspace().await
-        .ok_or_else(|| Error::WorkspaceNotFound("No workspace loaded".to_string()))?;
-
+/// Generate tree view HTML content (shared between single and multi-workspace modes).
+fn generate_tree_page_html(workspace: &Workspace, base_path: &str, workspace_id: Option<&str>) -> String {
     let model = workspace.model();
 
     // Build tree structure HTML
@@ -1970,65 +1179,214 @@ pub async fn tree_view(State(state): State<AppState>) -> Result<Html<String>> {
         tree_html.push_str(r#"</ul></li>"#);
     }
 
-    let html = format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Tree View - {} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; height: 100vh; overflow: hidden; }}
-        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; }}
-        .header a {{ color: white; text-decoration: none; }}
-        .header h1 {{ margin: 0; font-size: 18px; }}
-        .container {{ display: flex; height: calc(100vh - 54px); }}
+    // Page-specific styles for tree view
+    let extra_styles = r##"<style>
+        .tree-panel { width: 500px; background: var(--card-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; }
+        .search-box { padding: 15px; border-bottom: 1px solid var(--border-color); }
+        .search-box input { width: 100%; padding: 10px; font-size: 14px; border: 2px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); }
+        .search-box input:focus { outline: none; border-color: var(--link-color); }
+        .tree-container { flex: 1; overflow-y: auto; padding: 10px; }
 
-        .tree-panel {{ width: 500px; background: white; border-right: 1px solid #ddd; display: flex; flex-direction: column; }}
-        .search-box {{ padding: 15px; border-bottom: 1px solid #ddd; }}
-        .search-box input {{ width: 100%; padding: 10px; font-size: 14px; border: 2px solid #ddd; border-radius: 6px; }}
-        .search-box input:focus {{ outline: none; border-color: #0066cc; }}
-        .tree-container {{ flex: 1; overflow-y: auto; padding: 10px; }}
+        ul.tree { list-style: none; padding: 0; margin: 0; }
+        ul.tree ul { padding-left: 20px; }
 
-        ul.tree {{ list-style: none; padding: 0; margin: 0; }}
-        ul.tree ul {{ padding-left: 20px; }}
+        .tree li { margin: 2px 0; }
+        .tree-node { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; cursor: pointer; user-select: none; }
+        .tree-node:hover { background: var(--bg-tertiary); }
+        .tree-node.selected { background: var(--link-color); color: var(--bg-primary); border-left: 3px solid var(--link-color); }
+        [data-theme="light"] .tree-node.selected { background: #e3f2fd; color: #333; }
 
-        .tree li {{ margin: 2px 0; }}
-        .tree-node {{ display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; cursor: pointer; user-select: none; }}
-        .tree-node:hover {{ background: #f0f0f0; }}
-        .tree-node.selected {{ background: #e3f2fd; border-left: 3px solid #0066cc; }}
+        .toggle { width: 16px; text-align: center; font-size: 12px; color: var(--text-muted); }
+        .icon { font-size: 16px; }
+        .name { font-weight: 500; font-size: 14px; color: var(--text-primary); }
+        .count { font-size: 11px; color: var(--text-muted); }
+        .desc { font-size: 12px; color: var(--text-secondary); margin-left: auto; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .tech { font-size: 11px; color: var(--link-color); font-family: monospace; }
 
-        .toggle {{ width: 16px; text-align: center; font-size: 12px; color: #666; }}
-        .icon {{ font-size: 16px; }}
-        .name {{ font-weight: 500; font-size: 14px; color: #333; }}
-        .count {{ font-size: 11px; color: #888; }}
-        .desc {{ font-size: 12px; color: #666; margin-left: auto; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
-        .tech {{ font-size: 11px; color: #0066cc; font-family: monospace; }}
+        .children { display: none; }
+        .expandable.expanded > .children { display: block; }
 
-        .children {{ display: none; }}
-        .expandable.expanded > .children {{ display: block; }}
+        .detail-panel { flex: 1; padding: 30px; overflow-y: auto; background: var(--bg-primary); }
+        .detail-content { max-width: 800px; background: var(--card-bg); padding: 30px; border-radius: 8px; box-shadow: 0 1px 3px var(--shadow); }
+        .detail-content h2 { margin-top: 0; display: flex; align-items: center; gap: 10px; }
+        .detail-content .type-badge { background: var(--bg-tertiary); padding: 4px 12px; border-radius: 4px; font-size: 11px; text-transform: uppercase; font-weight: 600; }
+        .detail-content .property { margin: 15px 0; }
+        .detail-content .property-label { font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
+        .detail-content .property-value { font-size: 14px; color: var(--text-primary); line-height: 1.6; }
+        .empty-state { color: var(--text-muted); font-style: italic; text-align: center; padding: 100px 20px; }
+        .no-results { color: var(--text-muted); font-style: italic; padding: 20px; text-align: center; }
+        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0; }
+        .stat-card { background: var(--bg-tertiary); padding: 15px; border-radius: 6px; text-align: center; }
+        .stat-card .value { font-size: 24px; font-weight: bold; color: var(--link-color); }
+        .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 5px; }
+    </style>"##;
 
-        .detail-panel {{ flex: 1; padding: 30px; overflow-y: auto; background: #fafafa; }}
-        .detail-content {{ max-width: 800px; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        .detail-content h2 {{ margin-top: 0; display: flex; align-items: center; gap: 10px; }}
-        .detail-content .type-badge {{ background: #e8e8e8; padding: 4px 12px; border-radius: 4px; font-size: 11px; text-transform: uppercase; font-weight: 600; }}
-        .detail-content .property {{ margin: 15px 0; }}
-        .detail-content .property-label {{ font-weight: 600; color: #666; font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }}
-        .detail-content .property-value {{ font-size: 14px; color: #333; line-height: 1.6; }}
-        .empty-state {{ color: #888; font-style: italic; text-align: center; padding: 100px 20px; }}
-        .no-results {{ color: #888; font-style: italic; padding: 20px; text-align: center; }}
-        .stats {{ display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0; }}
-        .stat-card {{ background: #f5f5f5; padding: 15px; border-radius: 6px; text-align: center; }}
-        .stat-card .value {{ font-size: 24px; font-weight: bold; color: #0066cc; }}
-        .stat-card .label {{ font-size: 12px; color: #666; margin-top: 5px; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <a href="/">← Back</a>
-        <h1>Tree View: {}</h1>
-    </div>
-    <div class="container">
-        <div class="tree-panel">
+    // Tree page JavaScript
+    let extra_scripts = r##"<script>
+        // Tree expand/collapse functionality
+        document.addEventListener('click', (e) => {
+            const toggle = e.target.closest('.toggle');
+            if (toggle) {
+                e.stopPropagation();
+                const li = toggle.closest('li');
+                li.classList.toggle('expanded');
+                toggle.textContent = li.classList.contains('expanded') ? '▼' : '▶';
+            }
+        });
+
+        // Node selection and detail display
+        document.addEventListener('click', (e) => {
+            const node = e.target.closest('.tree-node');
+            if (node && node.dataset.id) {
+                // Remove previous selection
+                document.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
+
+                // Add new selection
+                node.classList.add('selected');
+
+                // Show details
+                showDetails(node);
+            }
+        });
+
+        function showDetails(node) {
+            const emptyState = document.getElementById('empty-state');
+            const detailContent = document.getElementById('detail-content');
+
+            emptyState.style.display = 'none';
+            detailContent.style.display = 'block';
+
+            const type = node.dataset.type;
+            const name = node.dataset.name;
+            const description = node.dataset.description || 'No description provided';
+            const technology = node.dataset.technology || '';
+            const id = node.dataset.id;
+
+            let html = `
+                <h2>
+                    <span class="icon">${getIcon(type)}</span>
+                    ${escapeHtml(name)}
+                    <span class="type-badge">${type}</span>
+                </h2>
+                <div class="property">
+                    <div class="property-label">ID</div>
+                    <div class="property-value"><code>${id}</code></div>
+                </div>
+                <div class="property">
+                    <div class="property-label">Description</div>
+                    <div class="property-value">${escapeHtml(description)}</div>
+                </div>
+            `;
+
+            if (technology) {
+                html += `
+                    <div class="property">
+                        <div class="property-label">Technology</div>
+                        <div class="property-value">${escapeHtml(technology)}</div>
+                    </div>
+                `;
+            }
+
+            detailContent.innerHTML = html;
+        }
+
+        function getIcon(type) {
+            const icons = {
+                'Person': '👤',
+                'Software System': '📦',
+                'Container': '🗄️',
+                'Component': '⚙️',
+                'Deployment Node': '🖥️'
+            };
+            return icons[type] || '📄';
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        // Search functionality
+        const searchInput = document.getElementById('search-input');
+        const tree = document.getElementById('tree');
+        const noResults = document.getElementById('no-results');
+
+        searchInput.addEventListener('input', (e) => {
+            const query = e.target.value.toLowerCase().trim();
+
+            if (!query) {
+                // Show all nodes
+                document.querySelectorAll('.tree li, .tree-node').forEach(el => {
+                    el.style.display = '';
+                });
+                noResults.style.display = 'none';
+                tree.style.display = '';
+                return;
+            }
+
+            let hasResults = false;
+
+            // Filter nodes
+            document.querySelectorAll('.tree-node').forEach(node => {
+                const name = (node.dataset.name || '').toLowerCase();
+                const description = (node.dataset.description || '').toLowerCase();
+                const technology = (node.dataset.technology || '').toLowerCase();
+                const type = (node.dataset.type || '').toLowerCase();
+
+                const matches = name.includes(query) ||
+                               description.includes(query) ||
+                               technology.includes(query) ||
+                               type.includes(query);
+
+                const li = node.closest('li');
+
+                if (matches) {
+                    hasResults = true;
+                    li.style.display = '';
+                    node.style.display = '';
+
+                    // Expand parent nodes
+                    let parent = li.parentElement?.closest('li');
+                    while (parent) {
+                        parent.style.display = '';
+                        parent.classList.add('expanded');
+                        const toggle = parent.querySelector(':scope > .tree-node > .toggle');
+                        if (toggle) toggle.textContent = '▼';
+                        parent = parent.parentElement?.closest('li');
+                    }
+                } else if (node.dataset.type !== 'group') {
+                    li.style.display = 'none';
+                }
+            });
+
+            // Handle group nodes visibility
+            document.querySelectorAll('[data-type="group"]').forEach(groupNode => {
+                const li = groupNode.closest('li');
+                const visibleChildren = li.querySelectorAll('.children > li[style=""], .children > li:not([style])');
+                if (visibleChildren.length === 0) {
+                    li.style.display = 'none';
+                } else {
+                    li.style.display = '';
+                    li.classList.add('expanded');
+                    const toggle = groupNode.querySelector('.toggle');
+                    if (toggle) toggle.textContent = '▼';
+                }
+            });
+
+            if (hasResults) {
+                noResults.style.display = 'none';
+                tree.style.display = '';
+            } else {
+                noResults.style.display = 'block';
+                tree.style.display = 'none';
+            }
+        });
+    </script>"##;
+
+    // Build content HTML
+    let content = format!(
+        r#"<div class="tree-panel">
             <div class="search-box">
                 <input type="text" id="search-input" placeholder="Search elements...">
             </div>
@@ -2059,181 +1417,26 @@ pub async fn tree_view(State(state): State<AppState>) -> Result<Html<String>> {
                 </div>
             </div>
             <div class="detail-content" id="detail-content" style="display: none;"></div>
-        </div>
-    </div>
-
-    <script>
-        // Tree expand/collapse functionality
-        document.addEventListener('click', (e) => {{
-            const toggle = e.target.closest('.toggle');
-            if (toggle) {{
-                e.stopPropagation();
-                const li = toggle.closest('li');
-                li.classList.toggle('expanded');
-                toggle.textContent = li.classList.contains('expanded') ? '▼' : '▶';
-            }}
-        }});
-
-        // Node selection and detail display
-        document.addEventListener('click', (e) => {{
-            const node = e.target.closest('.tree-node');
-            if (node && node.dataset.id) {{
-                // Remove previous selection
-                document.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
-
-                // Add new selection
-                node.classList.add('selected');
-
-                // Show details
-                showDetails(node);
-            }}
-        }});
-
-        function showDetails(node) {{
-            const emptyState = document.getElementById('empty-state');
-            const detailContent = document.getElementById('detail-content');
-
-            emptyState.style.display = 'none';
-            detailContent.style.display = 'block';
-
-            const type = node.dataset.type;
-            const name = node.dataset.name;
-            const description = node.dataset.description || 'No description provided';
-            const technology = node.dataset.technology || '';
-            const id = node.dataset.id;
-
-            let html = `
-                <h2>
-                    <span class="icon">${{getIcon(type)}}</span>
-                    ${{escapeHtml(name)}}
-                    <span class="type-badge">${{type}}</span>
-                </h2>
-                <div class="property">
-                    <div class="property-label">ID</div>
-                    <div class="property-value"><code>${{id}}</code></div>
-                </div>
-                <div class="property">
-                    <div class="property-label">Description</div>
-                    <div class="property-value">${{escapeHtml(description)}}</div>
-                </div>
-            `;
-
-            if (technology) {{
-                html += `
-                    <div class="property">
-                        <div class="property-label">Technology</div>
-                        <div class="property-value">${{escapeHtml(technology)}}</div>
-                    </div>
-                `;
-            }}
-
-            detailContent.innerHTML = html;
-        }}
-
-        function getIcon(type) {{
-            const icons = {{
-                'Person': '👤',
-                'Software System': '📦',
-                'Container': '🗄️',
-                'Component': '⚙️',
-                'Deployment Node': '🖥️'
-            }};
-            return icons[type] || '📄';
-        }}
-
-        function escapeHtml(text) {{
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }}
-
-        // Search functionality
-        const searchInput = document.getElementById('search-input');
-        const tree = document.getElementById('tree');
-        const noResults = document.getElementById('no-results');
-
-        searchInput.addEventListener('input', (e) => {{
-            const query = e.target.value.toLowerCase().trim();
-
-            if (!query) {{
-                // Show all nodes
-                document.querySelectorAll('.tree li, .tree-node').forEach(el => {{
-                    el.style.display = '';
-                }});
-                noResults.style.display = 'none';
-                tree.style.display = '';
-                return;
-            }}
-
-            let hasResults = false;
-
-            // Filter nodes
-            document.querySelectorAll('.tree-node').forEach(node => {{
-                const name = (node.dataset.name || '').toLowerCase();
-                const description = (node.dataset.description || '').toLowerCase();
-                const technology = (node.dataset.technology || '').toLowerCase();
-                const type = (node.dataset.type || '').toLowerCase();
-
-                const matches = name.includes(query) ||
-                               description.includes(query) ||
-                               technology.includes(query) ||
-                               type.includes(query);
-
-                const li = node.closest('li');
-
-                if (matches) {{
-                    hasResults = true;
-                    li.style.display = '';
-                    node.style.display = '';
-
-                    // Expand parent nodes
-                    let parent = li.parentElement?.closest('li');
-                    while (parent) {{
-                        parent.style.display = '';
-                        parent.classList.add('expanded');
-                        const toggle = parent.querySelector(':scope > .tree-node > .toggle');
-                        if (toggle) toggle.textContent = '▼';
-                        parent = parent.parentElement?.closest('li');
-                    }}
-                }} else if (node.dataset.type !== 'group') {{
-                    li.style.display = 'none';
-                }}
-            }});
-
-            // Handle group nodes visibility
-            document.querySelectorAll('[data-type="group"]').forEach(groupNode => {{
-                const li = groupNode.closest('li');
-                const visibleChildren = li.querySelectorAll('.children > li[style=""], .children > li:not([style])');
-                if (visibleChildren.length === 0) {{
-                    li.style.display = 'none';
-                }} else {{
-                    li.style.display = '';
-                    li.classList.add('expanded');
-                    const toggle = groupNode.querySelector('.toggle');
-                    if (toggle) toggle.textContent = '▼';
-                }}
-            }});
-
-            if (hasResults) {{
-                noResults.style.display = 'none';
-                tree.style.display = '';
-            }} else {{
-                noResults.style.display = 'block';
-                tree.style.display = 'none';
-            }}
-        }});
-    </script>
-</body>
-</html>"##,
-        workspace.name,
-        workspace.name,
+        </div>"#,
         tree_html,
         model.people.len(),
         model.software_systems.len(),
         model.relationships.len()
     );
 
-    Ok(Html(html))
+    let title = format!("Tree View - {}", workspace.name);
+    let config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(&workspace.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Tree,
+        content_type: ContentType::Sidebar,
+        extra_head: extra_styles,
+        extra_body_end: extra_scripts,
+    };
+
+    generate_page_layout(&config, &content)
 }
 
 /// Helper function to render deployment nodes recursively.
@@ -2506,92 +1709,8 @@ pub async fn workspace_home(
     let workspace = state.get_workspace_by_id(&workspace_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
 
-    let views = workspace.views();
-    let view_list: Vec<String> = views.all_keys().iter().map(|k| k.to_string()).collect();
-
-    let dynamic_view_keys: std::collections::HashSet<String> = views.dynamic_views.iter()
-        .map(|v| v.properties.key.clone())
-        .collect();
-
     let base_path = format!("/w/{}", workspace_id);
-
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>{} - Structurizr</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        h1 {{ color: #333; }}
-        .workspace-info {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        .views {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }}
-        .view-card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        .view-card h3 {{ margin-top: 0; }}
-        .view-card a {{ color: #0066cc; text-decoration: none; }}
-        .view-card a:hover {{ text-decoration: underline; }}
-        .nav {{ margin-bottom: 20px; }}
-        .nav a {{ margin-right: 15px; color: #0066cc; text-decoration: none; }}
-        .breadcrumb {{ margin-bottom: 10px; color: #666; }}
-        .breadcrumb a {{ color: #0066cc; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="breadcrumb">
-            <a href="/">All Workspaces</a> / {}
-        </div>
-        <div class="nav">
-            <a href="{}">Home</a>
-            <a href="{}/tree">Tree View</a>
-            <a href="{}/docs">Documentation</a>
-            <a href="{}/search">Search</a>
-            <a href="{}/explore">Explore Graph</a>
-            <a href="{}/presentation">Presentation Mode</a>
-            <a href="{}/api/workspace">API</a>
-            <a href="{}/export/json">Export JSON</a>
-        </div>
-        <h1>{}</h1>
-        <div class="workspace-info">
-            <p>{}</p>
-            <p><strong>People:</strong> {}</p>
-            <p><strong>Software Systems:</strong> {}</p>
-            <p><strong>Relationships:</strong> {}</p>
-        </div>
-        <h2>Views</h2>
-        <div class="views">
-            {}
-        </div>
-    </div>
-</body>
-</html>"#,
-        workspace.name,
-        escape_html(&workspace_id),
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        base_path,
-        workspace.name,
-        workspace.description.as_deref().unwrap_or(""),
-        workspace.model().people.len(),
-        workspace.model().software_systems.len(),
-        workspace.model().relationships.len(),
-        view_list.iter().map(|v| {
-            let animate_link = if dynamic_view_keys.contains(v) {
-                format!(r#" | <a href="{}/view/{}/animate">Animate</a>"#, base_path, v)
-            } else {
-                String::new()
-            };
-            format!(
-                r#"<div class="view-card"><h3><a href="{}/view/{}">{}</a></h3><p><a href="{}/edit/{}">Edit</a> | <a href="{}/presentation?views={}">Present</a>{} | <a href="{}/view/{}/svg">SVG</a></p></div>"#,
-                base_path, v, v, base_path, v, base_path, v, animate_link, base_path, v
-            )
-        }).collect::<Vec<_>>().join("\n            ")
-    );
+    let html = generate_home_page_html(&workspace, &base_path, Some(&workspace_id));
 
     Ok(Html(html))
 }
@@ -2660,8 +1779,8 @@ pub async fn workspace_search_page(
 
     let base_path = format!("/w/{}", workspace_id);
     let search_term = query.q.unwrap_or_default();
-    let results = perform_search(&workspace, &search_term);
-    Ok(Html(generate_search_page_html(&workspace.name, &base_path, &search_term, &results)))
+    let html = generate_search_page_html(&workspace, &base_path, Some(&workspace_id), &search_term);
+    Ok(Html(html))
 }
 
 /// Workspace-scoped tree view handler.
@@ -2701,7 +1820,8 @@ pub async fn workspace_explore(
         .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
 
     let base_path = format!("/w/{}", workspace_id);
-    render_explore_html(&workspace, &base_path)
+    let html = generate_explore_page_html(&workspace, &base_path, Some(&workspace_id));
+    Ok(Html(html))
 }
 
 /// Workspace-scoped get workspace JSON handler.
@@ -2834,6 +1954,13 @@ pub async fn workspace_export_d2(
 /// - `view_key`: The key of the view to render
 /// - `base_path`: Base path for URLs (empty for single-workspace, "/w/workspace_id" for multi)
 fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: &str) -> String {
+    // Extract workspace_id from base_path for layout
+    let workspace_id = if base_path.starts_with("/w/") {
+        Some(&base_path[3..])
+    } else {
+        None
+    };
+
     let svg_url = format!("{}/view/{}/svg", base_path, view_key);
     let model = workspace.model();
     let views = workspace.views();
@@ -3030,78 +2157,130 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
     }
     elements_json.push(']');
 
-    // Home link uses base_path (empty string means root "/")
-    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+    let title = format!("{} - {}", view_key, workspace.name);
 
-    format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>{view_key} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; background: #1a1a1a; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; height: 100vh; overflow: hidden; }}
-        .toolbar {{ background: #333; color: white; padding: 10px 20px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid #444; }}
-        .toolbar a {{ color: white; text-decoration: none; }}
-        .toolbar a:hover {{ text-decoration: underline; }}
-        .toolbar button {{ background: #555; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }}
-        .toolbar button:hover {{ background: #666; }}
-        .toolbar .separator {{ border-left: 1px solid #555; height: 20px; }}
-        .zoom-controls {{ display: flex; gap: 5px; align-items: center; }}
-        .zoom-level {{ font-size: 12px; min-width: 50px; text-align: center; }}
-        .diagram-container {{ height: calc(100vh - 50px); overflow: hidden; position: relative; background: #2a2a2a; }}
-        #diagram-canvas {{ width: 100%; height: 100%; cursor: grab; }}
-        #diagram-canvas.dragging {{ cursor: grabbing; }}
-        .tooltip {{ position: fixed; background: #333; color: white; padding: 12px 16px; border-radius: 6px; font-size: 13px; max-width: 300px; z-index: 1000; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,0.3); display: none; }}
-        .tooltip h4 {{ margin: 0 0 6px 0; font-size: 14px; }}
-        .tooltip .type {{ color: #888; font-size: 11px; margin-bottom: 8px; }}
-        .tooltip .desc {{ line-height: 1.4; }}
-        .tooltip .tech {{ color: #6af; margin-top: 6px; font-size: 12px; }}
-        .tooltip .drill-hint {{ color: #4c9; margin-top: 8px; font-size: 11px; font-style: italic; }}
-        .minimap {{ position: absolute; bottom: 20px; right: 20px; width: 200px; height: 150px; background: #333; border: 1px solid #555; border-radius: 4px; overflow: hidden; cursor: crosshair; }}
-        .minimap-canvas {{ width: 100%; height: 100%; opacity: 0.7; }}
-        .minimap .viewport {{ position: absolute; border: 2px solid #0066cc; background: rgba(0,102,204,0.1); cursor: grab; transition: background 0.15s; }}
-        .minimap .viewport:hover {{ background: rgba(0,102,204,0.25); }}
-        .keyboard-help {{ position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: #666; }}
-        .breadcrumbs {{ display: flex; align-items: center; gap: 6px; font-size: 13px; max-width: 500px; overflow: hidden; }}
-        .breadcrumb {{ display: flex; align-items: center; gap: 4px; color: #aaa; text-decoration: none; padding: 4px 8px; border-radius: 4px; transition: all 0.15s; white-space: nowrap; }}
-        .breadcrumb:hover {{ background: rgba(255,255,255,0.1); color: white; }}
-        .breadcrumb.current {{ color: white; font-weight: 500; }}
-        .breadcrumb-icon {{ background: rgba(255,255,255,0.15); padding: 2px 6px; border-radius: 3px; font-size: 10px; font-weight: 600; }}
-        .breadcrumb-separator {{ color: #555; font-size: 11px; }}
-        .drill-indicator {{ position: absolute; pointer-events: none; }}
-    </style>
-</head>
-<body>
-    <div class="toolbar">
-        <a href="{home_href}">Home</a>
-        <div class="separator"></div>
-        <nav class="breadcrumbs" id="breadcrumbs"></nav>
-        <div class="separator"></div>
-        <div class="zoom-controls">
-            <button onclick="zoomOut()">−</button>
-            <span class="zoom-level" id="zoom-level">100%</span>
-            <button onclick="zoomIn()">+</button>
-            <button onclick="resetZoom()">Reset</button>
-            <button onclick="fitToScreen()">Fit</button>
+    let extra_styles = r##"<style>
+        .view-toolbar {
+            background: var(--toolbar-bg);
+            color: var(--toolbar-text);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 1px solid var(--toolbar-border);
+        }
+        .view-toolbar a { color: var(--link-color); text-decoration: none; }
+        .view-toolbar a:hover { text-decoration: underline; }
+        .view-toolbar button {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            padding: 6px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        .view-toolbar button:hover { background: var(--card-hover); }
+        .view-toolbar .separator { border-left: 1px solid var(--border-color); height: 20px; }
+        .zoom-controls { display: flex; gap: 5px; align-items: center; }
+        .zoom-level { font-size: 12px; min-width: 50px; text-align: center; color: var(--text-secondary); }
+        .diagram-container { flex: 1; overflow: hidden; position: relative; background: var(--canvas-bg); }
+        #diagram-canvas { width: 100%; height: 100%; cursor: grab; }
+        #diagram-canvas.dragging { cursor: grabbing; }
+        .tooltip {
+            position: fixed;
+            background: var(--card-bg);
+            color: var(--text-primary);
+            padding: 12px 16px;
+            border-radius: 6px;
+            font-size: 13px;
+            max-width: 300px;
+            z-index: 1000;
+            pointer-events: none;
+            box-shadow: 0 4px 12px var(--shadow-medium);
+            border: 1px solid var(--border-color);
+            display: none;
+        }
+        .tooltip h4 { margin: 0 0 6px 0; font-size: 14px; }
+        .tooltip .type { color: var(--text-muted); font-size: 11px; margin-bottom: 8px; }
+        .tooltip .desc { line-height: 1.4; }
+        .tooltip .tech { color: var(--link-color); margin-top: 6px; font-size: 12px; }
+        .tooltip .drill-hint { color: #4c9; margin-top: 8px; font-size: 11px; font-style: italic; }
+        .minimap {
+            position: absolute;
+            bottom: 20px;
+            right: 20px;
+            width: 200px;
+            height: 150px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+            cursor: crosshair;
+        }
+        .minimap-canvas { width: 100%; height: 100%; opacity: 0.7; }
+        .minimap .viewport {
+            position: absolute;
+            border: 2px solid #0066cc;
+            background: rgba(0,102,204,0.1);
+            cursor: grab;
+            transition: background 0.15s;
+        }
+        .minimap .viewport:hover { background: rgba(0,102,204,0.25); }
+        .keyboard-help { position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: var(--text-muted); }
+        .view-breadcrumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; max-width: 500px; overflow: hidden; }
+        .view-breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            color: var(--text-secondary);
+            text-decoration: none;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: all 0.15s;
+            white-space: nowrap;
+        }
+        .view-breadcrumb:hover { background: var(--header-link-hover); color: var(--text-primary); }
+        .view-breadcrumb.current { color: var(--text-primary); font-weight: 500; }
+        .view-breadcrumb-icon {
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 10px;
+            font-weight: 600;
+        }
+        .view-breadcrumb-separator { color: var(--text-muted); font-size: 11px; }
+        .drill-indicator { position: absolute; pointer-events: none; }
+    </style>"##;
+
+    let content = format!(r##"
+        <div class="view-toolbar">
+            <nav class="view-breadcrumbs" id="breadcrumbs"></nav>
+            <div class="separator"></div>
+            <div class="zoom-controls">
+                <button onclick="zoomOut()">−</button>
+                <span class="zoom-level" id="zoom-level">100%</span>
+                <button onclick="zoomIn()">+</button>
+                <button onclick="resetZoom()">Reset</button>
+                <button onclick="fitToScreen()">Fit</button>
+            </div>
+            <div class="separator"></div>
+            <a href="{base_path}/edit/{view_key}">Edit</a>
+            <a href="{svg_url}" download="{view_key}.svg">Download SVG</a>
         </div>
-        <div class="separator"></div>
-        <a href="{base_path}/edit/{view_key}">Edit</a>
-        <a href="{svg_url}" download="{view_key}.svg">Download SVG</a>
-    </div>
-    <div class="diagram-container" id="diagram-container">
-        <canvas id="diagram-canvas"></canvas>
-    </div>
-    <div class="tooltip" id="tooltip"></div>
-    <div class="minimap" id="minimap">
-        <canvas class="minimap-canvas" id="minimap-canvas"></canvas>
-        <div class="viewport" id="minimap-viewport"></div>
-    </div>
-    <div class="keyboard-help">
-        Scroll to zoom • Drag to pan • Double-click to drill down • Hover for info • Esc to go back
-    </div>
+        <div class="diagram-container" id="diagram-container">
+            <canvas id="diagram-canvas"></canvas>
+        </div>
+        <div class="tooltip" id="tooltip"></div>
+        <div class="minimap" id="minimap">
+            <canvas class="minimap-canvas" id="minimap-canvas"></canvas>
+            <div class="viewport" id="minimap-viewport"></div>
+        </div>
+        <div class="keyboard-help">
+            Scroll to zoom • Drag to pan • Double-click to drill down • Hover for info • Esc to go back
+        </div>
+    "##, base_path = base_path, view_key = view_key, svg_url = svg_url);
 
-    <script>
+    let extra_scripts = format!(r##"<script>
         // Base path for URL construction
         const basePath = '{base_path}';
 
@@ -3160,6 +2339,13 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
 
         renderBreadcrumbs();
 
+        // Theme-aware colors (read from CSS variables)
+        function getThemeColor(varName, fallback) {{
+            return getComputedStyle(document.documentElement).getPropertyValue(varName).trim() || fallback;
+        }}
+        function getCanvasBg() {{ return getThemeColor('--canvas-bg', '#f0f0f0'); }}
+        function getCardBg() {{ return getThemeColor('--card-bg', '#ffffff'); }}
+
         // Canvas and context
         const canvas = document.getElementById('diagram-canvas');
         const ctx = canvas.getContext('2d');
@@ -3205,7 +2391,7 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             minimapCanvas.width = 200;
             minimapCanvas.height = 150;
 
-            ctx.fillStyle = '#2a2a2a';
+            ctx.fillStyle = getCanvasBg();
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = '#666';
             ctx.font = '16px system-ui, sans-serif';
@@ -3241,7 +2427,7 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
                 }});
         }};
         svgImage.onerror = (e) => {{
-            ctx.fillStyle = '#2a2a2a';
+            ctx.fillStyle = getCanvasBg();
             ctx.fillRect(0, 0, canvas.width, canvas.height);
             ctx.fillStyle = '#f66';
             ctx.font = '16px system-ui, sans-serif';
@@ -3262,7 +2448,7 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
         function render() {{
             if (!svgLoaded) return;
 
-            ctx.fillStyle = '#2a2a2a';
+            ctx.fillStyle = getCanvasBg();
             ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             ctx.save();
@@ -3273,7 +2459,7 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             ctx.shadowBlur = 20;
             ctx.shadowOffsetX = 0;
             ctx.shadowOffsetY = 4;
-            ctx.fillStyle = 'white';
+            ctx.fillStyle = getCardBg();
             ctx.fillRect(0, 0, svgWidth, svgHeight);
 
             ctx.shadowColor = 'transparent';
@@ -3641,18 +2827,32 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             resizeCanvas();
         }});
 
+        // Re-render when theme changes
+        new MutationObserver(() => {{ render(); }}).observe(
+            document.documentElement, {{ attributes: true, attributeFilter: ['data-theme'] }}
+        );
+
         minimapViewport.style.cursor = 'grab';
-    </script>
-</body>
-</html>"##,
-        view_key = view_key,
-        home_href = home_href,
+    </script>"##,
         base_path = base_path,
         svg_url = svg_url,
         elements_json = elements_json,
         breadcrumbs_json = breadcrumbs_json,
         current_view_title = escape_json(&current_view_title),
-    )
+    );
+
+    let config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(&workspace.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::View,
+        content_type: ContentType::ToolbarViewport,
+        extra_head: extra_styles,
+        extra_body_end: &extra_scripts,
+    };
+
+    generate_page_layout(&config, &content)
 }
 
 /// Render view diagram HTML (wrapper for multi-workspace handlers).
@@ -3886,10 +3086,16 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
 }
 
 /// Render edit diagram HTML using the shared generator.
-fn render_edit_diagram_html(_workspace: &Workspace, view_key: &str, base_path: &str) -> Result<Html<String>> {
+fn render_edit_diagram_html(workspace: &Workspace, view_key: &str, base_path: &str) -> Result<Html<String>> {
     // Use ws path relative to base_path for multi-workspace routing
     let ws_path = if base_path.is_empty() { "".to_string() } else { format!("{}/ws", base_path) };
-    let html = generate_editor_html(view_key, base_path, &ws_path);
+    // Extract workspace_id from base_path for layout
+    let workspace_id = if base_path.starts_with("/w/") {
+        Some(&base_path[3..])
+    } else {
+        None
+    };
+    let html = generate_editor_html(workspace, view_key, base_path, &ws_path, workspace_id);
     Ok(Html(html))
 }
 
@@ -3903,11 +3109,12 @@ fn render_edit_diagram_html(_workspace: &Workspace, view_key: &str, base_path: &
 /// - Connection status indicator
 ///
 /// # Arguments
+/// - `workspace` - The workspace containing the diagram
 /// - `view_key` - The view being edited
 /// - `base_path` - Base URL path (empty for single-workspace, e.g., "/w/my-workspace" for multi)
 /// - `ws_path` - WebSocket base path (empty for single-workspace, e.g., "/w/my-workspace/ws" for multi)
-fn generate_editor_html(view_key: &str, base_path: &str, ws_path: &str) -> String {
-    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
+/// - `workspace_id` - Optional workspace ID for multi-workspace mode
+fn generate_editor_html(workspace: &Workspace, view_key: &str, base_path: &str, ws_path: &str, workspace_id: Option<&str>) -> String {
     let svg_url = if base_path.is_empty() {
         format!("/view/{}/svg", view_key)
     } else {
@@ -3915,156 +3122,171 @@ fn generate_editor_html(view_key: &str, base_path: &str, ws_path: &str) -> Strin
     };
     let ws_base = if ws_path.is_empty() { "/ws".to_string() } else { ws_path.to_string() };
 
-    format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Edit {view_key} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; color: #fff; height: 100vh; overflow: hidden; }}
-        .toolbar {{ background: #333; padding: 10px 20px; display: flex; align-items: center; gap: 20px; border-bottom: 1px solid #444; }}
-        .toolbar a {{ color: #fff; text-decoration: none; }}
-        .toolbar a:hover {{ color: #88c8ff; }}
-        .toolbar button {{ background: #0066cc; color: #fff; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; font-weight: 500; }}
-        .toolbar button:hover {{ background: #0052a3; }}
-        .toolbar button.secondary {{ background: #555; }}
-        .toolbar button.secondary:hover {{ background: #666; }}
-        .toolbar .divider {{ width: 1px; height: 24px; background: #444; }}
-        .editor-container {{ display: flex; height: calc(100vh - 50px); }}
-        .canvas-container {{ flex: 1; overflow: hidden; position: relative; background: #2a2a2a; }}
-        #canvas {{
+    let title = format!("Edit {} - {}", view_key, workspace.name);
+
+    let extra_styles = r##"<style>
+        .editor-toolbar {
+            background: var(--toolbar-bg);
+            padding: 10px 20px;
+            display: flex;
+            align-items: center;
+            gap: 20px;
+            border-bottom: 1px solid var(--toolbar-border);
+        }
+        .editor-toolbar span { color: var(--toolbar-text); }
+        .editor-toolbar button {
+            background: #0066cc;
+            color: #fff;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        .editor-toolbar button:hover { background: #0052a3; }
+        .editor-toolbar button.secondary {
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+        }
+        .editor-toolbar button.secondary:hover { background: var(--card-hover); }
+        .editor-toolbar .divider { width: 1px; height: 24px; background: var(--border-color); }
+        .editor-container { display: flex; flex: 1; }
+        .canvas-container { flex: 1; overflow: hidden; position: relative; background: var(--canvas-bg); }
+        #canvas {
             position: absolute;
             cursor: grab;
             transform-origin: 0 0;
-        }}
-        #canvas.dragging {{ cursor: grabbing; }}
-        #canvas.element-dragging {{ cursor: move; }}
-        .element {{
+        }
+        #canvas.dragging { cursor: grabbing; }
+        #canvas.element-dragging { cursor: move; }
+        .element {
             position: absolute;
             cursor: move;
             user-select: none;
             border: 2px solid transparent;
             border-radius: 4px;
             transition: border-color 0.15s ease;
-        }}
-        .element:hover {{ border-color: rgba(255, 255, 255, 0.3); }}
-        .element.selected {{ border-color: #0066cc !important; box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.3); }}
-        .element.dragging {{ opacity: 0.8; z-index: 1000; }}
-        .status {{
+        }
+        .element:hover { border-color: rgba(255, 255, 255, 0.3); }
+        .element.selected { border-color: #0066cc !important; box-shadow: 0 0 0 2px rgba(0, 102, 204, 0.3); }
+        .element.dragging { opacity: 0.8; z-index: 1000; }
+        .status {
             position: fixed;
             bottom: 20px;
             right: 20px;
-            background: #333;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
             padding: 10px 20px;
             border-radius: 4px;
             font-size: 12px;
             display: flex;
             align-items: center;
             gap: 8px;
-        }}
-        .status .dot {{
+            color: var(--text-secondary);
+        }
+        .status .dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
-            background: #666;
-        }}
-        .status.connected .dot {{ background: #28a745; }}
-        .status.disconnected .dot {{ background: #dc3545; }}
-        .status.connecting .dot {{ background: #ffc107; animation: pulse 1s infinite; }}
-        @keyframes pulse {{ 0%, 100% {{ opacity: 1; }} 50% {{ opacity: 0.5; }} }}
-        .zoom-controls {{
+            background: var(--text-muted);
+        }
+        .status.connected .dot { background: #28a745; }
+        .status.disconnected .dot { background: #dc3545; }
+        .status.connecting .dot { background: #ffc107; animation: pulse 1s infinite; }
+        @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.5; } }
+        .zoom-controls {
             position: absolute;
             bottom: 20px;
             left: 20px;
             display: flex;
             gap: 5px;
-            background: #333;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
             padding: 5px;
             border-radius: 4px;
-        }}
-        .zoom-controls button {{
-            background: #444;
+        }
+        .zoom-controls button {
+            background: var(--bg-tertiary);
             border: none;
-            color: white;
+            color: var(--text-primary);
             padding: 8px 12px;
             border-radius: 3px;
             cursor: pointer;
-        }}
-        .zoom-controls button:hover {{ background: #555; }}
-        .zoom-controls span {{
+        }
+        .zoom-controls button:hover { background: var(--card-hover); }
+        .zoom-controls span {
             padding: 8px 12px;
             font-size: 12px;
-            color: #888;
-        }}
-        .minimap {{
+            color: var(--text-muted);
+        }
+        .minimap {
             position: absolute;
             bottom: 20px;
             right: 100px;
             width: 150px;
             height: 100px;
-            background: #222;
-            border: 1px solid #444;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
             border-radius: 4px;
             overflow: hidden;
-        }}
-        .minimap-viewport {{
+        }
+        .minimap-viewport {
             position: absolute;
             border: 1px solid #0066cc;
             background: rgba(0, 102, 204, 0.1);
-        }}
-        .help-text {{
+        }
+        .help-text {
             position: absolute;
             top: 10px;
             right: 10px;
             font-size: 11px;
-            color: #666;
+            color: var(--text-muted);
             text-align: right;
-        }}
-    </style>
-</head>
-<body>
-    <div class="toolbar">
-        <a href="{home_href}">← Back</a>
-        <span class="divider"></span>
-        <span id="view-name">{view_key}</span>
-        <span class="divider"></span>
-        <button onclick="autoLayout()">Auto Layout</button>
-        <button onclick="save()" class="secondary">Save</button>
-        <button onclick="undo()" class="secondary">Undo</button>
-        <button onclick="redo()" class="secondary">Redo</button>
-        <span style="margin-left: auto; font-size: 12px; color: #888;">
-            Drag elements to reposition • Shift+drag to pan • Scroll to zoom
-        </span>
-    </div>
-    <div class="editor-container">
-        <div class="canvas-container" id="canvas-container">
-            <div id="canvas">
-                <img src="{svg_url}" alt="{view_key}" id="diagram-svg" style="pointer-events: none;">
-            </div>
-            <div class="zoom-controls">
-                <button onclick="zoomIn()">+</button>
-                <span id="zoom-level">100%</span>
-                <button onclick="zoomOut()">−</button>
-                <button onclick="resetZoom()">Reset</button>
-            </div>
-            <div class="minimap" id="minimap">
-                <div class="minimap-viewport" id="minimap-viewport"></div>
-            </div>
-            <div class="help-text">
-                Shift+Drag: Pan<br>
-                Scroll: Zoom<br>
-                Click: Select<br>
-                Drag element: Move
+        }
+    </style>"##;
+
+    let content = format!(r##"
+        <div class="editor-toolbar">
+            <span id="view-name">{view_key}</span>
+            <span class="divider"></span>
+            <button onclick="autoLayout()">Auto Layout</button>
+            <button onclick="save()" class="secondary">Save</button>
+            <button onclick="undo()" class="secondary">Undo</button>
+            <button onclick="redo()" class="secondary">Redo</button>
+            <span style="margin-left: auto; font-size: 12px;">
+                Drag elements to reposition • Shift+drag to pan • Scroll to zoom
+            </span>
+        </div>
+        <div class="editor-container">
+            <div class="canvas-container" id="canvas-container">
+                <div id="canvas">
+                    <img src="{svg_url}" alt="{view_key}" id="diagram-svg" style="pointer-events: none;">
+                </div>
+                <div class="zoom-controls">
+                    <button onclick="zoomIn()">+</button>
+                    <span id="zoom-level">100%</span>
+                    <button onclick="zoomOut()">−</button>
+                    <button onclick="resetZoom()">Reset</button>
+                </div>
+                <div class="minimap" id="minimap">
+                    <div class="minimap-viewport" id="minimap-viewport"></div>
+                </div>
+                <div class="help-text">
+                    Shift+Drag: Pan<br>
+                    Scroll: Zoom<br>
+                    Click: Select<br>
+                    Drag element: Move
+                </div>
             </div>
         </div>
-    </div>
-    <div class="status connecting" id="status">
-        <span class="dot"></span>
-        <span id="status-text">Connecting...</span>
-    </div>
+        <div class="status connecting" id="status">
+            <span class="dot"></span>
+            <span id="status-text">Connecting...</span>
+        </div>
+    "##, view_key = view_key, svg_url = svg_url);
 
-    <script>
+    let extra_scripts = format!(r##"<script>
         const viewKey = '{view_key}';
         const wsBase = '{ws_base}';
         const wsUrl = 'ws://' + window.location.host + wsBase + '/edit/' + viewKey;
@@ -4322,14 +3544,23 @@ fn generate_editor_html(view_key: &str, base_path: &str, ws_path: &str) -> Strin
         }};
 
         connect();
-    </script>
-</body>
-</html>"##,
+    </script>"##,
         view_key = view_key,
-        home_href = home_href,
-        svg_url = svg_url,
         ws_base = ws_base,
-    )
+    );
+
+    let config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(&workspace.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Edit,
+        content_type: ContentType::ToolbarViewport,
+        extra_head: extra_styles,
+        extra_body_end: &extra_scripts,
+    };
+
+    generate_page_layout(&config, &content)
 }
 
 /// Render documentation HTML with full sidebar navigation and scroll-spy.
@@ -4347,6 +3578,13 @@ fn render_documentation_html(workspace: &Workspace, base_path: &str) -> Result<H
 /// - ADR (Architecture Decision Record) display with status badges
 /// - Markdown rendering with syntax highlighting
 fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String {
+    // Extract workspace_id from base_path if present
+    let workspace_id = if base_path.starts_with("/w/") {
+        Some(&base_path[3..])
+    } else {
+        None
+    };
+
     let docs = &workspace.documentation;
 
     // Build sections list and collect navigation tree
@@ -4448,492 +3686,239 @@ fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String
         format!(r##"<a href="#adr-{}" class="nav-link adr-link">{}: {}</a>"##, decision.id, decision.id, escape_html(&decision.title))
     }).collect();
 
-    // Home link uses base_path (empty string means root "/")
-    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
-
-    format!(
-        r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Documentation - {} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; overflow: hidden; }}
-        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; position: sticky; top: 0; z-index: 100; }}
-        .header a {{ color: white; text-decoration: none; }}
-        .header h1 {{ margin: 0; font-size: 18px; }}
-        .container {{ display: flex; height: calc(100vh - 54px); }}
-        .sidebar {{ width: 300px; background: white; border-right: 1px solid #ddd; padding: 20px; overflow-y: auto; flex-shrink: 0; height: calc(100vh - 54px); }}
-        .sidebar h3 {{ margin: 0 0 10px 0; font-size: 12px; text-transform: uppercase; color: #888; }}
+    // Page-specific styles
+    let extra_styles = r##"<style>
+        .sidebar { width: 300px; background: var(--card-bg); border-right: 1px solid var(--border-color); padding: 20px; overflow-y: auto; flex-shrink: 0; }
+        .sidebar h3 { margin: 0 0 10px 0; font-size: 12px; text-transform: uppercase; color: var(--text-muted); }
 
         /* Tree Navigation */
-        .nav-tree, .nav-tree ul {{ list-style: none; padding: 0; margin: 0; }}
-        .nav-item {{ margin: 1px 0; position: relative; }}
-        .nav-row {{ display: flex; align-items: center; }}
-        .nav-link {{ flex: 1; padding: 6px 8px; color: #333; text-decoration: none; border-radius: 4px; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }}
-        .nav-link:hover {{ background: #f0f0f0; }}
-        .nav-link.active {{ background: #e3f2fd; color: #1976d2; font-weight: 500; }}
+        .nav-tree, .nav-tree ul { list-style: none; padding: 0; margin: 0; }
+        .nav-item { margin: 1px 0; position: relative; }
+        .nav-row { display: flex; align-items: center; }
+        .sidebar .nav-link { flex: 1; padding: 6px 8px; color: var(--text-primary); text-decoration: none; border-radius: 4px; font-size: 13px; display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .sidebar .nav-link:hover { background: var(--bg-tertiary); text-decoration: none; }
+        .sidebar .nav-link.active { background: var(--link-color); color: white; font-weight: 500; }
+        [data-theme="light"] .sidebar .nav-link.active { background: #e3f2fd; color: #1976d2; }
 
         /* Toggle arrow */
-        .toggle {{ width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 4px; }}
-        .toggle:hover {{ background: #e0e0e0; }}
-        .toggle::before {{ content: '\25B6'; font-size: 8px; color: #666; transition: transform 0.15s ease; }}
-        .expandable.expanded > .nav-row > .toggle::before {{ transform: rotate(90deg); }}
+        .toggle { width: 20px; height: 20px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; border-radius: 4px; }
+        .toggle:hover { background: var(--bg-tertiary); }
+        .toggle::before { content: '\25B6'; font-size: 8px; color: var(--text-muted); transition: transform 0.15s ease; }
+        .expandable.expanded > .nav-row > .toggle::before { transform: rotate(90deg); }
 
         /* Leaf nodes need padding to align with expandable nodes */
-        .leaf > .nav-link {{ padding-left: 28px; }}
+        .leaf > .nav-link { padding-left: 28px; }
 
         /* Children container */
-        .nav-children {{ display: none; margin-left: 12px; border-left: 1px solid #e0e0e0; padding-left: 4px; }}
-        .expandable.expanded > .nav-children {{ display: block; }}
+        .nav-children { display: none; margin-left: 12px; border-left: 1px solid var(--border-color); padding-left: 4px; }
+        .expandable.expanded > .nav-children { display: block; }
 
         /* Depth styling */
-        .depth-0 > .nav-row > .nav-link, .depth-0 > .nav-link {{ font-weight: 600; font-size: 14px; }}
-        .depth-1 > .nav-row > .nav-link, .depth-1 > .nav-link {{ font-size: 13px; }}
-        .depth-2 > .nav-row > .nav-link, .depth-2 > .nav-link {{ font-size: 12px; color: #555; }}
-        .depth-3 > .nav-row > .nav-link, .depth-3 > .nav-link {{ font-size: 12px; color: #666; }}
-        .depth-4 > .nav-row > .nav-link, .depth-4 > .nav-link {{ font-size: 11px; color: #777; }}
-        .depth-5 > .nav-row > .nav-link, .depth-5 > .nav-link {{ font-size: 11px; color: #888; }}
+        .depth-0 > .nav-row > .nav-link, .depth-0 > .nav-link { font-weight: 600; font-size: 14px; }
+        .depth-1 > .nav-row > .nav-link, .depth-1 > .nav-link { font-size: 13px; }
+        .depth-2 > .nav-row > .nav-link, .depth-2 > .nav-link { font-size: 12px; color: var(--text-secondary); }
+        .depth-3 > .nav-row > .nav-link, .depth-3 > .nav-link { font-size: 12px; color: var(--text-secondary); }
+        .depth-4 > .nav-row > .nav-link, .depth-4 > .nav-link { font-size: 11px; color: var(--text-muted); }
+        .depth-5 > .nav-row > .nav-link, .depth-5 > .nav-link { font-size: 11px; color: var(--text-muted); }
 
         /* Active parent chain */
-        .nav-item.active-parent > .nav-row > .nav-link {{ color: #1976d2; }}
+        .nav-item.active-parent > .nav-row > .nav-link { color: var(--link-color); }
 
         /* ADR links */
-        .adr-link {{ display: block; padding: 6px 8px; margin: 2px 0; font-size: 13px; }}
-        .main {{ flex: 1; padding: 40px; width: 95%; overflow-y: auto; height: calc(100vh - 54px); }}
-        .doc-section {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        .doc-section h2 {{ margin-top: 0; border-bottom: 1px solid #eee; padding-bottom: 10px; }}
-        .content {{ line-height: 1.5; }}
-        .content h1, .content h2, .content h3 {{ margin-top: 0.8em; margin-bottom: 0.3em; }}
-        .content p {{ margin: 0.5em 0; }}
-        .content ul, .content ol {{ margin: 0.5em 0; padding-left: 1.5em; }}
-        .content pre {{ background: #f5f5f5; padding: 15px; border-radius: 4px; overflow-x: auto; }}
-        .content code {{ background: #f0f0f0; padding: 2px 6px; border-radius: 3px; font-family: "SF Mono", Monaco, monospace; font-size: 0.9em; }}
-        .content pre code {{ background: none; padding: 0; }}
-        .content blockquote {{ border-left: 4px solid #ddd; margin: 0; padding-left: 20px; color: #666; }}
-        .content table {{ border-collapse: collapse; width: 100%; margin: 1em 0; display: block; overflow-x: auto; }}
-        .content th, .content td {{ border: 1px solid #ddd; padding: 10px; text-align: left; }}
-        .content th {{ background: #f5f5f5; font-weight: 600; }}
-        .content tr:nth-child(even) {{ background: #fafafa; }}
-        .content del {{ color: #999; text-decoration: line-through; }}
-        .content input[type="checkbox"] {{ margin-right: 0.5em; transform: scale(1.1); }}
-        .content ul.contains-task-list {{ list-style: none; padding-left: 1em; }}
-        .content li.task-list-item {{ list-style: none; }}
-        .content .footnotes {{ font-size: 0.9em; border-top: 1px solid #eee; padding-top: 1em; margin-top: 2em; }}
-        .content .footnote-ref {{ font-size: 0.75em; vertical-align: super; }}
-        .content .footnote-backref {{ text-decoration: none; margin-left: 0.25em; }}
-        .content img {{ max-width: 100%; height: auto; border-radius: 4px; margin: 1em 0; }}
-        .content dl {{ margin: 1em 0; }}
-        .content dt {{ font-weight: 600; margin-top: 0.5em; }}
-        .content dd {{ margin-left: 2em; color: #555; }}
-        .decisions-section {{ margin-top: 40px; }}
-        .decision {{ background: white; padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); }}
-        .decision-header {{ display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }}
-        .decision-id {{ font-family: monospace; background: #f0f0f0; padding: 4px 8px; border-radius: 4px; font-size: 12px; }}
-        .decision-header h3 {{ margin: 0; flex: 1; }}
-        .status {{ padding: 4px 10px; border-radius: 20px; font-size: 11px; text-transform: uppercase; font-weight: 600; }}
-        .status.accepted {{ background: #d4edda; color: #155724; }}
-        .status.proposed {{ background: #fff3cd; color: #856404; }}
-        .status.superseded {{ background: #e2e3e5; color: #383d41; }}
-        .status.deprecated {{ background: #f8d7da; color: #721c24; }}
-        .status.rejected {{ background: #f8d7da; color: #721c24; }}
-        .date {{ color: #888; font-size: 12px; }}
-        .empty {{ color: #888; font-style: italic; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <a href="{home_href}">← Back</a>
-        <h1>Documentation: {name}</h1>
-    </div>
-    <div class="container">
-        <div class="sidebar">
-            <h3>Sections</h3>
-            {sidebar_sections}
-            {sidebar_decisions_section}
-        </div>
-        <div class="main">
-            {sections_html}
-            {decisions_html}
-        </div>
-    </div>
-    <script>
-    document.addEventListener('DOMContentLoaded', function() {{
+        .adr-link { display: block; padding: 6px 8px; margin: 2px 0; font-size: 13px; }
+        .main { flex: 1; padding: 40px; overflow-y: auto; }
+        .doc-section { background: var(--card-bg); padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px var(--shadow); }
+        .doc-section h2 { margin-top: 0; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
+        .content { line-height: 1.5; }
+        .content h1, .content h2, .content h3 { margin-top: 0.8em; margin-bottom: 0.3em; }
+        .content p { margin: 0.5em 0; }
+        .content ul, .content ol { margin: 0.5em 0; padding-left: 1.5em; }
+        .content pre { background: var(--pre-bg); padding: 15px; border-radius: 4px; overflow-x: auto; }
+        .content code { background: var(--code-bg); color: var(--code-text); padding: 2px 6px; border-radius: 3px; font-family: "SF Mono", Monaco, monospace; font-size: 0.9em; }
+        .content pre code { background: none; padding: 0; }
+        .content blockquote { border-left: 4px solid var(--border-color); margin: 0; padding-left: 20px; color: var(--text-secondary); }
+        .content table { border-collapse: collapse; width: 100%; margin: 1em 0; display: block; overflow-x: auto; }
+        .content th, .content td { border: 1px solid var(--border-color); padding: 10px; text-align: left; }
+        .content th { background: var(--bg-tertiary); font-weight: 600; }
+        .content tr:nth-child(even) { background: var(--bg-secondary); }
+        .content del { color: var(--text-muted); text-decoration: line-through; }
+        .content input[type="checkbox"] { margin-right: 0.5em; transform: scale(1.1); }
+        .content ul.contains-task-list { list-style: none; padding-left: 1em; }
+        .content li.task-list-item { list-style: none; }
+        .content .footnotes { font-size: 0.9em; border-top: 1px solid var(--border-color); padding-top: 1em; margin-top: 2em; }
+        .content .footnote-ref { font-size: 0.75em; vertical-align: super; }
+        .content .footnote-backref { text-decoration: none; margin-left: 0.25em; }
+        .content img { max-width: 100%; height: auto; border-radius: 4px; margin: 1em 0; }
+        .content dl { margin: 1em 0; }
+        .content dt { font-weight: 600; margin-top: 0.5em; }
+        .content dd { margin-left: 2em; color: var(--text-secondary); }
+        .decisions-section { margin-top: 40px; }
+        .decision { background: var(--card-bg); padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px var(--shadow); }
+        .decision-header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+        .decision-id { font-family: monospace; background: var(--bg-tertiary); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .decision-header h3 { margin: 0; flex: 1; }
+        .status { padding: 4px 10px; border-radius: 20px; font-size: 11px; text-transform: uppercase; font-weight: 600; }
+        .status.accepted { background: var(--status-accepted-bg); color: var(--status-accepted-text); }
+        .status.proposed { background: var(--status-proposed-bg); color: var(--status-proposed-text); }
+        .status.superseded { background: var(--status-superseded-bg); color: var(--status-superseded-text); }
+        .status.deprecated { background: var(--status-deprecated-bg); color: var(--status-deprecated-text); }
+        .status.rejected { background: var(--status-deprecated-bg); color: var(--status-deprecated-text); }
+        .date { color: var(--text-muted); font-size: 12px; }
+        .empty { color: var(--text-muted); font-style: italic; }
+    </style>"##;
+
+    // Page-specific scripts
+    let extra_scripts = r##"<script>
+    document.addEventListener('DOMContentLoaded', function() {
         const mainContent = document.querySelector('.main');
         const allHeadings = document.querySelectorAll('[id^="section-"], [id^="s"]');
         const navItems = document.querySelectorAll('.nav-item');
-        const navLinks = document.querySelectorAll('.nav-link');
+        const navLinks = document.querySelectorAll('.sidebar .nav-link');
 
         // Toggle expand/collapse on toggle button click
-        document.querySelectorAll('.toggle').forEach(function(toggle) {{
-            toggle.addEventListener('click', function(e) {{
+        document.querySelectorAll('.toggle').forEach(function(toggle) {
+            toggle.addEventListener('click', function(e) {
                 e.stopPropagation();
                 e.preventDefault();
                 const navItem = this.closest('.nav-item');
-                if (navItem && navItem.classList.contains('expandable')) {{
+                if (navItem && navItem.classList.contains('expandable')) {
                     navItem.classList.toggle('expanded');
-                }}
-            }});
-        }});
+                }
+            });
+        });
 
         // Smooth scroll on nav link click
-        navLinks.forEach(function(link) {{
-            link.addEventListener('click', function(e) {{
+        navLinks.forEach(function(link) {
+            link.addEventListener('click', function(e) {
                 e.preventDefault();
                 const href = this.getAttribute('href');
-                if (href && href.startsWith('#')) {{
+                if (href && href.startsWith('#')) {
                     const targetId = href.slice(1);
                     const target = document.getElementById(targetId);
-                    if (target) {{
-                        mainContent.scrollTo({{
+                    if (target) {
+                        mainContent.scrollTo({
                             top: target.offsetTop - 20,
                             behavior: 'smooth'
-                        }});
-                    }}
-                }}
-            }});
-        }});
+                        });
+                    }
+                }
+            });
+        });
 
         // Scroll-spy: update active state based on scroll position
-        function updateActiveState() {{
+        function updateActiveState() {
             const scrollTop = mainContent.scrollTop;
             const offset = 100;
             let currentId = '';
 
-            allHeadings.forEach(function(heading) {{
-                if (scrollTop >= heading.offsetTop - offset) {{
+            allHeadings.forEach(function(heading) {
+                if (scrollTop >= heading.offsetTop - offset) {
                     currentId = heading.id;
-                }}
-            }});
+                }
+            });
 
-            navItems.forEach(function(item) {{
+            navItems.forEach(function(item) {
                 item.classList.remove('active', 'active-parent');
-            }});
-            navLinks.forEach(function(link) {{
+            });
+            navLinks.forEach(function(link) {
                 link.classList.remove('active');
-            }});
+            });
 
-            if (currentId) {{
-                const activeLink = document.querySelector('.nav-link[href="#' + currentId + '"]');
-                if (activeLink) {{
+            if (currentId) {
+                const activeLink = document.querySelector('.sidebar .nav-link[href="#' + currentId + '"]');
+                if (activeLink) {
                     activeLink.classList.add('active');
 
                     let parent = activeLink.closest('.nav-item');
-                    if (parent) {{
+                    if (parent) {
                         parent.classList.add('active');
-                    }}
+                    }
                     parent = parent ? parent.parentElement : null;
-                    while (parent) {{
+                    while (parent) {
                         const parentItem = parent.closest('.nav-item');
-                        if (parentItem) {{
+                        if (parentItem) {
                             parentItem.classList.add('active-parent');
-                            if (parentItem.classList.contains('expandable')) {{
+                            if (parentItem.classList.contains('expandable')) {
                                 parentItem.classList.add('expanded');
-                            }}
+                            }
                             parent = parentItem.parentElement;
-                        }} else {{
+                        } else {
                             break;
-                        }}
-                    }}
+                        }
+                    }
 
                     const sidebar = document.querySelector('.sidebar');
-                    if (sidebar) {{
+                    if (sidebar) {
                         const linkRect = activeLink.getBoundingClientRect();
                         const sidebarRect = sidebar.getBoundingClientRect();
                         const linkCenter = linkRect.top + linkRect.height / 2;
                         const sidebarCenter = sidebarRect.top + sidebarRect.height / 2;
                         const scrollOffset = linkCenter - sidebarCenter;
-                        sidebar.scrollBy({{ top: scrollOffset, behavior: 'smooth' }});
-                    }}
-                }}
-            }}
-        }}
+                        sidebar.scrollBy({ top: scrollOffset, behavior: 'smooth' });
+                    }
+                }
+            }
+        }
 
         let scrollTimer;
-        mainContent.addEventListener('scroll', function() {{
+        mainContent.addEventListener('scroll', function() {
             clearTimeout(scrollTimer);
             scrollTimer = setTimeout(updateActiveState, 50);
-        }});
+        });
 
         updateActiveState();
-    }});
-    </script>
-</body>
-</html>"##,
-        workspace.name,
-        home_href = home_href,
-        name = workspace.name,
-        sidebar_sections = sidebar_sections,
-        sidebar_decisions_section = if !docs.decisions.is_empty() { format!("<h3 style=\"margin-top: 20px;\">ADRs</h3>{}", sidebar_decisions) } else { String::new() },
-        sections_html = sections_html,
-        decisions_html = decisions_html
-    )
-}
+    });
+    </script>"##;
 
-/// Generate search page HTML with full search results display.
-fn generate_search_page_html(workspace_name: &str, base_path: &str, search_term: &str, results: &[SearchResult]) -> String {
-    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
-
-    let results_html: String = if results.is_empty() && !search_term.is_empty() {
-        "<p class=\"no-results\">No results found.</p>".to_string()
+    // Build sidebar decisions section
+    let sidebar_decisions_section = if !docs.decisions.is_empty() {
+        format!("<h3 style=\"margin-top: 20px;\">ADRs</h3>{}", sidebar_decisions)
     } else {
-        results.iter().map(|r| format!(
-            r#"<div class="result">
-                <div class="result-header">
-                    <span class="type type-{}">{}</span>
-                    <h3>{}</h3>
-                </div>
-                {}
-            </div>"#,
-            r.element_type.to_lowercase().replace(' ', "-"),
-            escape_html(&r.element_type),
-            escape_html(&r.name),
-            r.description.as_ref().map(|d| format!("<p class=\"desc\">{}</p>", escape_html(d))).unwrap_or_default()
-        )).collect()
+        String::new()
     };
 
-    format!(r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Search - {workspace_name} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }}
-        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; }}
-        .header a {{ color: white; text-decoration: none; }}
-        .header h1 {{ margin: 0; font-size: 18px; }}
-        .search-container {{ max-width: 800px; margin: 40px auto; padding: 0 20px; }}
-        .search-box {{ display: flex; gap: 10px; margin-bottom: 30px; }}
-        .search-box input {{ flex: 1; padding: 12px 16px; font-size: 16px; border: 2px solid #ddd; border-radius: 8px; }}
-        .search-box input:focus {{ outline: none; border-color: #0066cc; }}
-        .search-box button {{ background: #0066cc; color: white; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-size: 16px; }}
-        .search-box button:hover {{ background: #0052a3; }}
-        .result {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 15px; box-shadow: 0 1px 3px rgba(0,0,0,0.1); transition: box-shadow 0.2s; }}
-        .result:hover {{ box-shadow: 0 2px 8px rgba(0,0,0,0.15); }}
-        .result-header {{ display: flex; align-items: center; gap: 10px; }}
-        .result-header h3 {{ margin: 0; }}
-        .type {{ background: #e8e8e8; padding: 4px 10px; border-radius: 4px; font-size: 11px; text-transform: uppercase; font-weight: 600; }}
-        .type-person {{ background: #e3f2fd; color: #1565c0; }}
-        .type-software-system {{ background: #e8f5e9; color: #2e7d32; }}
-        .type-container {{ background: #fff3e0; color: #ef6c00; }}
-        .type-component {{ background: #fce4ec; color: #c2185b; }}
-        .desc {{ color: #666; margin: 10px 0 0 0; }}
-        .no-results {{ color: #888; font-style: italic; text-align: center; padding: 40px; background: white; border-radius: 8px; }}
-        .result-count {{ color: #666; margin-bottom: 20px; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <a href="{home_href}">← Back</a>
-        <h1>Search: {workspace_name}</h1>
-    </div>
-    <div class="search-container">
-        <form class="search-box" method="get">
-            <input type="text" name="q" placeholder="Search elements, relationships, documentation..." value="{search_term_escaped}" autofocus>
-            <button type="submit">Search</button>
-        </form>
-        {result_count}
-        <div class="results">
-            {results_html}
+    // Build content HTML
+    let content = format!(
+        r#"<div class="sidebar">
+            <h3>Sections</h3>
+            {}
+            {}
         </div>
-    </div>
-</body>
-</html>"##,
-        workspace_name = workspace_name,
-        home_href = home_href,
-        search_term_escaped = escape_html(search_term),
-        result_count = if !search_term.is_empty() { format!("<p class=\"result-count\">{} results for \"{}\"</p>", results.len(), escape_html(search_term)) } else { String::new() },
-        results_html = results_html
-    )
+        <div class="main">
+            {}
+            {}
+        </div>"#,
+        sidebar_sections,
+        sidebar_decisions_section,
+        sections_html,
+        decisions_html
+    );
+
+    let title = format!("Documentation - {}", workspace.name);
+    let config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(&workspace.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Docs,
+        content_type: ContentType::Sidebar,
+        extra_head: extra_styles,
+        extra_body_end: extra_scripts,
+    };
+
+    generate_page_layout(&config, &content)
 }
 
 /// Render tree view HTML with full expand/collapse tree navigation.
 fn render_tree_view_html(workspace: &Workspace, base_path: &str) -> Result<Html<String>> {
-    let html = generate_tree_view_html(workspace, base_path);
+    // Extract workspace_id from base_path if present (e.g., "/w/small/my-workspace" -> "small/my-workspace")
+    let workspace_id = if base_path.starts_with("/w/") {
+        Some(&base_path[3..])
+    } else {
+        None
+    };
+    let html = generate_tree_page_html(workspace, base_path, workspace_id);
     Ok(Html(html))
-}
-
-/// Generate tree view HTML with full hierarchical navigation.
-fn generate_tree_view_html(workspace: &Workspace, base_path: &str) -> String {
-    let model = workspace.model();
-    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
-
-    // Build tree structure HTML
-    let mut tree_html = String::new();
-
-    // People branch
-    if !model.people.is_empty() {
-        tree_html.push_str(r#"<li class="expandable expanded"><div class="tree-node" data-type="group"><span class="toggle">▼</span><span class="icon">👤</span><span class="name">People</span>"#);
-        tree_html.push_str(&format!(r#"<span class="count">({})</span></div><ul class="children">"#, model.people.len()));
-        for person in &model.people {
-            tree_html.push_str(&format!(
-                r#"<li class="leaf"><div class="tree-node" data-id="{}" data-type="Person" data-name="{}" data-description="{}"><span class="icon">👤</span><span class="name">{}</span>"#,
-                person.id(), escape_html(&person.name()),
-                person.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default(),
-                escape_html(&person.name())
-            ));
-            if let Some(desc) = &person.properties.description {
-                let truncated = if desc.len() > 50 { format!("{}...", &desc[..50]) } else { desc.clone() };
-                tree_html.push_str(&format!(r#"<span class="desc">{}</span>"#, escape_html(&truncated)));
-            }
-            tree_html.push_str(r#"</div></li>"#);
-        }
-        tree_html.push_str(r#"</ul></li>"#);
-    }
-
-    // Software Systems branch
-    if !model.software_systems.is_empty() {
-        tree_html.push_str(r#"<li class="expandable expanded"><div class="tree-node" data-type="group"><span class="toggle">▼</span><span class="icon">📦</span><span class="name">Software Systems</span>"#);
-        tree_html.push_str(&format!(r#"<span class="count">({})</span></div><ul class="children">"#, model.software_systems.len()));
-
-        for system in &model.software_systems {
-            let has_containers = !system.containers.is_empty();
-            if has_containers { tree_html.push_str(r#"<li class="expandable">"#); } else { tree_html.push_str(r#"<li class="leaf">"#); }
-            tree_html.push_str(&format!(r#"<div class="tree-node" data-id="{}" data-type="Software System" data-name="{}" data-description="{}">"#,
-                system.id(), escape_html(&system.name()), system.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default()));
-            if has_containers { tree_html.push_str(r#"<span class="toggle">▶</span>"#); }
-            tree_html.push_str(&format!(r#"<span class="icon">📦</span><span class="name">{}</span>"#, escape_html(&system.name())));
-            if has_containers { tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, system.containers.len())); }
-            tree_html.push_str(r#"</div>"#);
-
-            if has_containers {
-                tree_html.push_str(r#"<ul class="children">"#);
-                for container in &system.containers {
-                    let has_components = !container.components.is_empty();
-                    if has_components { tree_html.push_str(r#"<li class="expandable">"#); } else { tree_html.push_str(r#"<li class="leaf">"#); }
-                    tree_html.push_str(&format!(r#"<div class="tree-node" data-id="{}" data-type="Container" data-name="{}">"#, container.id(), escape_html(&container.name())));
-                    if has_components { tree_html.push_str(r#"<span class="toggle">▶</span>"#); }
-                    tree_html.push_str(&format!(r#"<span class="icon">🗄️</span><span class="name">{}</span>"#, escape_html(&container.name())));
-                    if let Some(tech) = &container.technology { tree_html.push_str(&format!(r#"<span class="tech">[{}]</span>"#, escape_html(tech))); }
-                    tree_html.push_str(r#"</div>"#);
-
-                    if has_components {
-                        tree_html.push_str(r#"<ul class="children">"#);
-                        for component in &container.components {
-                            tree_html.push_str(&format!(r#"<li class="leaf"><div class="tree-node" data-id="{}" data-type="Component" data-name="{}"><span class="icon">⚙️</span><span class="name">{}</span>"#,
-                                component.id(), escape_html(&component.name()), escape_html(&component.name())));
-                            if let Some(tech) = &component.technology { tree_html.push_str(&format!(r#"<span class="tech">[{}]</span>"#, escape_html(tech))); }
-                            tree_html.push_str(r#"</div></li>"#);
-                        }
-                        tree_html.push_str(r#"</ul>"#);
-                    }
-                    tree_html.push_str(r#"</li>"#);
-                }
-                tree_html.push_str(r#"</ul>"#);
-            }
-            tree_html.push_str(r#"</li>"#);
-        }
-        tree_html.push_str(r#"</ul></li>"#);
-    }
-
-    format!(r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Tree View - {name} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #f5f5f5; }}
-        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; }}
-        .header a {{ color: white; text-decoration: none; }}
-        .header h1 {{ margin: 0; font-size: 18px; flex: 1; }}
-        .search-box {{ padding: 8px 12px; border: none; border-radius: 4px; width: 250px; }}
-        .container {{ display: flex; height: calc(100vh - 54px); }}
-        .tree-panel {{ width: 50%; padding: 20px; overflow-y: auto; }}
-        .detail-panel {{ width: 50%; background: white; border-left: 1px solid #ddd; padding: 20px; overflow-y: auto; }}
-        .tree {{ list-style: none; padding: 0; margin: 0; }}
-        .tree ul {{ list-style: none; padding-left: 20px; margin: 0; }}
-        .tree li {{ margin: 2px 0; }}
-        .tree-node {{ display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; cursor: pointer; }}
-        .tree-node:hover {{ background: #e3f2fd; }}
-        .toggle {{ width: 16px; font-size: 10px; color: #666; cursor: pointer; }}
-        .icon {{ font-size: 14px; }}
-        .name {{ flex: 1; font-size: 14px; }}
-        .count {{ color: #888; font-size: 12px; }}
-        .desc {{ color: #666; font-size: 12px; margin-left: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }}
-        .tech {{ color: #0066cc; font-size: 11px; margin-left: 8px; }}
-        .expandable > ul {{ display: none; }}
-        .expandable.expanded > ul {{ display: block; }}
-        .detail-panel h3 {{ margin: 0 0 10px 0; }}
-        .detail-panel p {{ margin: 5px 0; color: #666; }}
-        #no-results {{ display: none; padding: 40px; text-align: center; color: #888; }}
-        .stats {{ display: flex; gap: 20px; margin-bottom: 20px; padding: 15px; background: white; border-radius: 8px; }}
-        .stat {{ text-align: center; }}
-        .stat-value {{ font-size: 24px; font-weight: 600; color: #333; }}
-        .stat-label {{ font-size: 12px; color: #888; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <a href="{home_href}">← Back</a>
-        <h1>Architecture Tree: {name}</h1>
-        <input type="text" id="search-input" class="search-box" placeholder="Filter elements...">
-    </div>
-    <div class="container">
-        <div class="tree-panel">
-            <div class="stats">
-                <div class="stat"><div class="stat-value">{people_count}</div><div class="stat-label">People</div></div>
-                <div class="stat"><div class="stat-value">{systems_count}</div><div class="stat-label">Systems</div></div>
-                <div class="stat"><div class="stat-value">{relationships_count}</div><div class="stat-label">Relationships</div></div>
-            </div>
-            <ul class="tree" id="tree">{tree_html}</ul>
-            <div id="no-results">No matching elements found</div>
-        </div>
-        <div class="detail-panel" id="detail-panel">
-            <h3 id="detail-name">Select an element</h3>
-            <p id="detail-type"></p>
-            <p id="detail-desc">Click on any element in the tree to see its details.</p>
-        </div>
-    </div>
-    <script>
-        document.querySelectorAll('.toggle').forEach(toggle => {{
-            toggle.addEventListener('click', (e) => {{
-                e.stopPropagation();
-                const li = toggle.closest('li');
-                if (li.classList.contains('expandable')) {{
-                    li.classList.toggle('expanded');
-                    toggle.textContent = li.classList.contains('expanded') ? '▼' : '▶';
-                }}
-            }});
-        }});
-
-        document.querySelectorAll('.tree-node').forEach(node => {{
-            node.addEventListener('click', () => {{
-                document.getElementById('detail-name').textContent = node.dataset.name || 'Unknown';
-                document.getElementById('detail-type').textContent = node.dataset.type || '';
-                document.getElementById('detail-desc').textContent = node.dataset.description || 'No description';
-            }});
-        }});
-
-        document.getElementById('search-input').addEventListener('input', (e) => {{
-            const query = e.target.value.toLowerCase().trim();
-            const tree = document.getElementById('tree');
-            const noResults = document.getElementById('no-results');
-            if (!query) {{
-                document.querySelectorAll('.tree li, .tree-node').forEach(el => el.style.display = '');
-                noResults.style.display = 'none';
-                return;
-            }}
-            let hasResults = false;
-            document.querySelectorAll('.tree-node').forEach(node => {{
-                const matches = (node.dataset.name || '').toLowerCase().includes(query) ||
-                               (node.dataset.description || '').toLowerCase().includes(query) ||
-                               (node.dataset.type || '').toLowerCase().includes(query);
-                const li = node.closest('li');
-                if (matches) {{ hasResults = true; li.style.display = ''; let p = li.parentElement; while(p) {{ if(p.closest) {{ const pli = p.closest('li'); if(pli) {{ pli.style.display = ''; pli.classList.add('expanded'); }} }} p = p.parentElement; }} }}
-                else {{ li.style.display = 'none'; }}
-            }});
-            noResults.style.display = hasResults ? 'none' : 'block';
-        }});
-    </script>
-</body>
-</html>"##,
-        name = workspace.name,
-        home_href = home_href,
-        tree_html = tree_html,
-        people_count = model.people.len(),
-        systems_count = model.software_systems.len(),
-        relationships_count = model.relationships.len()
-    )
 }
 
 /// Render presentation HTML with slideshow navigation.
@@ -5024,202 +4009,6 @@ fn render_presentation_html(workspace: &Workspace, base_path: &str, views_param:
         slide_count = view_keys.len(),
         slides_json = slides_json,
         base_path = base_path,
-    );
-
-    Ok(Html(html))
-}
-
-/// Render explore graph HTML with interactive visualization.
-fn render_explore_html(workspace: &Workspace, base_path: &str) -> Result<Html<String>> {
-    let home_href = if base_path.is_empty() { "/".to_string() } else { base_path.to_string() };
-    let model = workspace.model();
-
-    // Build nodes and edges for the graph
-    let mut nodes_json = String::from("[");
-    let mut edges_json = String::from("[");
-
-    let mut node_count = 0;
-    for person in &model.people {
-        if node_count > 0 { nodes_json.push(','); }
-        nodes_json.push_str(&format!(r#"{{"id":"{}","name":"{}","type":"Person"}}"#, person.id(), escape_json(&person.name())));
-        node_count += 1;
-    }
-    for system in &model.software_systems {
-        if node_count > 0 { nodes_json.push(','); }
-        nodes_json.push_str(&format!(r#"{{"id":"{}","name":"{}","type":"Software System"}}"#, system.id(), escape_json(&system.name())));
-        node_count += 1;
-        for container in &system.containers {
-            nodes_json.push(',');
-            nodes_json.push_str(&format!(r#"{{"id":"{}","name":"{}","type":"Container","parent":"{}"}}"#, container.id(), escape_json(&container.name()), system.id()));
-            node_count += 1;
-        }
-    }
-    nodes_json.push(']');
-
-    let mut edge_count = 0;
-    for rel in &model.relationships {
-        if edge_count > 0 { edges_json.push(','); }
-        edges_json.push_str(&format!(r#"{{"source":"{}","target":"{}","label":"{}"}}"#,
-            rel.source_id, rel.destination_id, rel.description.as_deref().map(|d| escape_json(d)).unwrap_or_default()));
-        edge_count += 1;
-    }
-    edges_json.push(']');
-
-    let html = format!(r##"<!DOCTYPE html>
-<html>
-<head>
-    <title>Explore - {name} - Structurizr</title>
-    <style>
-        * {{ box-sizing: border-box; }}
-        body {{ margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: #1a1a1a; overflow: hidden; }}
-        .header {{ background: #333; color: white; padding: 15px 20px; display: flex; align-items: center; gap: 20px; position: fixed; top: 0; left: 0; right: 0; z-index: 100; }}
-        .header a {{ color: white; text-decoration: none; }}
-        .header h1 {{ margin: 0; font-size: 18px; flex: 1; }}
-        .controls {{ display: flex; gap: 10px; }}
-        .controls button {{ background: #555; color: white; border: none; padding: 6px 12px; border-radius: 4px; cursor: pointer; }}
-        .controls button:hover {{ background: #666; }}
-        #graph {{ position: absolute; top: 54px; left: 0; right: 0; bottom: 0; }}
-        .node {{ fill: #4a9eff; cursor: pointer; }}
-        .node-person {{ fill: #08427b; }}
-        .node-system {{ fill: #1168bd; }}
-        .node-container {{ fill: #438dd5; }}
-        .node-label {{ font-size: 12px; fill: white; pointer-events: none; text-anchor: middle; dominant-baseline: middle; }}
-        .link {{ stroke: #666; stroke-opacity: 0.6; fill: none; }}
-        .link-label {{ font-size: 10px; fill: #888; }}
-        .tooltip {{ position: absolute; background: #333; color: white; padding: 8px 12px; border-radius: 4px; font-size: 12px; pointer-events: none; opacity: 0; transition: opacity 0.2s; z-index: 200; }}
-        .stats {{ position: fixed; bottom: 20px; left: 20px; background: rgba(0,0,0,0.7); padding: 10px 15px; border-radius: 6px; font-size: 12px; color: #aaa; }}
-    </style>
-</head>
-<body>
-    <div class="header">
-        <a href="{home_href}">← Back</a>
-        <h1>Explore: {name}</h1>
-        <div class="controls">
-            <button onclick="resetView()">Reset View</button>
-            <button onclick="togglePhysics()">Toggle Physics</button>
-        </div>
-    </div>
-    <svg id="graph"></svg>
-    <div class="tooltip" id="tooltip"></div>
-    <div class="stats">{node_count} nodes • {edge_count} relationships</div>
-    <script>
-        const nodes = {nodes_json};
-        const edges = {edges_json};
-        const width = window.innerWidth;
-        const height = window.innerHeight - 54;
-        const svg = document.getElementById('graph');
-        svg.setAttribute('width', width);
-        svg.setAttribute('height', height);
-
-        // Simple force-directed layout
-        nodes.forEach((n, i) => {{
-            n.x = width/2 + (Math.random() - 0.5) * 400;
-            n.y = height/2 + (Math.random() - 0.5) * 400;
-            n.vx = 0; n.vy = 0;
-        }});
-
-        let physicsEnabled = true;
-        function togglePhysics() {{ physicsEnabled = !physicsEnabled; }}
-        function resetView() {{ nodes.forEach(n => {{ n.x = width/2 + (Math.random() - 0.5) * 400; n.y = height/2 + (Math.random() - 0.5) * 400; }}); }}
-
-        function simulate() {{
-            if (physicsEnabled) {{
-                // Repulsion between nodes
-                for (let i = 0; i < nodes.length; i++) {{
-                    for (let j = i + 1; j < nodes.length; j++) {{
-                        const dx = nodes[j].x - nodes[i].x;
-                        const dy = nodes[j].y - nodes[i].y;
-                        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-                        const force = 5000 / (dist * dist);
-                        nodes[i].vx -= dx/dist * force;
-                        nodes[i].vy -= dy/dist * force;
-                        nodes[j].vx += dx/dist * force;
-                        nodes[j].vy += dy/dist * force;
-                    }}
-                }}
-                // Attraction along edges
-                edges.forEach(e => {{
-                    const source = nodes.find(n => n.id === e.source);
-                    const target = nodes.find(n => n.id === e.target);
-                    if (source && target) {{
-                        const dx = target.x - source.x;
-                        const dy = target.y - source.y;
-                        const dist = Math.sqrt(dx*dx + dy*dy) || 1;
-                        const force = (dist - 150) * 0.01;
-                        source.vx += dx/dist * force;
-                        source.vy += dy/dist * force;
-                        target.vx -= dx/dist * force;
-                        target.vy -= dy/dist * force;
-                    }}
-                }});
-                // Center gravity
-                nodes.forEach(n => {{
-                    n.vx += (width/2 - n.x) * 0.001;
-                    n.vy += (height/2 - n.y) * 0.001;
-                    n.vx *= 0.9; n.vy *= 0.9;
-                    n.x += n.vx; n.y += n.vy;
-                    n.x = Math.max(50, Math.min(width-50, n.x));
-                    n.y = Math.max(50, Math.min(height-50, n.y));
-                }});
-            }}
-            render();
-            requestAnimationFrame(simulate);
-        }}
-
-        function render() {{
-            let html = '';
-            edges.forEach(e => {{
-                const source = nodes.find(n => n.id === e.source);
-                const target = nodes.find(n => n.id === e.target);
-                if (source && target) {{
-                    html += `<line class="link" x1="${{source.x}}" y1="${{source.y}}" x2="${{target.x}}" y2="${{target.y}}"/>`;
-                }}
-            }});
-            nodes.forEach(n => {{
-                const cls = n.type === 'Person' ? 'node-person' : n.type === 'Container' ? 'node-container' : 'node-system';
-                html += `<circle class="node ${{cls}}" cx="${{n.x}}" cy="${{n.y}}" r="30" data-name="${{n.name}}" data-type="${{n.type}}"/>`;
-                html += `<text class="node-label" x="${{n.x}}" y="${{n.y}}">${{n.name.substring(0,10)}}${{n.name.length > 10 ? '...' : ''}}</text>`;
-            }});
-            svg.innerHTML = html;
-
-            // Drag handling
-            svg.querySelectorAll('.node').forEach(node => {{
-                node.addEventListener('mousedown', startDrag);
-                node.addEventListener('mouseenter', (e) => {{
-                    const tooltip = document.getElementById('tooltip');
-                    tooltip.textContent = `${{e.target.dataset.name}} (${{e.target.dataset.type}})`;
-                    tooltip.style.left = (e.pageX + 10) + 'px';
-                    tooltip.style.top = (e.pageY + 10) + 'px';
-                    tooltip.style.opacity = 1;
-                }});
-                node.addEventListener('mouseleave', () => document.getElementById('tooltip').style.opacity = 0);
-            }});
-        }}
-
-        let dragging = null;
-        function startDrag(e) {{
-            const idx = nodes.findIndex(n => n.name.startsWith(e.target.dataset.name.substring(0,10)));
-            if (idx >= 0) dragging = nodes[idx];
-        }}
-        document.addEventListener('mousemove', (e) => {{
-            if (dragging) {{
-                dragging.x = e.clientX;
-                dragging.y = e.clientY - 54;
-                dragging.vx = 0; dragging.vy = 0;
-            }}
-        }});
-        document.addEventListener('mouseup', () => dragging = null);
-
-        simulate();
-    </script>
-</body>
-</html>"##,
-        name = workspace.name,
-        home_href = home_href,
-        node_count = node_count,
-        edge_count = edge_count,
-        nodes_json = nodes_json,
-        edges_json = edges_json,
     );
 
     Ok(Html(html))
@@ -5340,63 +4129,9 @@ pub async fn workspace_home_nested(
     let workspace = state.get_workspace_by_id(&full_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
 
-    let views = workspace.views();
-    let view_list: Vec<String> = views.all_keys().iter().map(|k| k.to_string()).collect();
-    let dynamic_view_keys: std::collections::HashSet<String> = views.dynamic_views.iter()
-        .map(|v| v.properties.key.clone())
-        .collect();
-
     let base_path = format!("/w/{}", full_id);
+    let html = generate_home_page_html(&workspace, &base_path, Some(&full_id));
 
-    let html = format!(
-        r#"<!DOCTYPE html>
-<html>
-<head>
-    <title>{} - Structurizr</title>
-    <style>
-        body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; padding: 20px; background: #f5f5f5; }}
-        .container {{ max-width: 1200px; margin: 0 auto; }}
-        .breadcrumb {{ margin-bottom: 10px; color: #666; }}
-        .breadcrumb a {{ color: #0066cc; }}
-        .nav a {{ margin-right: 15px; color: #0066cc; text-decoration: none; }}
-        .workspace-info {{ background: white; padding: 20px; border-radius: 8px; margin-bottom: 20px; }}
-        .views {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 20px; }}
-        .view-card {{ background: white; padding: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }}
-        .view-card a {{ color: #0066cc; text-decoration: none; }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div class="breadcrumb"><a href="/">All Workspaces</a> / {}</div>
-        <div class="nav">
-            <a href="{}">Home</a>
-            <a href="{}/docs">Docs</a>
-            <a href="{}/tree">Tree</a>
-            <a href="{}/explore">Explore</a>
-        </div>
-        <h1>{}</h1>
-        <div class="workspace-info">
-            <p>{}</p>
-            <p><strong>People:</strong> {} | <strong>Systems:</strong> {} | <strong>Relationships:</strong> {}</p>
-        </div>
-        <h2>Views</h2>
-        <div class="views">{}</div>
-    </div>
-</body>
-</html>"#,
-        workspace.name,
-        escape_html(&full_id),
-        base_path, base_path, base_path, base_path,
-        workspace.name,
-        workspace.description.as_deref().unwrap_or(""),
-        workspace.model().people.len(),
-        workspace.model().software_systems.len(),
-        workspace.model().relationships.len(),
-        view_list.iter().map(|v| {
-            let animate = if dynamic_view_keys.contains(v) { format!(" | <a href=\"{}/view/{}/animate\">Animate</a>", base_path, v) } else { String::new() };
-            format!(r#"<div class="view-card"><h3><a href="{}/view/{}">{}</a></h3><p><a href="{}/view/{}/svg">SVG</a>{}</p></div>"#, base_path, v, v, base_path, v, animate)
-        }).collect::<Vec<_>>().join("")
-    );
     Ok(Html(html))
 }
 
@@ -5450,8 +4185,8 @@ pub async fn workspace_search_page_nested(
         .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
     let base_path = format!("/w/{}", full_id);
     let search_term = query.q.unwrap_or_default();
-    let results = perform_search(&workspace, &search_term);
-    Ok(Html(generate_search_page_html(&workspace.name, &base_path, &search_term, &results)))
+    let html = generate_search_page_html(&workspace, &base_path, Some(&full_id), &search_term);
+    Ok(Html(html))
 }
 
 pub async fn workspace_tree_view_nested(
@@ -5482,7 +4217,9 @@ pub async fn workspace_explore_nested(
     let full_id = make_nested_workspace_id(&category, &workspace_id);
     let workspace = state.get_workspace_by_id(&full_id).await
         .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
-    render_explore_html(&workspace, &format!("/w/{}", full_id))
+    let base_path = format!("/w/{}", full_id);
+    let html = generate_explore_page_html(&workspace, &base_path, Some(&full_id));
+    Ok(Html(html))
 }
 
 pub async fn workspace_get_json_nested(
