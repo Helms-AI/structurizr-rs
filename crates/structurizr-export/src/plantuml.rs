@@ -1,5 +1,7 @@
 //! PlantUML export for Structurizr views.
 
+use std::collections::HashSet;
+
 use structurizr_core::view::{
     ComponentView, ContainerView, DeploymentView, DynamicView, SystemContextView,
     SystemLandscapeView,
@@ -16,6 +18,7 @@ impl PlantUmlExporter {
     pub fn export_system_landscape(workspace: &Workspace, view: &SystemLandscapeView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml\n\n");
@@ -26,9 +29,11 @@ impl PlantUmlExporter {
 
         // Add people
         for person in &model.people {
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             output.push_str(&format!(
                 "Person({}, \"{}\", \"{}\")\n",
-                sanitize_id(&person.properties.id.to_string()),
+                sanitize_id(&id),
                 person.name(),
                 person.properties.description.as_deref().unwrap_or("")
             ));
@@ -38,9 +43,11 @@ impl PlantUmlExporter {
 
         // Add software systems
         for system in &model.software_systems {
+            let id = system.properties.id.to_string();
+            element_ids.insert(id.clone());
             output.push_str(&format!(
                 "System({}, \"{}\", \"{}\")\n",
-                sanitize_id(&system.properties.id.to_string()),
+                sanitize_id(&id),
                 system.name(),
                 system.properties.description.as_deref().unwrap_or("")
             ));
@@ -48,14 +55,18 @@ impl PlantUmlExporter {
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            output.push_str(&format!(
-                "Rel({}, {}, \"{}\")\n",
-                sanitize_id(&rel.source_id.to_string()),
-                sanitize_id(&rel.destination_id.to_string()),
-                rel.description.as_deref().unwrap_or("uses")
-            ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                output.push_str(&format!(
+                    "Rel({}, {}, \"{}\")\n",
+                    sanitize_id(&source),
+                    sanitize_id(&dest),
+                    rel.description.as_deref().unwrap_or("uses")
+                ));
+            }
         }
 
         output.push_str("\n@enduml\n");
@@ -67,6 +78,7 @@ impl PlantUmlExporter {
     pub fn export_system_context(workspace: &Workspace, view: &SystemContextView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml\n\n");
@@ -80,9 +92,11 @@ impl PlantUmlExporter {
 
         // Add people
         for person in &model.people {
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             output.push_str(&format!(
                 "Person({}, \"{}\", \"{}\")\n",
-                sanitize_id(&person.properties.id.to_string()),
+                sanitize_id(&id),
                 person.name(),
                 person.properties.description.as_deref().unwrap_or("")
             ));
@@ -92,18 +106,20 @@ impl PlantUmlExporter {
 
         // Add software systems
         for system in &model.software_systems {
+            let id = system.properties.id.to_string();
+            element_ids.insert(id.clone());
             let is_main = main_system.map(|m| m.id() == system.id()).unwrap_or(false);
             if is_main {
                 output.push_str(&format!(
                     "System({}, \"{}\", \"{}\")\n",
-                    sanitize_id(&system.properties.id.to_string()),
+                    sanitize_id(&id),
                     system.name(),
                     system.properties.description.as_deref().unwrap_or("")
                 ));
             } else {
                 output.push_str(&format!(
                     "System_Ext({}, \"{}\", \"{}\")\n",
-                    sanitize_id(&system.properties.id.to_string()),
+                    sanitize_id(&id),
                     system.name(),
                     system.properties.description.as_deref().unwrap_or("")
                 ));
@@ -112,14 +128,18 @@ impl PlantUmlExporter {
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            output.push_str(&format!(
-                "Rel({}, {}, \"{}\")\n",
-                sanitize_id(&rel.source_id.to_string()),
-                sanitize_id(&rel.destination_id.to_string()),
-                rel.description.as_deref().unwrap_or("uses")
-            ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                output.push_str(&format!(
+                    "Rel({}, {}, \"{}\")\n",
+                    sanitize_id(&source),
+                    sanitize_id(&dest),
+                    rel.description.as_deref().unwrap_or("uses")
+                ));
+            }
         }
 
         output.push_str("\n@enduml\n");
@@ -131,6 +151,7 @@ impl PlantUmlExporter {
     pub fn export_container(workspace: &Workspace, view: &ContainerView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml\n\n");
@@ -141,9 +162,11 @@ impl PlantUmlExporter {
 
         // Add people
         for person in &model.people {
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             output.push_str(&format!(
                 "Person({}, \"{}\", \"{}\")\n",
-                sanitize_id(&person.properties.id.to_string()),
+                sanitize_id(&id),
                 person.name(),
                 person.properties.description.as_deref().unwrap_or("")
             ));
@@ -160,10 +183,12 @@ impl PlantUmlExporter {
             ));
 
             for container in &system.containers {
+                let id = container.properties.id.to_string();
+                element_ids.insert(id.clone());
                 let tech = container.technology.as_deref().unwrap_or("");
                 output.push_str(&format!(
                     "  Container({}, \"{}\", \"{}\", \"{}\")\n",
-                    sanitize_id(&container.properties.id.to_string()),
+                    sanitize_id(&id),
                     container.name(),
                     tech,
                     container.properties.description.as_deref().unwrap_or("")
@@ -176,9 +201,11 @@ impl PlantUmlExporter {
         // Add external systems
         for system in &model.software_systems {
             if system.id() != view.software_system_id {
+                let id = system.properties.id.to_string();
+                element_ids.insert(id.clone());
                 output.push_str(&format!(
                     "System_Ext({}, \"{}\", \"{}\")\n",
-                    sanitize_id(&system.properties.id.to_string()),
+                    sanitize_id(&id),
                     system.name(),
                     system.properties.description.as_deref().unwrap_or("")
                 ));
@@ -187,24 +214,28 @@ impl PlantUmlExporter {
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let tech = rel.technology.as_deref();
-            if let Some(tech) = tech {
-                output.push_str(&format!(
-                    "Rel({}, {}, \"{}\", \"{}\")\n",
-                    sanitize_id(&rel.source_id.to_string()),
-                    sanitize_id(&rel.destination_id.to_string()),
-                    rel.description.as_deref().unwrap_or("uses"),
-                    tech
-                ));
-            } else {
-                output.push_str(&format!(
-                    "Rel({}, {}, \"{}\")\n",
-                    sanitize_id(&rel.source_id.to_string()),
-                    sanitize_id(&rel.destination_id.to_string()),
-                    rel.description.as_deref().unwrap_or("uses")
-                ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                let tech = rel.technology.as_deref();
+                if let Some(tech) = tech {
+                    output.push_str(&format!(
+                        "Rel({}, {}, \"{}\", \"{}\")\n",
+                        sanitize_id(&source),
+                        sanitize_id(&dest),
+                        rel.description.as_deref().unwrap_or("uses"),
+                        tech
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "Rel({}, {}, \"{}\")\n",
+                        sanitize_id(&source),
+                        sanitize_id(&dest),
+                        rel.description.as_deref().unwrap_or("uses")
+                    ));
+                }
             }
         }
 
@@ -217,6 +248,7 @@ impl PlantUmlExporter {
     pub fn export_component(workspace: &Workspace, view: &ComponentView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml\n\n");
@@ -241,9 +273,11 @@ impl PlantUmlExporter {
 
         // Add people
         for person in &model.people {
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             output.push_str(&format!(
                 "Person({}, \"{}\", \"{}\")\n",
-                sanitize_id(&person.properties.id.to_string()),
+                sanitize_id(&id),
                 person.name(),
                 person.properties.description.as_deref().unwrap_or("")
             ));
@@ -260,10 +294,12 @@ impl PlantUmlExporter {
             ));
 
             for component in &container.components {
+                let id = component.properties.id.to_string();
+                element_ids.insert(id.clone());
                 let tech = component.technology.as_deref().unwrap_or("");
                 output.push_str(&format!(
                     "  Component({}, \"{}\", \"{}\", \"{}\")\n",
-                    sanitize_id(&component.properties.id.to_string()),
+                    sanitize_id(&id),
                     component.name(),
                     tech,
                     component.properties.description.as_deref().unwrap_or("")
@@ -277,10 +313,12 @@ impl PlantUmlExporter {
         if let Some(system) = parent_system {
             for container in &system.containers {
                 if Some(container.id()) != target_container.map(|c| c.id()) {
+                    let id = container.properties.id.to_string();
+                    element_ids.insert(id.clone());
                     let tech = container.technology.as_deref().unwrap_or("");
                     output.push_str(&format!(
                         "Container({}, \"{}\", \"{}\", \"{}\")\n",
-                        sanitize_id(&container.properties.id.to_string()),
+                        sanitize_id(&id),
                         container.name(),
                         tech,
                         container.properties.description.as_deref().unwrap_or("")
@@ -291,24 +329,28 @@ impl PlantUmlExporter {
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let tech = rel.technology.as_deref();
-            if let Some(tech) = tech {
-                output.push_str(&format!(
-                    "Rel({}, {}, \"{}\", \"{}\")\n",
-                    sanitize_id(&rel.source_id.to_string()),
-                    sanitize_id(&rel.destination_id.to_string()),
-                    rel.description.as_deref().unwrap_or("uses"),
-                    tech
-                ));
-            } else {
-                output.push_str(&format!(
-                    "Rel({}, {}, \"{}\")\n",
-                    sanitize_id(&rel.source_id.to_string()),
-                    sanitize_id(&rel.destination_id.to_string()),
-                    rel.description.as_deref().unwrap_or("uses")
-                ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                let tech = rel.technology.as_deref();
+                if let Some(tech) = tech {
+                    output.push_str(&format!(
+                        "Rel({}, {}, \"{}\", \"{}\")\n",
+                        sanitize_id(&source),
+                        sanitize_id(&dest),
+                        rel.description.as_deref().unwrap_or("uses"),
+                        tech
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "Rel({}, {}, \"{}\")\n",
+                        sanitize_id(&source),
+                        sanitize_id(&dest),
+                        rel.description.as_deref().unwrap_or("uses")
+                    ));
+                }
             }
         }
 
@@ -330,7 +372,7 @@ impl PlantUmlExporter {
         }
 
         // Collect all participants from the steps
-        let mut participants = std::collections::HashSet::new();
+        let mut participants = HashSet::new();
 
         for step in &view.steps {
             participants.insert(step.source_id.to_string());

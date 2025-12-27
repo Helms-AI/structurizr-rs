@@ -1,5 +1,7 @@
 //! Mermaid export for Structurizr views.
 
+use std::collections::HashSet;
+
 use structurizr_core::view::{
     ComponentView, ContainerView, DeploymentView, DynamicView, SystemContextView,
     SystemLandscapeView,
@@ -16,6 +18,7 @@ impl MermaidExporter {
     pub fn export_system_landscape(workspace: &Workspace, view: &SystemLandscapeView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("```mermaid\n");
         output.push_str("C4Context\n");
@@ -28,10 +31,12 @@ impl MermaidExporter {
 
         // Add people
         for person in &model.people {
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
             output.push_str(&format!(
                 "    Person({}, \"{}\", \"{}\")\n",
-                sanitize_id(&person.properties.id.to_string()),
+                sanitize_id(&id),
                 person.name(),
                 desc
             ));
@@ -39,10 +44,12 @@ impl MermaidExporter {
 
         // Add software systems
         for system in &model.software_systems {
+            let id = system.properties.id.to_string();
+            element_ids.insert(id.clone());
             let desc = system.properties.description.as_deref().unwrap_or("");
             output.push_str(&format!(
                 "    System({}, \"{}\", \"{}\")\n",
-                sanitize_id(&system.properties.id.to_string()),
+                sanitize_id(&id),
                 system.name(),
                 desc
             ));
@@ -50,15 +57,19 @@ impl MermaidExporter {
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let desc = rel.description.as_deref().unwrap_or("uses");
-            output.push_str(&format!(
-                "    Rel({}, {}, \"{}\")\n",
-                sanitize_id(&rel.source_id.to_string()),
-                sanitize_id(&rel.destination_id.to_string()),
-                desc
-            ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                let desc = rel.description.as_deref().unwrap_or("uses");
+                output.push_str(&format!(
+                    "    Rel({}, {}, \"{}\")\n",
+                    sanitize_id(&source),
+                    sanitize_id(&dest),
+                    desc
+                ));
+            }
         }
 
         output.push_str("```\n");
@@ -70,6 +81,7 @@ impl MermaidExporter {
     pub fn export_system_context(workspace: &Workspace, view: &SystemContextView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("```mermaid\n");
         output.push_str("C4Context\n");
@@ -85,10 +97,12 @@ impl MermaidExporter {
 
         // Add people
         for person in &model.people {
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
             output.push_str(&format!(
                 "    Person({}, \"{}\", \"{}\")\n",
-                sanitize_id(&person.properties.id.to_string()),
+                sanitize_id(&id),
                 person.name(),
                 desc
             ));
@@ -96,20 +110,22 @@ impl MermaidExporter {
 
         // Add software systems
         for system in &model.software_systems {
+            let id = system.properties.id.to_string();
+            element_ids.insert(id.clone());
             let desc = system.properties.description.as_deref().unwrap_or("");
             let is_main = main_system.map(|m| m.id() == system.id()).unwrap_or(false);
 
             if is_main {
                 output.push_str(&format!(
                     "    System({}, \"{}\", \"{}\")\n",
-                    sanitize_id(&system.properties.id.to_string()),
+                    sanitize_id(&id),
                     system.name(),
                     desc
                 ));
             } else {
                 output.push_str(&format!(
                     "    System_Ext({}, \"{}\", \"{}\")\n",
-                    sanitize_id(&system.properties.id.to_string()),
+                    sanitize_id(&id),
                     system.name(),
                     desc
                 ));
@@ -118,15 +134,19 @@ impl MermaidExporter {
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let desc = rel.description.as_deref().unwrap_or("uses");
-            output.push_str(&format!(
-                "    Rel({}, {}, \"{}\")\n",
-                sanitize_id(&rel.source_id.to_string()),
-                sanitize_id(&rel.destination_id.to_string()),
-                desc
-            ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                let desc = rel.description.as_deref().unwrap_or("uses");
+                output.push_str(&format!(
+                    "    Rel({}, {}, \"{}\")\n",
+                    sanitize_id(&source),
+                    sanitize_id(&dest),
+                    desc
+                ));
+            }
         }
 
         output.push_str("```\n");
@@ -138,6 +158,7 @@ impl MermaidExporter {
     pub fn export_container(workspace: &Workspace, view: &ContainerView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("```mermaid\n");
         output.push_str("C4Container\n");
@@ -150,10 +171,12 @@ impl MermaidExporter {
 
         // Add people
         for person in &model.people {
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
             output.push_str(&format!(
                 "    Person({}, \"{}\", \"{}\")\n",
-                sanitize_id(&person.properties.id.to_string()),
+                sanitize_id(&id),
                 person.name(),
                 desc
             ));
@@ -161,18 +184,23 @@ impl MermaidExporter {
 
         // Find the main system and add boundary with containers
         if let Some(system) = model.software_systems.iter().find(|s| s.id() == view.software_system_id) {
+            let system_id = system.properties.id.to_string();
+            element_ids.insert(system_id.clone());
+
             output.push_str(&format!(
                 "\n    System_Boundary({}, \"{}\") {{\n",
-                sanitize_id(&system.properties.id.to_string()),
+                sanitize_id(&system_id),
                 system.name()
             ));
 
             for container in &system.containers {
+                let container_id = container.properties.id.to_string();
+                element_ids.insert(container_id.clone());
                 let tech = container.technology.as_deref().unwrap_or("");
                 let desc = container.properties.description.as_deref().unwrap_or("");
                 output.push_str(&format!(
                     "        Container({}, \"{}\", \"{}\", \"{}\")\n",
-                    sanitize_id(&container.properties.id.to_string()),
+                    sanitize_id(&container_id),
                     container.name(),
                     tech,
                     desc
@@ -185,10 +213,12 @@ impl MermaidExporter {
         // Add external systems
         for system in &model.software_systems {
             if system.id() != view.software_system_id {
+                let id = system.properties.id.to_string();
+                element_ids.insert(id.clone());
                 let desc = system.properties.description.as_deref().unwrap_or("");
                 output.push_str(&format!(
                     "    System_Ext({}, \"{}\", \"{}\")\n",
-                    sanitize_id(&system.properties.id.to_string()),
+                    sanitize_id(&id),
                     system.name(),
                     desc
                 ));
@@ -197,24 +227,28 @@ impl MermaidExporter {
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let desc = rel.description.as_deref().unwrap_or("uses");
-            if let Some(ref tech) = rel.technology {
-                output.push_str(&format!(
-                    "    Rel({}, {}, \"{}\", \"{}\")\n",
-                    sanitize_id(&rel.source_id.to_string()),
-                    sanitize_id(&rel.destination_id.to_string()),
-                    desc,
-                    tech
-                ));
-            } else {
-                output.push_str(&format!(
-                    "    Rel({}, {}, \"{}\")\n",
-                    sanitize_id(&rel.source_id.to_string()),
-                    sanitize_id(&rel.destination_id.to_string()),
-                    desc
-                ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                let desc = rel.description.as_deref().unwrap_or("uses");
+                if let Some(ref tech) = rel.technology {
+                    output.push_str(&format!(
+                        "    Rel({}, {}, \"{}\", \"{}\")\n",
+                        sanitize_id(&source),
+                        sanitize_id(&dest),
+                        desc,
+                        tech
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "    Rel({}, {}, \"{}\")\n",
+                        sanitize_id(&source),
+                        sanitize_id(&dest),
+                        desc
+                    ));
+                }
             }
         }
 
@@ -227,6 +261,7 @@ impl MermaidExporter {
     pub fn export_component(workspace: &Workspace, view: &ComponentView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("```mermaid\n");
         output.push_str("C4Component\n");
@@ -253,10 +288,12 @@ impl MermaidExporter {
 
         // Add people
         for person in &model.people {
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
             output.push_str(&format!(
                 "    Person({}, \"{}\", \"{}\")\n",
-                sanitize_id(&person.properties.id.to_string()),
+                sanitize_id(&id),
                 person.name(),
                 desc
             ));
@@ -264,18 +301,23 @@ impl MermaidExporter {
 
         // Add the container boundary with its components
         if let Some(container) = target_container {
+            let container_id = container.properties.id.to_string();
+            element_ids.insert(container_id.clone());
+
             output.push_str(&format!(
                 "\n    Container_Boundary({}, \"{}\") {{\n",
-                sanitize_id(&container.properties.id.to_string()),
+                sanitize_id(&container_id),
                 container.name()
             ));
 
             for component in &container.components {
+                let component_id = component.properties.id.to_string();
+                element_ids.insert(component_id.clone());
                 let tech = component.technology.as_deref().unwrap_or("");
                 let desc = component.properties.description.as_deref().unwrap_or("");
                 output.push_str(&format!(
                     "        Component({}, \"{}\", \"{}\", \"{}\")\n",
-                    sanitize_id(&component.properties.id.to_string()),
+                    sanitize_id(&component_id),
                     component.name(),
                     tech,
                     desc
@@ -289,11 +331,13 @@ impl MermaidExporter {
         if let Some(system) = parent_system {
             for container in &system.containers {
                 if Some(container.id()) != target_container.map(|c| c.id()) {
+                    let id = container.properties.id.to_string();
+                    element_ids.insert(id.clone());
                     let tech = container.technology.as_deref().unwrap_or("");
                     let desc = container.properties.description.as_deref().unwrap_or("");
                     output.push_str(&format!(
                         "    Container({}, \"{}\", \"{}\", \"{}\")\n",
-                        sanitize_id(&container.properties.id.to_string()),
+                        sanitize_id(&id),
                         container.name(),
                         tech,
                         desc
@@ -304,24 +348,28 @@ impl MermaidExporter {
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let desc = rel.description.as_deref().unwrap_or("uses");
-            if let Some(ref tech) = rel.technology {
-                output.push_str(&format!(
-                    "    Rel({}, {}, \"{}\", \"{}\")\n",
-                    sanitize_id(&rel.source_id.to_string()),
-                    sanitize_id(&rel.destination_id.to_string()),
-                    desc,
-                    tech
-                ));
-            } else {
-                output.push_str(&format!(
-                    "    Rel({}, {}, \"{}\")\n",
-                    sanitize_id(&rel.source_id.to_string()),
-                    sanitize_id(&rel.destination_id.to_string()),
-                    desc
-                ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                let desc = rel.description.as_deref().unwrap_or("uses");
+                if let Some(ref tech) = rel.technology {
+                    output.push_str(&format!(
+                        "    Rel({}, {}, \"{}\", \"{}\")\n",
+                        sanitize_id(&source),
+                        sanitize_id(&dest),
+                        desc,
+                        tech
+                    ));
+                } else {
+                    output.push_str(&format!(
+                        "    Rel({}, {}, \"{}\")\n",
+                        sanitize_id(&source),
+                        sanitize_id(&dest),
+                        desc
+                    ));
+                }
             }
         }
 
@@ -420,41 +468,46 @@ impl MermaidExporter {
     pub fn export_flowchart(workspace: &Workspace) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
 
         output.push_str("```mermaid\n");
         output.push_str("flowchart TB\n");
 
         // Add people
         for person in &model.people {
-            let id = sanitize_id(&person.properties.id.to_string());
+            let id = person.properties.id.to_string();
+            element_ids.insert(id.clone());
             output.push_str(&format!(
                 "    {}[\"{}\"]\n",
-                id,
+                sanitize_id(&id),
                 person.name()
             ));
         }
 
         // Add software systems
         for system in &model.software_systems {
-            let id = sanitize_id(&system.properties.id.to_string());
+            let id = system.properties.id.to_string();
+            element_ids.insert(id.clone());
             output.push_str(&format!(
                 "    {}[\"{}\"]\n",
-                id,
+                sanitize_id(&id),
                 system.name()
             ));
         }
 
         output.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let source = sanitize_id(&rel.source_id.to_string());
-            let target = sanitize_id(&rel.destination_id.to_string());
-            let desc = rel.description.as_deref().unwrap_or("uses");
-            output.push_str(&format!(
-                "    {} -->|\"{}\"| {}\n",
-                source, desc, target
-            ));
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if element_ids.contains(&source) && element_ids.contains(&dest) {
+                let desc = rel.description.as_deref().unwrap_or("uses");
+                output.push_str(&format!(
+                    "    {} -->|\"{}\"| {}\n",
+                    sanitize_id(&source), desc, sanitize_id(&dest)
+                ));
+            }
         }
 
         output.push_str("```\n");
