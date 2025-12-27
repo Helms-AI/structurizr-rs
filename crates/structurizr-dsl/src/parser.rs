@@ -1515,6 +1515,119 @@ fn generate_implied_relationships(workspace: &mut Workspace) {
     }
 }
 
+/// View type for element resolution.
+#[derive(Debug, Clone, Copy)]
+enum ViewType {
+    SystemLandscape,
+    SystemContext,
+    Container,
+    Component,
+}
+
+/// Resolve which elements should be included in a view based on include/exclude directives.
+fn resolve_view_elements(
+    model: &Model,
+    view_type: ViewType,
+    scope_id: Option<ElementId>,
+    include: &[IncludeExclude],
+    exclude: &[IncludeExclude],
+    identifiers: &HashMap<String, ElementId>,
+) -> Vec<ElementView> {
+    let mut element_ids: Vec<ElementId> = Vec::new();
+
+    // Determine if we should include all (empty include = include all, or explicit include *)
+    let include_all = include.is_empty() || include.iter().any(|i| matches!(i, IncludeExclude::All));
+
+    if include_all {
+        // Include all applicable elements based on view type
+        match view_type {
+            ViewType::SystemLandscape | ViewType::SystemContext => {
+                // All people and all software systems
+                for person in &model.people {
+                    element_ids.push(person.id());
+                }
+                for system in &model.software_systems {
+                    element_ids.push(system.id());
+                }
+            }
+            ViewType::Container => {
+                // All people + target system's containers + all other systems
+                for person in &model.people {
+                    element_ids.push(person.id());
+                }
+                for system in &model.software_systems {
+                    if Some(system.id()) == scope_id {
+                        // Include containers from the target system
+                        for container in &system.containers {
+                            element_ids.push(container.id());
+                        }
+                    } else {
+                        // Include external systems
+                        element_ids.push(system.id());
+                    }
+                }
+            }
+            ViewType::Component => {
+                // All people + target container's components + sibling containers
+                for person in &model.people {
+                    element_ids.push(person.id());
+                }
+                for system in &model.software_systems {
+                    for container in &system.containers {
+                        if Some(container.id()) == scope_id {
+                            // Include components from the target container
+                            for component in &container.components {
+                                element_ids.push(component.id());
+                            }
+                        } else {
+                            // Include sibling containers
+                            element_ids.push(container.id());
+                        }
+                    }
+                }
+            }
+        }
+    } else {
+        // Only include specifically listed elements
+        for inc in include {
+            match inc {
+                IncludeExclude::All => {
+                    // Already handled above
+                }
+                IncludeExclude::Identifier(name) => {
+                    if let Some(&id) = identifiers.get(name) {
+                        element_ids.push(id);
+                    }
+                }
+                IncludeExclude::Expression(_expr) => {
+                    // TODO: Implement tag expression matching
+                    // For now, expressions are not supported
+                }
+            }
+        }
+    }
+
+    // Apply excludes
+    for exc in exclude {
+        match exc {
+            IncludeExclude::All => {
+                element_ids.clear();
+            }
+            IncludeExclude::Identifier(name) => {
+                if let Some(&id) = identifiers.get(name) {
+                    element_ids.retain(|&eid| eid != id);
+                }
+            }
+            IncludeExclude::Expression(_expr) => {
+                // TODO: Implement tag expression matching for excludes
+            }
+        }
+    }
+
+    // Convert to ElementView
+    element_ids.into_iter().map(ElementView::new).collect()
+}
+
 /// Build a Workspace from an AST.
 fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
     // Step 1: Process !const directives to build constants map
@@ -1604,6 +1717,15 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
             if let Some(background) = view.properties.background {
                 v.properties = v.properties.with_background(background);
             }
+            // Resolve include/exclude to populate elements
+            v.properties.elements = resolve_view_elements(
+                workspace.model(),
+                ViewType::SystemLandscape,
+                None,
+                &view.properties.include,
+                &view.properties.exclude,
+                &identifiers,
+            );
             workspace.views_mut().add_system_landscape_view(v);
         }
 
@@ -1622,6 +1744,15 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 if let Some(background) = view.properties.background {
                     v.properties = v.properties.with_background(background);
                 }
+                // Resolve include/exclude to populate elements
+                v.properties.elements = resolve_view_elements(
+                    workspace.model(),
+                    ViewType::SystemContext,
+                    Some(system_id),
+                    &view.properties.include,
+                    &view.properties.exclude,
+                    &identifiers,
+                );
                 workspace.views_mut().add_system_context_view(v);
             }
         }
@@ -1641,6 +1772,15 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 if let Some(background) = view.properties.background {
                     v.properties = v.properties.with_background(background);
                 }
+                // Resolve include/exclude to populate elements
+                v.properties.elements = resolve_view_elements(
+                    workspace.model(),
+                    ViewType::Container,
+                    Some(system_id),
+                    &view.properties.include,
+                    &view.properties.exclude,
+                    &identifiers,
+                );
                 workspace.views_mut().add_container_view(v);
             }
         }
@@ -1661,6 +1801,15 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 if let Some(background) = view.properties.background {
                     v.properties = v.properties.with_background(background);
                 }
+                // Resolve include/exclude to populate elements
+                v.properties.elements = resolve_view_elements(
+                    workspace.model(),
+                    ViewType::Component,
+                    Some(container_id),
+                    &view.properties.include,
+                    &view.properties.exclude,
+                    &identifiers,
+                );
                 workspace.views_mut().add_component_view(v);
             }
         }

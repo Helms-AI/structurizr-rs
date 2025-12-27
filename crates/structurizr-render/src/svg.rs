@@ -1,5 +1,7 @@
 //! SVG rendering for Structurizr diagrams.
 
+use std::collections::HashSet;
+
 use structurizr_core::model::{ElementId, DeploymentNode};
 use structurizr_core::style::{IconPosition, Routing, Styles};
 use structurizr_core::view::{
@@ -484,7 +486,20 @@ impl SvgRenderer {
         let mut element_ids: Vec<String> = Vec::new();
         let mut elements_info: Vec<ElementInfo> = Vec::new();
 
+        // Build set of allowed element IDs if view has explicit elements
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         for person in &model.people {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
                 id: person.id(),
@@ -497,6 +512,12 @@ impl SvgRenderer {
         }
 
         for system in &model.software_systems {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
             element_ids.push(system.id().to_string());
             elements_info.push(ElementInfo {
                 id: system.id(),
@@ -542,6 +563,13 @@ impl SvgRenderer {
         let mut element_ids: Vec<String> = Vec::new();
         let mut elements_info: Vec<ElementInfo> = Vec::new();
 
+        // Build set of allowed element IDs if view has explicit elements
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         // Find the main system
         let main_system = model
             .software_systems
@@ -550,6 +578,12 @@ impl SvgRenderer {
 
         // Add all people
         for person in &model.people {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
                 id: person.id(),
@@ -563,6 +597,12 @@ impl SvgRenderer {
 
         // Add all software systems
         for system in &model.software_systems {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
             element_ids.push(system.id().to_string());
             let is_main = main_system.map(|m| m.id() == system.id()).unwrap_or(false);
             elements_info.push(ElementInfo {
@@ -611,8 +651,21 @@ impl SvgRenderer {
         let mut element_ids: Vec<String> = Vec::new();
         let mut elements_info: Vec<ElementInfo> = Vec::new();
 
+        // Build set of allowed element IDs if view has explicit elements
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
                 id: person.id(),
@@ -627,6 +680,12 @@ impl SvgRenderer {
         // Add containers from the target system
         if let Some(system) = model.software_systems.iter().find(|s| s.id() == view.software_system_id) {
             for container in &system.containers {
+                // Skip if not in allowed list (when list is specified)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&container.id()) {
+                        continue;
+                    }
+                }
                 element_ids.push(container.id().to_string());
                 elements_info.push(ElementInfo {
                     id: container.id(),
@@ -642,6 +701,12 @@ impl SvgRenderer {
         // Add external systems
         for system in &model.software_systems {
             if system.id() != view.software_system_id {
+                // Skip if not in allowed list (when list is specified)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&system.id()) {
+                        continue;
+                    }
+                }
                 element_ids.push(system.id().to_string());
                 elements_info.push(ElementInfo {
                     id: system.id(),
@@ -686,6 +751,13 @@ impl SvgRenderer {
         let mut element_ids: Vec<String> = Vec::new();
         let mut elements_info: Vec<ElementInfo> = Vec::new();
 
+        // Build set of allowed element IDs if view has explicit elements
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         // Find the container
         let mut target_container = None;
 
@@ -705,6 +777,12 @@ impl SvgRenderer {
         // This gives a focused C3 view showing just the internal structure
         if let Some(container) = target_container {
             for component in &container.components {
+                // Skip if not in allowed list (when list is specified)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&component.id()) {
+                        continue;
+                    }
+                }
                 element_ids.push(component.id().to_string());
                 elements_info.push(ElementInfo {
                     id: component.id(),

@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use structurizr_core::model::ElementId;
 use structurizr_core::view::{
     ComponentView, ContainerView, DeploymentView, DynamicView, SystemContextView,
     SystemLandscapeView,
@@ -20,6 +21,13 @@ impl PlantUmlExporter {
         let mut output = String::new();
         let mut element_ids: HashSet<String> = HashSet::new();
 
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml\n\n");
 
@@ -29,6 +37,12 @@ impl PlantUmlExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             output.push_str(&format!(
@@ -43,6 +57,12 @@ impl PlantUmlExporter {
 
         // Add software systems
         for system in &model.software_systems {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
             let id = system.properties.id.to_string();
             element_ids.insert(id.clone());
             output.push_str(&format!(
@@ -80,6 +100,13 @@ impl PlantUmlExporter {
         let mut output = String::new();
         let mut element_ids: HashSet<String> = HashSet::new();
 
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml\n\n");
 
@@ -92,6 +119,12 @@ impl PlantUmlExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             output.push_str(&format!(
@@ -106,6 +139,12 @@ impl PlantUmlExporter {
 
         // Add software systems
         for system in &model.software_systems {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
             let id = system.properties.id.to_string();
             element_ids.insert(id.clone());
             let is_main = main_system.map(|m| m.id() == system.id()).unwrap_or(false);
@@ -153,6 +192,13 @@ impl PlantUmlExporter {
         let mut output = String::new();
         let mut element_ids: HashSet<String> = HashSet::new();
 
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml\n\n");
 
@@ -162,6 +208,12 @@ impl PlantUmlExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             output.push_str(&format!(
@@ -183,6 +235,12 @@ impl PlantUmlExporter {
             ));
 
             for container in &system.containers {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&container.id()) {
+                        continue;
+                    }
+                }
                 let id = container.properties.id.to_string();
                 element_ids.insert(id.clone());
                 let tech = container.technology.as_deref().unwrap_or("");
@@ -201,6 +259,12 @@ impl PlantUmlExporter {
         // Add external systems
         for system in &model.software_systems {
             if system.id() != view.software_system_id {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&system.id()) {
+                        continue;
+                    }
+                }
                 let id = system.properties.id.to_string();
                 element_ids.insert(id.clone());
                 output.push_str(&format!(
@@ -250,6 +314,13 @@ impl PlantUmlExporter {
         let mut output = String::new();
         let mut element_ids: HashSet<String> = HashSet::new();
 
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml\n\n");
 
@@ -273,6 +344,12 @@ impl PlantUmlExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             output.push_str(&format!(
@@ -294,6 +371,12 @@ impl PlantUmlExporter {
             ));
 
             for component in &container.components {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&component.id()) {
+                        continue;
+                    }
+                }
                 let id = component.properties.id.to_string();
                 element_ids.insert(id.clone());
                 let tech = component.technology.as_deref().unwrap_or("");
@@ -313,6 +396,12 @@ impl PlantUmlExporter {
         if let Some(system) = parent_system {
             for container in &system.containers {
                 if Some(container.id()) != target_container.map(|c| c.id()) {
+                    // Skip if not in allowed list (when filtering is active)
+                    if let Some(ref allowed) = allowed_ids {
+                        if !allowed.contains(&container.id()) {
+                            continue;
+                        }
+                    }
                     let id = container.properties.id.to_string();
                     element_ids.insert(id.clone());
                     let tech = container.technology.as_deref().unwrap_or("");

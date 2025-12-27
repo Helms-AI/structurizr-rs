@@ -2,6 +2,9 @@
 //!
 //! D2 is a modern declarative diagramming language: https://d2lang.com
 
+use std::collections::HashSet;
+
+use structurizr_core::model::ElementId;
 use structurizr_core::view::{
     ComponentView, ContainerView, DeploymentView, DynamicView, SystemContextView,
     SystemLandscapeView,
@@ -18,6 +21,14 @@ impl D2Exporter {
     pub fn export_system_landscape(workspace: &Workspace, view: &SystemLandscapeView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
+
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
 
         // Add title
         if let Some(ref title) = view.properties.title {
@@ -29,6 +40,13 @@ impl D2Exporter {
 
         // Add people with person shape
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
             output.push_str(&format!(
@@ -44,6 +62,13 @@ impl D2Exporter {
 
         // Add software systems
         for system in &model.software_systems {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(system.id().to_string());
             let id = sanitize_id(&system.id().to_string());
             let desc = system.properties.description.as_deref().unwrap_or("");
             let color = if system.location == structurizr_core::model::Location::External {
@@ -62,10 +87,15 @@ impl D2Exporter {
             output.push_str(&format!("  style.fill: \"{}\"\n  style.font-color: white\n  style.border-radius: 8\n}}\n\n", color));
         }
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let source = sanitize_id(&rel.source_id.to_string());
-            let target = sanitize_id(&rel.destination_id.to_string());
+            let source_str = rel.source_id.to_string();
+            let dest_str = rel.destination_id.to_string();
+            if !element_ids.contains(&source_str) || !element_ids.contains(&dest_str) {
+                continue;
+            }
+            let source = sanitize_id(&source_str);
+            let target = sanitize_id(&dest_str);
             let desc = rel.description.as_deref().unwrap_or("uses");
             let tech = rel.technology.as_ref()
                 .map(|t| format!(" [{}]", t))
@@ -84,6 +114,14 @@ impl D2Exporter {
     pub fn export_system_context(workspace: &Workspace, view: &SystemContextView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
+
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
 
         if let Some(ref title) = view.properties.title {
             output.push_str(&format!("# {}\n\n", title));
@@ -97,6 +135,13 @@ impl D2Exporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
             output.push_str(&format!(
@@ -112,6 +157,13 @@ impl D2Exporter {
 
         // Add software systems
         for system in &model.software_systems {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(system.id().to_string());
             let id = sanitize_id(&system.id().to_string());
             let desc = system.properties.description.as_deref().unwrap_or("");
             let is_central = central_system.map(|c| c.id() == system.id()).unwrap_or(false);
@@ -132,10 +184,15 @@ impl D2Exporter {
             ));
         }
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let source = sanitize_id(&rel.source_id.to_string());
-            let target = sanitize_id(&rel.destination_id.to_string());
+            let source_str = rel.source_id.to_string();
+            let dest_str = rel.destination_id.to_string();
+            if !element_ids.contains(&source_str) || !element_ids.contains(&dest_str) {
+                continue;
+            }
+            let source = sanitize_id(&source_str);
+            let target = sanitize_id(&dest_str);
             let desc = rel.description.as_deref().unwrap_or("uses");
             let tech = rel.technology.as_ref()
                 .map(|t| format!(" [{}]", t))
@@ -154,6 +211,14 @@ impl D2Exporter {
     pub fn export_container(workspace: &Workspace, view: &ContainerView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
+
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
 
         if let Some(ref title) = view.properties.title {
             output.push_str(&format!("# {}\n\n", title));
@@ -163,6 +228,13 @@ impl D2Exporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
             output.push_str(&format!(
@@ -186,6 +258,13 @@ impl D2Exporter {
             ));
 
             for container in &system.containers {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&container.id()) {
+                        continue;
+                    }
+                }
+                element_ids.insert(container.id().to_string());
                 let container_id = sanitize_id(&container.id().to_string());
                 let desc = container.properties.description.as_deref().unwrap_or("");
                 let tech = container.technology.as_deref().unwrap_or("");
@@ -210,6 +289,13 @@ impl D2Exporter {
         // Add external systems
         for system in &model.software_systems {
             if system.id() != view.software_system_id {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&system.id()) {
+                        continue;
+                    }
+                }
+                element_ids.insert(system.id().to_string());
                 let id = sanitize_id(&system.id().to_string());
                 let desc = system.properties.description.as_deref().unwrap_or("");
                 output.push_str(&format!(
@@ -224,10 +310,15 @@ impl D2Exporter {
             }
         }
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let source = sanitize_id(&rel.source_id.to_string());
-            let target = sanitize_id(&rel.destination_id.to_string());
+            let source_str = rel.source_id.to_string();
+            let dest_str = rel.destination_id.to_string();
+            if !element_ids.contains(&source_str) || !element_ids.contains(&dest_str) {
+                continue;
+            }
+            let source = sanitize_id(&source_str);
+            let target = sanitize_id(&dest_str);
             let desc = rel.description.as_deref().unwrap_or("uses");
             let tech = rel.technology.as_ref()
                 .map(|t| format!(" [{}]", t))
@@ -246,6 +337,14 @@ impl D2Exporter {
     pub fn export_component(workspace: &Workspace, view: &ComponentView) -> Result<String> {
         let model = workspace.model();
         let mut output = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
+
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
 
         if let Some(ref title) = view.properties.title {
             output.push_str(&format!("# {}\n\n", title));
@@ -277,6 +376,13 @@ impl D2Exporter {
             ));
 
             for component in &container.components {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&component.id()) {
+                        continue;
+                    }
+                }
+                element_ids.insert(component.id().to_string());
                 let comp_id = sanitize_id(&component.id().to_string());
                 let desc = component.properties.description.as_deref().unwrap_or("");
                 let tech = component.technology.as_deref().unwrap_or("");
@@ -302,6 +408,13 @@ impl D2Exporter {
         if let Some(system) = parent_system {
             for container in &system.containers {
                 if Some(container.id()) != target_container.map(|c| c.id()) {
+                    // Skip if not in allowed list (when filtering is active)
+                    if let Some(ref allowed) = allowed_ids {
+                        if !allowed.contains(&container.id()) {
+                            continue;
+                        }
+                    }
+                    element_ids.insert(container.id().to_string());
                     let id = sanitize_id(&container.id().to_string());
                     let desc = container.properties.description.as_deref().unwrap_or("");
                     output.push_str(&format!(
@@ -317,10 +430,15 @@ impl D2Exporter {
             }
         }
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
-            let source = sanitize_id(&rel.source_id.to_string());
-            let target = sanitize_id(&rel.destination_id.to_string());
+            let source_str = rel.source_id.to_string();
+            let dest_str = rel.destination_id.to_string();
+            if !element_ids.contains(&source_str) || !element_ids.contains(&dest_str) {
+                continue;
+            }
+            let source = sanitize_id(&source_str);
+            let target = sanitize_id(&dest_str);
             let desc = rel.description.as_deref().unwrap_or("uses");
             let tech = rel.technology.as_ref()
                 .map(|t| format!(" [{}]", t))

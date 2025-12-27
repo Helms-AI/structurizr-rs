@@ -2,6 +2,7 @@
 
 use std::collections::HashSet;
 
+use structurizr_core::model::ElementId;
 use structurizr_core::view::{
     ComponentView, ContainerView, DeploymentView, DynamicView, SystemContextView,
     SystemLandscapeView,
@@ -20,6 +21,13 @@ impl MermaidExporter {
         let mut output = String::new();
         let mut element_ids: HashSet<String> = HashSet::new();
 
+        // Build set of allowed element IDs if view has explicit elements
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         output.push_str("```mermaid\n");
         output.push_str("C4Context\n");
 
@@ -31,6 +39,12 @@ impl MermaidExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -44,6 +58,12 @@ impl MermaidExporter {
 
         // Add software systems
         for system in &model.software_systems {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
             let id = system.properties.id.to_string();
             element_ids.insert(id.clone());
             let desc = system.properties.description.as_deref().unwrap_or("");
@@ -83,6 +103,13 @@ impl MermaidExporter {
         let mut output = String::new();
         let mut element_ids: HashSet<String> = HashSet::new();
 
+        // Build set of allowed element IDs if view has explicit elements
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         output.push_str("```mermaid\n");
         output.push_str("C4Context\n");
 
@@ -97,6 +124,12 @@ impl MermaidExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -110,6 +143,12 @@ impl MermaidExporter {
 
         // Add software systems
         for system in &model.software_systems {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
             let id = system.properties.id.to_string();
             element_ids.insert(id.clone());
             let desc = system.properties.description.as_deref().unwrap_or("");
@@ -160,6 +199,13 @@ impl MermaidExporter {
         let mut output = String::new();
         let mut element_ids: HashSet<String> = HashSet::new();
 
+        // Build set of allowed element IDs if view has explicit elements
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         output.push_str("```mermaid\n");
         output.push_str("C4Container\n");
 
@@ -171,6 +217,12 @@ impl MermaidExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -194,6 +246,12 @@ impl MermaidExporter {
             ));
 
             for container in &system.containers {
+                // Skip if not in allowed list (when list is specified)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&container.id()) {
+                        continue;
+                    }
+                }
                 let container_id = container.properties.id.to_string();
                 element_ids.insert(container_id.clone());
                 let tech = container.technology.as_deref().unwrap_or("");
@@ -213,6 +271,12 @@ impl MermaidExporter {
         // Add external systems
         for system in &model.software_systems {
             if system.id() != view.software_system_id {
+                // Skip if not in allowed list (when list is specified)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&system.id()) {
+                        continue;
+                    }
+                }
                 let id = system.properties.id.to_string();
                 element_ids.insert(id.clone());
                 let desc = system.properties.description.as_deref().unwrap_or("");
@@ -263,6 +327,13 @@ impl MermaidExporter {
         let mut output = String::new();
         let mut element_ids: HashSet<String> = HashSet::new();
 
+        // Build set of allowed element IDs if view has explicit elements
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
+
         output.push_str("```mermaid\n");
         output.push_str("C4Component\n");
 
@@ -288,6 +359,12 @@ impl MermaidExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when list is specified)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -311,6 +388,12 @@ impl MermaidExporter {
             ));
 
             for component in &container.components {
+                // Skip if not in allowed list (when list is specified)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&component.id()) {
+                        continue;
+                    }
+                }
                 let component_id = component.properties.id.to_string();
                 element_ids.insert(component_id.clone());
                 let tech = component.technology.as_deref().unwrap_or("");
@@ -331,6 +414,12 @@ impl MermaidExporter {
         if let Some(system) = parent_system {
             for container in &system.containers {
                 if Some(container.id()) != target_container.map(|c| c.id()) {
+                    // Skip if not in allowed list (when list is specified)
+                    if let Some(ref allowed) = allowed_ids {
+                        if !allowed.contains(&container.id()) {
+                            continue;
+                        }
+                    }
                     let id = container.properties.id.to_string();
                     element_ids.insert(id.clone());
                     let tech = container.technology.as_deref().unwrap_or("");

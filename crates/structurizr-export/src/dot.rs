@@ -2,6 +2,9 @@
 //!
 //! This module exports C4 model views to DOT format for use with Graphviz.
 
+use std::collections::HashSet;
+
+use structurizr_core::model::ElementId;
 use structurizr_core::view::{
     ContainerView, SystemContextView, SystemLandscapeView, ComponentView,
 };
@@ -14,8 +17,16 @@ pub struct DotExporter;
 
 impl DotExporter {
     /// Export a system landscape view to DOT format.
-    pub fn export_system_landscape(workspace: &Workspace, _view: &SystemLandscapeView) -> Result<String> {
+    pub fn export_system_landscape(workspace: &Workspace, view: &SystemLandscapeView) -> Result<String> {
         let mut dot = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
+
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
 
         dot.push_str("digraph SystemLandscape {\n");
         dot.push_str("  rankdir=TB;\n");
@@ -27,6 +38,13 @@ impl DotExporter {
         // Add people
         dot.push_str("  // People\n");
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
             dot.push_str(&format!(
                 "  \"{}\" [label=\"{}\\n[Person]\\n{}\", fillcolor=\"#08427b\", fontcolor=\"white\"];\n",
@@ -41,6 +59,13 @@ impl DotExporter {
         // Add software systems
         dot.push_str("  // Software Systems\n");
         for system in &model.software_systems {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(system.id().to_string());
             let desc = system.properties.description.as_deref().unwrap_or("");
             let color = if system.location == structurizr_core::model::Location::External {
                 "#999999"
@@ -58,9 +83,14 @@ impl DotExporter {
 
         dot.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         dot.push_str("  // Relationships\n");
         for rel in &model.relationships {
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if !element_ids.contains(&source) || !element_ids.contains(&dest) {
+                continue;
+            }
             let desc = rel.description.as_deref().unwrap_or("");
             let tech = rel.technology.as_ref()
                 .map(|t| format!("\\n[{}]", t))
@@ -83,6 +113,14 @@ impl DotExporter {
     /// Export a system context view to DOT format.
     pub fn export_system_context(workspace: &Workspace, view: &SystemContextView) -> Result<String> {
         let mut dot = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
+
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
 
         dot.push_str("digraph SystemContext {\n");
         dot.push_str("  rankdir=TB;\n");
@@ -97,6 +135,13 @@ impl DotExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
             dot.push_str(&format!(
                 "  \"{}\" [label=\"{}\\n[Person]\\n{}\", fillcolor=\"#08427b\", fontcolor=\"white\"];\n",
@@ -108,18 +153,33 @@ impl DotExporter {
 
         // Add the central system (highlighted)
         if let Some(system) = central_system {
-            let desc = system.properties.description.as_deref().unwrap_or("");
-            dot.push_str(&format!(
-                "  \"{}\" [label=\"{}\\n[Software System]\\n{}\", fillcolor=\"#1168bd\", fontcolor=\"white\", penwidth=3];\n",
-                system.id(),
-                escape_dot(&system.name()),
-                escape_dot(desc)
-            ));
+            // Skip if not in allowed list (when filtering is active)
+            let should_include = match &allowed_ids {
+                Some(allowed) => allowed.contains(&system.id()),
+                None => true,
+            };
+            if should_include {
+                element_ids.insert(system.id().to_string());
+                let desc = system.properties.description.as_deref().unwrap_or("");
+                dot.push_str(&format!(
+                    "  \"{}\" [label=\"{}\\n[Software System]\\n{}\", fillcolor=\"#1168bd\", fontcolor=\"white\", penwidth=3];\n",
+                    system.id(),
+                    escape_dot(&system.name()),
+                    escape_dot(desc)
+                ));
+            }
         }
 
         // Add external systems
         for system in &model.software_systems {
             if Some(system.id()) != central_system.map(|s| s.id()) {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&system.id()) {
+                        continue;
+                    }
+                }
+                element_ids.insert(system.id().to_string());
                 let desc = system.properties.description.as_deref().unwrap_or("");
                 dot.push_str(&format!(
                     "  \"{}\" [label=\"{}\\n[Software System]\\n{}\", fillcolor=\"#999999\", fontcolor=\"white\"];\n",
@@ -132,8 +192,13 @@ impl DotExporter {
 
         dot.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if !element_ids.contains(&source) || !element_ids.contains(&dest) {
+                continue;
+            }
             let desc = rel.description.as_deref().unwrap_or("");
             let tech = rel.technology.as_ref()
                 .map(|t| format!("\\n[{}]", t))
@@ -156,6 +221,14 @@ impl DotExporter {
     /// Export a container view to DOT format.
     pub fn export_container(workspace: &Workspace, view: &ContainerView) -> Result<String> {
         let mut dot = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
+
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
 
         dot.push_str("digraph Container {\n");
         dot.push_str("  rankdir=TB;\n");
@@ -171,6 +244,13 @@ impl DotExporter {
 
         // Add people
         for person in &model.people {
+            // Skip if not in allowed list (when filtering is active)
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) {
+                    continue;
+                }
+            }
+            element_ids.insert(person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
             dot.push_str(&format!(
                 "  \"{}\" [label=\"{}\\n[Person]\\n{}\", fillcolor=\"#08427b\", fontcolor=\"white\"];\n",
@@ -194,6 +274,13 @@ impl DotExporter {
             dot.push_str("    color=\"#1168bd\";\n\n");
 
             for container in &sys.containers {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&container.id()) {
+                        continue;
+                    }
+                }
+                element_ids.insert(container.id().to_string());
                 let desc = container.properties.description.as_deref().unwrap_or("");
                 let tech = container.technology.as_ref()
                     .map(|t| format!("\\n[{}]", t))
@@ -214,6 +301,13 @@ impl DotExporter {
         // Add external systems
         for sys in &model.software_systems {
             if Some(sys.id()) != system.map(|s| s.id()) {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&sys.id()) {
+                        continue;
+                    }
+                }
+                element_ids.insert(sys.id().to_string());
                 let desc = sys.properties.description.as_deref().unwrap_or("");
                 dot.push_str(&format!(
                     "  \"{}\" [label=\"{}\\n[Software System]\\n{}\", fillcolor=\"#999999\", fontcolor=\"white\"];\n",
@@ -226,8 +320,13 @@ impl DotExporter {
 
         dot.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if !element_ids.contains(&source) || !element_ids.contains(&dest) {
+                continue;
+            }
             let desc = rel.description.as_deref().unwrap_or("");
             let tech = rel.technology.as_ref()
                 .map(|t| format!("\\n[{}]", t))
@@ -250,6 +349,14 @@ impl DotExporter {
     /// Export a component view to DOT format.
     pub fn export_component(workspace: &Workspace, view: &ComponentView) -> Result<String> {
         let mut dot = String::new();
+        let mut element_ids: HashSet<String> = HashSet::new();
+
+        // Build allowed element set from view.properties.elements if non-empty
+        let allowed_ids: Option<HashSet<ElementId>> = if !view.properties.elements.is_empty() {
+            Some(view.properties.elements.iter().map(|e| e.id).collect())
+        } else {
+            None
+        };
 
         dot.push_str("digraph Component {\n");
         dot.push_str("  rankdir=TB;\n");
@@ -287,6 +394,13 @@ impl DotExporter {
             dot.push_str("    color=\"#438dd5\";\n\n");
 
             for component in &container.components {
+                // Skip if not in allowed list (when filtering is active)
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&component.id()) {
+                        continue;
+                    }
+                }
+                element_ids.insert(component.id().to_string());
                 let desc = component.properties.description.as_deref().unwrap_or("");
                 let tech = component.technology.as_ref()
                     .map(|t| format!("\\n[{}]", t))
@@ -308,6 +422,13 @@ impl DotExporter {
         if let Some(system) = parent_system {
             for container in &system.containers {
                 if Some(container.id()) != target_container.map(|c| c.id()) {
+                    // Skip if not in allowed list (when filtering is active)
+                    if let Some(ref allowed) = allowed_ids {
+                        if !allowed.contains(&container.id()) {
+                            continue;
+                        }
+                    }
+                    element_ids.insert(container.id().to_string());
                     let desc = container.properties.description.as_deref().unwrap_or("");
                     let tech = container.technology.as_ref()
                         .map(|t| format!("\\n[{}]", t))
@@ -326,8 +447,13 @@ impl DotExporter {
 
         dot.push('\n');
 
-        // Add relationships
+        // Add relationships (only between elements in this view)
         for rel in &model.relationships {
+            let source = rel.source_id.to_string();
+            let dest = rel.destination_id.to_string();
+            if !element_ids.contains(&source) || !element_ids.contains(&dest) {
+                continue;
+            }
             let desc = rel.description.as_deref().unwrap_or("");
             let tech = rel.technology.as_ref()
                 .map(|t| format!("\\n[{}]", t))
