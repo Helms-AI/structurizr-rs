@@ -30,6 +30,12 @@ impl D2Exporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         // Add title
         if let Some(ref title) = view.properties.title {
             output.push_str(&format!("# {}\n\n", title));
@@ -45,6 +51,10 @@ impl D2Exporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
@@ -67,6 +77,10 @@ impl D2Exporter {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             element_ids.insert(system.id().to_string());
             let id = sanitize_id(&system.id().to_string());
@@ -123,6 +137,12 @@ impl D2Exporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         if let Some(ref title) = view.properties.title {
             output.push_str(&format!("# {}\n\n", title));
         }
@@ -140,6 +160,10 @@ impl D2Exporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
@@ -162,6 +186,10 @@ impl D2Exporter {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             element_ids.insert(system.id().to_string());
             let id = sanitize_id(&system.id().to_string());
@@ -220,6 +248,12 @@ impl D2Exporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         if let Some(ref title) = view.properties.title {
             output.push_str(&format!("# {}\n\n", title));
         }
@@ -233,6 +267,10 @@ impl D2Exporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
@@ -264,6 +302,10 @@ impl D2Exporter {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&container.id()) {
+                    continue;
+                }
                 element_ids.insert(container.id().to_string());
                 let container_id = sanitize_id(&container.id().to_string());
                 let desc = container.properties.description.as_deref().unwrap_or("");
@@ -294,6 +336,10 @@ impl D2Exporter {
                     if !allowed.contains(&system.id()) {
                         continue;
                     }
+                }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&system.id()) {
+                    continue;
                 }
                 element_ids.insert(system.id().to_string());
                 let id = sanitize_id(&system.id().to_string());
@@ -346,6 +392,12 @@ impl D2Exporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         if let Some(ref title) = view.properties.title {
             output.push_str(&format!("# {}\n\n", title));
         }
@@ -382,6 +434,10 @@ impl D2Exporter {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&component.id()) {
+                    continue;
+                }
                 element_ids.insert(component.id().to_string());
                 let comp_id = sanitize_id(&component.id().to_string());
                 let desc = component.properties.description.as_deref().unwrap_or("");
@@ -413,6 +469,10 @@ impl D2Exporter {
                         if !allowed.contains(&container.id()) {
                             continue;
                         }
+                    }
+                    // Skip orphaned elements (no relationships)
+                    if !connected_ids.contains(&container.id()) {
+                        continue;
                     }
                     element_ids.insert(container.id().to_string());
                     let id = sanitize_id(&container.id().to_string());
@@ -675,8 +735,9 @@ mod tests {
     #[test]
     fn test_export_system_landscape() {
         let mut workspace = Workspace::new("Test", "A test");
-        workspace.model_mut().add_person("User", "A user");
-        workspace.model_mut().add_software_system("System", "A system");
+        let user = workspace.model_mut().add_person("User", "A user");
+        let system = workspace.model_mut().add_software_system("System", "A system");
+        workspace.model_mut().add_relationship(user, system, "Uses", None);
 
         let view = SystemLandscapeView::new("landscape");
         let d2 = D2Exporter::export_system_landscape(&workspace, &view).unwrap();

@@ -28,12 +28,18 @@ impl DotExporter {
             None
         };
 
+        let model = workspace.model();
+
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         dot.push_str("digraph SystemLandscape {\n");
         dot.push_str("  rankdir=TB;\n");
         dot.push_str("  node [shape=box, style=\"rounded,filled\", fontname=\"Arial\"];\n");
         dot.push_str("  edge [fontname=\"Arial\", fontsize=10];\n\n");
-
-        let model = workspace.model();
 
         // Add people
         dot.push_str("  // People\n");
@@ -43,6 +49,10 @@ impl DotExporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.insert(person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -64,6 +74,10 @@ impl DotExporter {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             element_ids.insert(system.id().to_string());
             let desc = system.properties.description.as_deref().unwrap_or("");
@@ -122,12 +136,18 @@ impl DotExporter {
             None
         };
 
+        let model = workspace.model();
+
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         dot.push_str("digraph SystemContext {\n");
         dot.push_str("  rankdir=TB;\n");
         dot.push_str("  node [shape=box, style=\"rounded,filled\", fontname=\"Arial\"];\n");
         dot.push_str("  edge [fontname=\"Arial\", fontsize=10];\n\n");
-
-        let model = workspace.model();
 
         // Find the central system
         let central_system = model.software_systems.iter()
@@ -140,6 +160,10 @@ impl DotExporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.insert(person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -158,7 +182,9 @@ impl DotExporter {
                 Some(allowed) => allowed.contains(&system.id()),
                 None => true,
             };
-            if should_include {
+            // Check orphan filtering
+            let is_connected = connected_ids.contains(&system.id());
+            if should_include && is_connected {
                 element_ids.insert(system.id().to_string());
                 let desc = system.properties.description.as_deref().unwrap_or("");
                 dot.push_str(&format!(
@@ -178,6 +204,10 @@ impl DotExporter {
                     if !allowed.contains(&system.id()) {
                         continue;
                     }
+                }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&system.id()) {
+                    continue;
                 }
                 element_ids.insert(system.id().to_string());
                 let desc = system.properties.description.as_deref().unwrap_or("");
@@ -230,13 +260,19 @@ impl DotExporter {
             None
         };
 
+        let model = workspace.model();
+
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         dot.push_str("digraph Container {\n");
         dot.push_str("  rankdir=TB;\n");
         dot.push_str("  compound=true;\n");
         dot.push_str("  node [shape=box, style=\"rounded,filled\", fontname=\"Arial\"];\n");
         dot.push_str("  edge [fontname=\"Arial\", fontsize=10];\n\n");
-
-        let model = workspace.model();
 
         // Find the system
         let system = model.software_systems.iter()
@@ -249,6 +285,10 @@ impl DotExporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.insert(person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -280,6 +320,10 @@ impl DotExporter {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&container.id()) {
+                    continue;
+                }
                 element_ids.insert(container.id().to_string());
                 let desc = container.properties.description.as_deref().unwrap_or("");
                 let tech = container.technology.as_ref()
@@ -306,6 +350,10 @@ impl DotExporter {
                     if !allowed.contains(&sys.id()) {
                         continue;
                     }
+                }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&sys.id()) {
+                    continue;
                 }
                 element_ids.insert(sys.id().to_string());
                 let desc = sys.properties.description.as_deref().unwrap_or("");
@@ -358,13 +406,19 @@ impl DotExporter {
             None
         };
 
+        let model = workspace.model();
+
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         dot.push_str("digraph Component {\n");
         dot.push_str("  rankdir=TB;\n");
         dot.push_str("  compound=true;\n");
         dot.push_str("  node [shape=box, style=\"rounded,filled\", fontname=\"Arial\"];\n");
         dot.push_str("  edge [fontname=\"Arial\", fontsize=10];\n\n");
-
-        let model = workspace.model();
 
         // Find the container
         let mut target_container = None;
@@ -400,6 +454,10 @@ impl DotExporter {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&component.id()) {
+                    continue;
+                }
                 element_ids.insert(component.id().to_string());
                 let desc = component.properties.description.as_deref().unwrap_or("");
                 let tech = component.technology.as_ref()
@@ -427,6 +485,10 @@ impl DotExporter {
                         if !allowed.contains(&container.id()) {
                             continue;
                         }
+                    }
+                    // Skip orphaned elements (no relationships)
+                    if !connected_ids.contains(&container.id()) {
+                        continue;
                     }
                     element_ids.insert(container.id().to_string());
                     let desc = container.properties.description.as_deref().unwrap_or("");
@@ -495,8 +557,9 @@ mod tests {
     fn test_export_system_landscape() {
         let mut workspace = Workspace::new("Test", "Test workspace");
 
-        workspace.model_mut().add_person("User", "A user");
-        workspace.model_mut().add_software_system("System", "A system");
+        let user = workspace.model_mut().add_person("User", "A user");
+        let system = workspace.model_mut().add_software_system("System", "A system");
+        workspace.model_mut().add_relationship(user, system, "Uses", None);
 
         let view = SystemLandscapeView::new("landscape");
         let dot = DotExporter::export_system_landscape(&workspace, &view).unwrap();

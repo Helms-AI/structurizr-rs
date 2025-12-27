@@ -28,6 +28,12 @@ impl PlantUmlExporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml\n\n");
 
@@ -42,6 +48,10 @@ impl PlantUmlExporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -62,6 +72,10 @@ impl PlantUmlExporter {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             let id = system.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -107,6 +121,12 @@ impl PlantUmlExporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Context.puml\n\n");
 
@@ -124,6 +144,10 @@ impl PlantUmlExporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -144,6 +168,10 @@ impl PlantUmlExporter {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             let id = system.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -199,6 +227,12 @@ impl PlantUmlExporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Container.puml\n\n");
 
@@ -213,6 +247,10 @@ impl PlantUmlExporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -241,6 +279,10 @@ impl PlantUmlExporter {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&container.id()) {
+                    continue;
+                }
                 let id = container.properties.id.to_string();
                 element_ids.insert(id.clone());
                 let tech = container.technology.as_deref().unwrap_or("");
@@ -264,6 +306,10 @@ impl PlantUmlExporter {
                     if !allowed.contains(&system.id()) {
                         continue;
                     }
+                }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&system.id()) {
+                    continue;
                 }
                 let id = system.properties.id.to_string();
                 element_ids.insert(id.clone());
@@ -321,6 +367,12 @@ impl PlantUmlExporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         output.push_str("@startuml\n");
         output.push_str("!include https://raw.githubusercontent.com/plantuml-stdlib/C4-PlantUML/master/C4_Component.puml\n\n");
 
@@ -350,6 +402,10 @@ impl PlantUmlExporter {
                     continue;
                 }
             }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             output.push_str(&format!(
@@ -377,6 +433,10 @@ impl PlantUmlExporter {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&component.id()) {
+                    continue;
+                }
                 let id = component.properties.id.to_string();
                 element_ids.insert(id.clone());
                 let tech = component.technology.as_deref().unwrap_or("");
@@ -401,6 +461,10 @@ impl PlantUmlExporter {
                         if !allowed.contains(&container.id()) {
                             continue;
                         }
+                    }
+                    // Skip orphaned elements (no relationships)
+                    if !connected_ids.contains(&container.id()) {
+                        continue;
                     }
                     let id = container.properties.id.to_string();
                     element_ids.insert(id.clone());
@@ -696,8 +760,9 @@ mod tests {
     #[test]
     fn test_export_system_landscape() {
         let mut workspace = Workspace::new("Test", "A test");
-        workspace.model_mut().add_person("User", "A user");
-        workspace.model_mut().add_software_system("System", "A system");
+        let user = workspace.model_mut().add_person("User", "A user");
+        let system = workspace.model_mut().add_software_system("System", "A system");
+        workspace.model_mut().add_relationship(user, system, "Uses", None);
 
         let view = SystemLandscapeView::new("landscape");
         let puml = PlantUmlExporter::export_system_landscape(&workspace, &view).unwrap();

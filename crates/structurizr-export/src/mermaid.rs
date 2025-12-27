@@ -28,6 +28,12 @@ impl MermaidExporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         output.push_str("```mermaid\n");
         output.push_str("C4Context\n");
 
@@ -44,6 +50,10 @@ impl MermaidExporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -63,6 +73,10 @@ impl MermaidExporter {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             let id = system.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -110,6 +124,12 @@ impl MermaidExporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         output.push_str("```mermaid\n");
         output.push_str("C4Context\n");
 
@@ -130,6 +150,10 @@ impl MermaidExporter {
                     continue;
                 }
             }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -148,6 +172,10 @@ impl MermaidExporter {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             let id = system.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -206,6 +234,12 @@ impl MermaidExporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         output.push_str("```mermaid\n");
         output.push_str("C4Container\n");
 
@@ -222,6 +256,10 @@ impl MermaidExporter {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
@@ -252,6 +290,10 @@ impl MermaidExporter {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&container.id()) {
+                    continue;
+                }
                 let container_id = container.properties.id.to_string();
                 element_ids.insert(container_id.clone());
                 let tech = container.technology.as_deref().unwrap_or("");
@@ -276,6 +318,10 @@ impl MermaidExporter {
                     if !allowed.contains(&system.id()) {
                         continue;
                     }
+                }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&system.id()) {
+                    continue;
                 }
                 let id = system.properties.id.to_string();
                 element_ids.insert(id.clone());
@@ -334,6 +380,12 @@ impl MermaidExporter {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         output.push_str("```mermaid\n");
         output.push_str("C4Component\n");
 
@@ -365,6 +417,10 @@ impl MermaidExporter {
                     continue;
                 }
             }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
+            }
             let id = person.properties.id.to_string();
             element_ids.insert(id.clone());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -394,6 +450,10 @@ impl MermaidExporter {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&component.id()) {
+                    continue;
+                }
                 let component_id = component.properties.id.to_string();
                 element_ids.insert(component_id.clone());
                 let tech = component.technology.as_deref().unwrap_or("");
@@ -419,6 +479,10 @@ impl MermaidExporter {
                         if !allowed.contains(&container.id()) {
                             continue;
                         }
+                    }
+                    // Skip orphaned elements (no relationships)
+                    if !connected_ids.contains(&container.id()) {
+                        continue;
                     }
                     let id = container.properties.id.to_string();
                     element_ids.insert(id.clone());

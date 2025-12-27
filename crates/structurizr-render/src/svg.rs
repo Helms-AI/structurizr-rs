@@ -493,12 +493,22 @@ impl SvgRenderer {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         for person in &model.people {
             // Skip if not in allowed list (when list is specified)
             if let Some(ref allowed) = allowed_ids {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
@@ -517,6 +527,10 @@ impl SvgRenderer {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             element_ids.push(system.id().to_string());
             elements_info.push(ElementInfo {
@@ -570,6 +584,12 @@ impl SvgRenderer {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         // Find the main system
         let main_system = model
             .software_systems
@@ -583,6 +603,10 @@ impl SvgRenderer {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
@@ -602,6 +626,10 @@ impl SvgRenderer {
                 if !allowed.contains(&system.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&system.id()) {
+                continue;
             }
             element_ids.push(system.id().to_string());
             let is_main = main_system.map(|m| m.id() == system.id()).unwrap_or(false);
@@ -658,6 +686,12 @@ impl SvgRenderer {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         // Add people
         for person in &model.people {
             // Skip if not in allowed list (when list is specified)
@@ -665,6 +699,10 @@ impl SvgRenderer {
                 if !allowed.contains(&person.id()) {
                     continue;
                 }
+            }
+            // Skip orphaned elements (no relationships)
+            if !connected_ids.contains(&person.id()) {
+                continue;
             }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
@@ -686,6 +724,10 @@ impl SvgRenderer {
                         continue;
                     }
                 }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&container.id()) {
+                    continue;
+                }
                 element_ids.push(container.id().to_string());
                 elements_info.push(ElementInfo {
                     id: container.id(),
@@ -706,6 +748,10 @@ impl SvgRenderer {
                     if !allowed.contains(&system.id()) {
                         continue;
                     }
+                }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&system.id()) {
+                    continue;
                 }
                 element_ids.push(system.id().to_string());
                 elements_info.push(ElementInfo {
@@ -758,6 +804,12 @@ impl SvgRenderer {
             None
         };
 
+        // Build set of elements that have at least one relationship (filter orphans)
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
         // Find the container
         let mut target_container = None;
 
@@ -782,6 +834,10 @@ impl SvgRenderer {
                     if !allowed.contains(&component.id()) {
                         continue;
                     }
+                }
+                // Skip orphaned elements (no relationships)
+                if !connected_ids.contains(&component.id()) {
+                    continue;
                 }
                 element_ids.push(component.id().to_string());
                 elements_info.push(ElementInfo {
