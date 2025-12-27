@@ -12,7 +12,7 @@ use structurizr_core::view::{
 use structurizr_core::Workspace;
 
 use crate::error::Result;
-use crate::layout::{GridLayout, LayoutEdge, LayoutNode};
+use crate::layout::{GridLayout, LayoutEdge, LayoutNode, Size};
 use crate::routing::orthogonal::{OrthogonalConfig, OrthogonalRouter};
 use crate::routing::{route_curved, EdgePath};
 use crate::shapes::{render_shape, Bounds};
@@ -493,23 +493,46 @@ impl SvgRenderer {
             None
         };
 
-        // Build set of elements that have at least one relationship (filter orphans)
+        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
+        // Include containers/components as "proxy candidates" so person→container relationships count
+        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
+
+        for person in &model.people {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) { continue; }
+            }
+            candidate_ids.insert(person.id());
+        }
+
+        for system in &model.software_systems {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) { continue; }
+            }
+            candidate_ids.insert(system.id());
+            // Also add containers and components as proxy candidates
+            // This allows person→container relationships to count for connectivity
+            for container in &system.containers {
+                candidate_ids.insert(container.id());
+                for component in &container.components {
+                    candidate_ids.insert(component.id());
+                }
+            }
+        }
+
+        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
         let connected_ids: HashSet<ElementId> = model.relationships
             .iter()
+            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
             .flat_map(|rel| [rel.source_id, rel.destination_id])
             .collect();
 
+        // Step 3: Add elements that are both candidates AND connected within this view
+        // (Only add people and systems - containers/components were just proxy candidates)
         for person in &model.people {
-            // Skip if not in allowed list (when list is specified)
             if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&person.id()) {
-                    continue;
-                }
+                if !allowed.contains(&person.id()) { continue; }
             }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&person.id()) {
-                continue;
-            }
+            if !connected_ids.contains(&person.id()) { continue; }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
                 id: person.id(),
@@ -522,16 +545,16 @@ impl SvgRenderer {
         }
 
         for system in &model.software_systems {
-            // Skip if not in allowed list (when list is specified)
             if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&system.id()) {
-                    continue;
-                }
+                if !allowed.contains(&system.id()) { continue; }
             }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&system.id()) {
-                continue;
-            }
+            // System is connected if: itself is connected OR any of its containers/components are
+            let system_connected = connected_ids.contains(&system.id()) ||
+                system.containers.iter().any(|c| {
+                    connected_ids.contains(&c.id()) ||
+                    c.components.iter().any(|comp| connected_ids.contains(&comp.id()))
+                });
+            if !system_connected { continue; }
             element_ids.push(system.id().to_string());
             elements_info.push(ElementInfo {
                 id: system.id(),
@@ -560,7 +583,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
     }
@@ -584,30 +624,53 @@ impl SvgRenderer {
             None
         };
 
-        // Build set of elements that have at least one relationship (filter orphans)
-        let connected_ids: HashSet<ElementId> = model.relationships
-            .iter()
-            .flat_map(|rel| [rel.source_id, rel.destination_id])
-            .collect();
-
         // Find the main system
         let main_system = model
             .software_systems
             .iter()
             .find(|s| s.id() == view.software_system_id);
 
-        // Add all people
+        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
+        // Include containers/components as "proxy candidates" so person→container relationships count
+        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
+
         for person in &model.people {
-            // Skip if not in allowed list (when list is specified)
             if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&person.id()) {
-                    continue;
+                if !allowed.contains(&person.id()) { continue; }
+            }
+            candidate_ids.insert(person.id());
+        }
+
+        for system in &model.software_systems {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) { continue; }
+            }
+            candidate_ids.insert(system.id());
+            // Also add containers and components as proxy candidates
+            // This allows person→container relationships to count for connectivity
+            for container in &system.containers {
+                candidate_ids.insert(container.id());
+                for component in &container.components {
+                    candidate_ids.insert(component.id());
                 }
             }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&person.id()) {
-                continue;
+        }
+
+        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
+        // Step 3: Add elements that are both candidates AND connected within this view
+        // (Only add people and systems - containers/components were just proxy candidates)
+        // Add all people
+        for person in &model.people {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) { continue; }
             }
+            if !connected_ids.contains(&person.id()) { continue; }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
                 id: person.id(),
@@ -621,16 +684,16 @@ impl SvgRenderer {
 
         // Add all software systems
         for system in &model.software_systems {
-            // Skip if not in allowed list (when list is specified)
             if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&system.id()) {
-                    continue;
-                }
+                if !allowed.contains(&system.id()) { continue; }
             }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&system.id()) {
-                continue;
-            }
+            // System is connected if: itself is connected OR any of its containers/components are
+            let system_connected = connected_ids.contains(&system.id()) ||
+                system.containers.iter().any(|c| {
+                    connected_ids.contains(&c.id()) ||
+                    c.components.iter().any(|comp| connected_ids.contains(&comp.id()))
+                });
+            if !system_connected { continue; }
             element_ids.push(system.id().to_string());
             let is_main = main_system.map(|m| m.id() == system.id()).unwrap_or(false);
             elements_info.push(ElementInfo {
@@ -662,7 +725,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
     }
@@ -686,24 +766,49 @@ impl SvgRenderer {
             None
         };
 
-        // Build set of elements that have at least one relationship (filter orphans)
+        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
+        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
+
+        // Add candidate people
+        for person in &model.people {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) { continue; }
+            }
+            candidate_ids.insert(person.id());
+        }
+
+        // Add candidate containers from the target system
+        if let Some(system) = model.software_systems.iter().find(|s| s.id() == view.software_system_id) {
+            for container in &system.containers {
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&container.id()) { continue; }
+                }
+                candidate_ids.insert(container.id());
+            }
+        }
+
+        // Add candidate external systems
+        for system in &model.software_systems {
+            if system.id() != view.software_system_id {
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&system.id()) { continue; }
+                }
+                candidate_ids.insert(system.id());
+            }
+        }
+
+        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
         let connected_ids: HashSet<ElementId> = model.relationships
             .iter()
+            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
             .flat_map(|rel| [rel.source_id, rel.destination_id])
             .collect();
 
+        // Step 3: Add elements that are both candidates AND connected within this view
         // Add people
         for person in &model.people {
-            // Skip if not in allowed list (when list is specified)
-            if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&person.id()) {
-                    continue;
-                }
-            }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&person.id()) {
-                continue;
-            }
+            if !candidate_ids.contains(&person.id()) { continue; }
+            if !connected_ids.contains(&person.id()) { continue; }
             element_ids.push(person.id().to_string());
             elements_info.push(ElementInfo {
                 id: person.id(),
@@ -718,16 +823,8 @@ impl SvgRenderer {
         // Add containers from the target system
         if let Some(system) = model.software_systems.iter().find(|s| s.id() == view.software_system_id) {
             for container in &system.containers {
-                // Skip if not in allowed list (when list is specified)
-                if let Some(ref allowed) = allowed_ids {
-                    if !allowed.contains(&container.id()) {
-                        continue;
-                    }
-                }
-                // Skip orphaned elements (no relationships)
-                if !connected_ids.contains(&container.id()) {
-                    continue;
-                }
+                if !candidate_ids.contains(&container.id()) { continue; }
+                if !connected_ids.contains(&container.id()) { continue; }
                 element_ids.push(container.id().to_string());
                 elements_info.push(ElementInfo {
                     id: container.id(),
@@ -743,16 +840,8 @@ impl SvgRenderer {
         // Add external systems
         for system in &model.software_systems {
             if system.id() != view.software_system_id {
-                // Skip if not in allowed list (when list is specified)
-                if let Some(ref allowed) = allowed_ids {
-                    if !allowed.contains(&system.id()) {
-                        continue;
-                    }
-                }
-                // Skip orphaned elements (no relationships)
-                if !connected_ids.contains(&system.id()) {
-                    continue;
-                }
+                if !candidate_ids.contains(&system.id()) { continue; }
+                if !connected_ids.contains(&system.id()) { continue; }
                 element_ids.push(system.id().to_string());
                 elements_info.push(ElementInfo {
                     id: system.id(),
@@ -780,7 +869,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
     }
@@ -804,12 +910,6 @@ impl SvgRenderer {
             None
         };
 
-        // Build set of elements that have at least one relationship (filter orphans)
-        let connected_ids: HashSet<ElementId> = model.relationships
-            .iter()
-            .flat_map(|rel| [rel.source_id, rel.destination_id])
-            .collect();
-
         // Find the container
         let mut target_container = None;
 
@@ -825,20 +925,30 @@ impl SvgRenderer {
             }
         }
 
-        // Add ONLY components from the target container
-        // This gives a focused C3 view showing just the internal structure
+        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
+        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
+
         if let Some(container) = target_container {
             for component in &container.components {
-                // Skip if not in allowed list (when list is specified)
                 if let Some(ref allowed) = allowed_ids {
-                    if !allowed.contains(&component.id()) {
-                        continue;
-                    }
+                    if !allowed.contains(&component.id()) { continue; }
                 }
-                // Skip orphaned elements (no relationships)
-                if !connected_ids.contains(&component.id()) {
-                    continue;
-                }
+                candidate_ids.insert(component.id());
+            }
+        }
+
+        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
+        // Step 3: Add components that are both candidates AND connected within this view
+        if let Some(container) = target_container {
+            for component in &container.components {
+                if !candidate_ids.contains(&component.id()) { continue; }
+                if !connected_ids.contains(&component.id()) { continue; }
                 element_ids.push(component.id().to_string());
                 elements_info.push(ElementInfo {
                     id: component.id(),
@@ -866,7 +976,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
     }
@@ -947,7 +1074,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
     }
@@ -1195,7 +1339,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &filtered_relationships, &model.groups, styles)
     }
@@ -1272,7 +1433,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &filtered_relationships, &model.groups, styles)
     }
@@ -1357,7 +1535,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &filtered_relationships, &model.groups, styles)
     }
@@ -1439,7 +1634,24 @@ impl SvgRenderer {
             GridLayout::default()
         };
 
-        let nodes = layout.layout_adaptive(&element_ids, &edges);
+        // Prepare node sizes for Sugiyama
+        let node_sizes: Vec<(String, Size)> = element_ids.iter()
+            .map(|id| (id.clone(), Size::default()))
+            .collect();
+
+        // Use Sugiyama with proper normalization
+        let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
+
+        // Convert sugiyama::LayoutNode to layout::LayoutNode
+        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+            .into_iter()
+            .map(|n| LayoutNode {
+                id: n.id,
+                position: crate::layout::Position { x: n.position.x, y: n.position.y },
+                size: Size { width: n.size.width, height: n.size.height },
+                rank: n.rank,
+            })
+            .collect();
 
         self.render_svg(&nodes, &elements_info, &filtered_relationships, &model.groups, styles)
     }

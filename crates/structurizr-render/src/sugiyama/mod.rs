@@ -175,6 +175,7 @@ pub fn sugiyama_layout(
 
     // Phase 3: Assign layers (ranks)
     ranking::assign_layers(&mut graph);
+    ranking::normalize_layers(&mut graph);  // Remove gaps between layers
 
     // Phase 4: Insert dummy nodes for long edges
     dummy::insert_dummy_nodes(&mut graph);

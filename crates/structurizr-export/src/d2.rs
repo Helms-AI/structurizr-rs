@@ -30,9 +30,38 @@ impl D2Exporter {
             None
         };
 
-        // Build set of elements that have at least one relationship (filter orphans)
+        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
+        // Include containers/components as "proxy candidates" so person→container relationships count
+        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
+
+        // Add candidate people
+        for person in &model.people {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) { continue; }
+            }
+            candidate_ids.insert(person.id());
+        }
+
+        // Add candidate software systems AND their containers/components as proxy candidates
+        for system in &model.software_systems {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) { continue; }
+            }
+            candidate_ids.insert(system.id());
+            // Also add containers and components as proxy candidates
+            // This allows person→container relationships to count for connectivity
+            for container in &system.containers {
+                candidate_ids.insert(container.id());
+                for component in &container.components {
+                    candidate_ids.insert(component.id());
+                }
+            }
+        }
+
+        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
         let connected_ids: HashSet<ElementId> = model.relationships
             .iter()
+            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
             .flat_map(|rel| [rel.source_id, rel.destination_id])
             .collect();
 
@@ -44,18 +73,11 @@ impl D2Exporter {
         // Add direction
         output.push_str("direction: down\n\n");
 
-        // Add people with person shape
+        // Step 3: Add elements that are both candidates AND connected within this view
+        // Add people (connected if they OR any container/component they relate to is connected)
         for person in &model.people {
-            // Skip if not in allowed list (when filtering is active)
-            if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&person.id()) {
-                    continue;
-                }
-            }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&person.id()) {
-                continue;
-            }
+            if !candidate_ids.contains(&person.id()) { continue; }
+            if !connected_ids.contains(&person.id()) { continue; }
             element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -70,18 +92,16 @@ impl D2Exporter {
             output.push_str("  style.fill: \"#08427b\"\n  style.font-color: white\n}\n\n");
         }
 
-        // Add software systems
+        // Add software systems (connected if system OR any of its containers/components is connected)
         for system in &model.software_systems {
-            // Skip if not in allowed list (when filtering is active)
-            if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&system.id()) {
-                    continue;
-                }
-            }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&system.id()) {
-                continue;
-            }
+            if !candidate_ids.contains(&system.id()) { continue; }
+            // System is connected if: itself is connected OR any of its containers/components are
+            let system_connected = connected_ids.contains(&system.id()) ||
+                system.containers.iter().any(|c| {
+                    connected_ids.contains(&c.id()) ||
+                    c.components.iter().any(|comp| connected_ids.contains(&comp.id()))
+                });
+            if !system_connected { continue; }
             element_ids.insert(system.id().to_string());
             let id = sanitize_id(&system.id().to_string());
             let desc = system.properties.description.as_deref().unwrap_or("");
@@ -137,9 +157,38 @@ impl D2Exporter {
             None
         };
 
-        // Build set of elements that have at least one relationship (filter orphans)
+        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
+        // Include containers/components as "proxy candidates" so person→container relationships count
+        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
+
+        // Add candidate people
+        for person in &model.people {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) { continue; }
+            }
+            candidate_ids.insert(person.id());
+        }
+
+        // Add candidate software systems AND their containers/components as proxy candidates
+        for system in &model.software_systems {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&system.id()) { continue; }
+            }
+            candidate_ids.insert(system.id());
+            // Also add containers and components as proxy candidates
+            // This allows person→container relationships to count for connectivity
+            for container in &system.containers {
+                candidate_ids.insert(container.id());
+                for component in &container.components {
+                    candidate_ids.insert(component.id());
+                }
+            }
+        }
+
+        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
         let connected_ids: HashSet<ElementId> = model.relationships
             .iter()
+            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
             .flat_map(|rel| [rel.source_id, rel.destination_id])
             .collect();
 
@@ -153,18 +202,11 @@ impl D2Exporter {
         let central_system = model.software_systems.iter()
             .find(|s| s.id() == view.software_system_id);
 
-        // Add people
+        // Step 3: Add elements that are both candidates AND connected within this view
+        // Add people (connected if they OR any container/component they relate to is connected)
         for person in &model.people {
-            // Skip if not in allowed list (when filtering is active)
-            if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&person.id()) {
-                    continue;
-                }
-            }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&person.id()) {
-                continue;
-            }
+            if !candidate_ids.contains(&person.id()) { continue; }
+            if !connected_ids.contains(&person.id()) { continue; }
             element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -179,18 +221,16 @@ impl D2Exporter {
             output.push_str("  style.fill: \"#08427b\"\n  style.font-color: white\n}\n\n");
         }
 
-        // Add software systems
+        // Add software systems (connected if system OR any of its containers/components is connected)
         for system in &model.software_systems {
-            // Skip if not in allowed list (when filtering is active)
-            if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&system.id()) {
-                    continue;
-                }
-            }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&system.id()) {
-                continue;
-            }
+            if !candidate_ids.contains(&system.id()) { continue; }
+            // System is connected if: itself is connected OR any of its containers/components are
+            let system_connected = connected_ids.contains(&system.id()) ||
+                system.containers.iter().any(|c| {
+                    connected_ids.contains(&c.id()) ||
+                    c.components.iter().any(|comp| connected_ids.contains(&comp.id()))
+                });
+            if !system_connected { continue; }
             element_ids.insert(system.id().to_string());
             let id = sanitize_id(&system.id().to_string());
             let desc = system.properties.description.as_deref().unwrap_or("");
@@ -248,9 +288,44 @@ impl D2Exporter {
             None
         };
 
-        // Build set of elements that have at least one relationship (filter orphans)
+        // Find the main system first (needed for candidate collection)
+        let main_system = model.software_systems.iter().find(|s| s.id() == view.software_system_id);
+
+        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
+        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
+
+        // Add candidate people
+        for person in &model.people {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) { continue; }
+            }
+            candidate_ids.insert(person.id());
+        }
+
+        // Add candidate containers from the main system
+        if let Some(system) = main_system {
+            for container in &system.containers {
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&container.id()) { continue; }
+                }
+                candidate_ids.insert(container.id());
+            }
+        }
+
+        // Add candidate external systems
+        for system in &model.software_systems {
+            if system.id() != view.software_system_id {
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&system.id()) { continue; }
+                }
+                candidate_ids.insert(system.id());
+            }
+        }
+
+        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
         let connected_ids: HashSet<ElementId> = model.relationships
             .iter()
+            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
             .flat_map(|rel| [rel.source_id, rel.destination_id])
             .collect();
 
@@ -260,18 +335,11 @@ impl D2Exporter {
 
         output.push_str("direction: down\n\n");
 
+        // Step 3: Add elements that are both candidates AND connected within this view
         // Add people
         for person in &model.people {
-            // Skip if not in allowed list (when filtering is active)
-            if let Some(ref allowed) = allowed_ids {
-                if !allowed.contains(&person.id()) {
-                    continue;
-                }
-            }
-            // Skip orphaned elements (no relationships)
-            if !connected_ids.contains(&person.id()) {
-                continue;
-            }
+            if !candidate_ids.contains(&person.id()) { continue; }
+            if !connected_ids.contains(&person.id()) { continue; }
             element_ids.insert(person.id().to_string());
             let id = sanitize_id(&person.id().to_string());
             let desc = person.properties.description.as_deref().unwrap_or("");
@@ -287,7 +355,7 @@ impl D2Exporter {
         }
 
         // Find the system and add containers as a group
-        if let Some(system) = model.software_systems.iter().find(|s| s.id() == view.software_system_id) {
+        if let Some(system) = main_system {
             let sys_id = sanitize_id(&system.id().to_string());
             output.push_str(&format!(
                 "{}: {{\n  label: \"{}\"\n  style.stroke-dash: 5\n  style.stroke: \"#1168bd\"\n\n",
@@ -296,16 +364,8 @@ impl D2Exporter {
             ));
 
             for container in &system.containers {
-                // Skip if not in allowed list (when filtering is active)
-                if let Some(ref allowed) = allowed_ids {
-                    if !allowed.contains(&container.id()) {
-                        continue;
-                    }
-                }
-                // Skip orphaned elements (no relationships)
-                if !connected_ids.contains(&container.id()) {
-                    continue;
-                }
+                if !candidate_ids.contains(&container.id()) { continue; }
+                if !connected_ids.contains(&container.id()) { continue; }
                 element_ids.insert(container.id().to_string());
                 let container_id = sanitize_id(&container.id().to_string());
                 let desc = container.properties.description.as_deref().unwrap_or("");
@@ -331,16 +391,8 @@ impl D2Exporter {
         // Add external systems
         for system in &model.software_systems {
             if system.id() != view.software_system_id {
-                // Skip if not in allowed list (when filtering is active)
-                if let Some(ref allowed) = allowed_ids {
-                    if !allowed.contains(&system.id()) {
-                        continue;
-                    }
-                }
-                // Skip orphaned elements (no relationships)
-                if !connected_ids.contains(&system.id()) {
-                    continue;
-                }
+                if !candidate_ids.contains(&system.id()) { continue; }
+                if !connected_ids.contains(&system.id()) { continue; }
                 element_ids.insert(system.id().to_string());
                 let id = sanitize_id(&system.id().to_string());
                 let desc = system.properties.description.as_deref().unwrap_or("");
@@ -392,19 +444,7 @@ impl D2Exporter {
             None
         };
 
-        // Build set of elements that have at least one relationship (filter orphans)
-        let connected_ids: HashSet<ElementId> = model.relationships
-            .iter()
-            .flat_map(|rel| [rel.source_id, rel.destination_id])
-            .collect();
-
-        if let Some(ref title) = view.properties.title {
-            output.push_str(&format!("# {}\n\n", title));
-        }
-
-        output.push_str("direction: down\n\n");
-
-        // Find the container and its parent system
+        // Find the container and its parent system first (needed for candidate collection)
         let mut target_container = None;
         let mut parent_system = None;
 
@@ -418,6 +458,53 @@ impl D2Exporter {
             }
         }
 
+        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
+        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
+
+        // Add candidate people
+        for person in &model.people {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&person.id()) { continue; }
+            }
+            candidate_ids.insert(person.id());
+        }
+
+        // Add candidate components from the target container
+        if let Some(container) = target_container {
+            for component in &container.components {
+                if let Some(ref allowed) = allowed_ids {
+                    if !allowed.contains(&component.id()) { continue; }
+                }
+                candidate_ids.insert(component.id());
+            }
+        }
+
+        // Add candidate other containers from the same system
+        if let Some(system) = parent_system {
+            for container in &system.containers {
+                if Some(container.id()) != target_container.map(|c| c.id()) {
+                    if let Some(ref allowed) = allowed_ids {
+                        if !allowed.contains(&container.id()) { continue; }
+                    }
+                    candidate_ids.insert(container.id());
+                }
+            }
+        }
+
+        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
+        let connected_ids: HashSet<ElementId> = model.relationships
+            .iter()
+            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
+            .flat_map(|rel| [rel.source_id, rel.destination_id])
+            .collect();
+
+        if let Some(ref title) = view.properties.title {
+            output.push_str(&format!("# {}\n\n", title));
+        }
+
+        output.push_str("direction: down\n\n");
+
+        // Step 3: Add elements that are both candidates AND connected within this view
         // Add container boundary with components
         if let Some(container) = target_container {
             let container_id = sanitize_id(&container.id().to_string());
@@ -428,16 +515,8 @@ impl D2Exporter {
             ));
 
             for component in &container.components {
-                // Skip if not in allowed list (when filtering is active)
-                if let Some(ref allowed) = allowed_ids {
-                    if !allowed.contains(&component.id()) {
-                        continue;
-                    }
-                }
-                // Skip orphaned elements (no relationships)
-                if !connected_ids.contains(&component.id()) {
-                    continue;
-                }
+                if !candidate_ids.contains(&component.id()) { continue; }
+                if !connected_ids.contains(&component.id()) { continue; }
                 element_ids.insert(component.id().to_string());
                 let comp_id = sanitize_id(&component.id().to_string());
                 let desc = component.properties.description.as_deref().unwrap_or("");
@@ -464,16 +543,8 @@ impl D2Exporter {
         if let Some(system) = parent_system {
             for container in &system.containers {
                 if Some(container.id()) != target_container.map(|c| c.id()) {
-                    // Skip if not in allowed list (when filtering is active)
-                    if let Some(ref allowed) = allowed_ids {
-                        if !allowed.contains(&container.id()) {
-                            continue;
-                        }
-                    }
-                    // Skip orphaned elements (no relationships)
-                    if !connected_ids.contains(&container.id()) {
-                        continue;
-                    }
+                    if !candidate_ids.contains(&container.id()) { continue; }
+                    if !connected_ids.contains(&container.id()) { continue; }
                     element_ids.insert(container.id().to_string());
                     let id = sanitize_id(&container.id().to_string());
                     let desc = container.properties.description.as_deref().unwrap_or("");

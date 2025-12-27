@@ -333,22 +333,41 @@ impl GridLayout {
             .map(|(i, id)| (id.as_str(), i))
             .collect();
 
-        // Simple topological-ish ranking
+        // Filter edges to only include those where both endpoints are in the view
+        let filtered_edges: Vec<_> = edges
+            .iter()
+            .filter(|e| id_to_idx.contains_key(e.source.as_str()) && id_to_idx.contains_key(e.target.as_str()))
+            .collect();
+
+        // Maximum possible rank in a DAG is n-1 (longest path through all nodes)
+        // If we detect ranks exceeding this, we have cycles and should stop
+        let max_possible_rank = node_ids.len().saturating_sub(1).max(1);
+
+        // Simple topological-ish ranking with cycle detection
         let mut changed = true;
         let mut iterations = 0;
         while changed && iterations < 100 {
             changed = false;
             iterations += 1;
 
-            for edge in edges {
+            for edge in &filtered_edges {
                 if let (Some(&source_idx), Some(&target_idx)) =
                     (id_to_idx.get(edge.source.as_str()), id_to_idx.get(edge.target.as_str()))
                 {
                     if ranks[target_idx] <= ranks[source_idx] {
-                        ranks[target_idx] = ranks[source_idx] + 1;
-                        changed = true;
+                        let new_rank = ranks[source_idx] + 1;
+                        // Cap rank to prevent cycles from spiraling
+                        if new_rank <= max_possible_rank {
+                            ranks[target_idx] = new_rank;
+                            changed = true;
+                        }
                     }
                 }
+            }
+
+            // Early exit if max rank reached (likely cycles present)
+            if *ranks.iter().max().unwrap_or(&0) >= max_possible_rank {
+                break;
             }
         }
 
