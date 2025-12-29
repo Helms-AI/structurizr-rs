@@ -2309,7 +2309,7 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
         }
         .view-toolbar button:hover { background: var(--card-hover); }
         .view-toolbar .separator { border-left: 1px solid var(--border-color); height: 20px; }
-        .zoom-controls { display: flex; gap: 5px; align-items: center; }
+        .zoom-controls { display: flex; gap: 5px; align-items: center; margin-left: auto; }
         .zoom-level { font-size: 12px; min-width: 50px; text-align: center; color: var(--text-secondary); }
         .diagram-container { flex: 1; overflow: hidden; position: relative; background: var(--canvas-bg); }
         #diagram-canvas { width: 100%; height: 100%; cursor: grab; }
@@ -2356,10 +2356,10 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
         .minimap .viewport:hover { background: rgba(0,102,204,0.25); }
         .keyboard-help { position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: var(--text-muted); }
         .view-breadcrumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; max-width: 500px; overflow: hidden; }
-        .view-breadcrumb {
+        .breadcrumb {
             display: flex;
             align-items: center;
-            gap: 4px;
+            gap: 6px;
             color: var(--text-secondary);
             text-decoration: none;
             padding: 4px 8px;
@@ -2367,17 +2367,95 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             transition: all 0.15s;
             white-space: nowrap;
         }
-        .view-breadcrumb:hover { background: var(--header-link-hover); color: var(--text-primary); }
-        .view-breadcrumb.current { color: var(--text-primary); font-weight: 500; }
-        .view-breadcrumb-icon {
+        .breadcrumb:hover { background: var(--header-link-hover); color: var(--text-primary); }
+        .breadcrumb.current { color: var(--text-primary); font-weight: 500; }
+        .breadcrumb-icon {
             background: var(--bg-tertiary);
-            padding: 2px 6px;
-            border-radius: 3px;
+            padding: 2px 8px;
+            border-radius: 10px;
             font-size: 10px;
             font-weight: 600;
         }
-        .view-breadcrumb-separator { color: var(--text-muted); font-size: 11px; }
+        .breadcrumb-separator { color: var(--text-muted); font-size: 11px; }
         .drill-indicator { position: absolute; pointer-events: none; }
+        /* Settings button */
+        .settings-btn {
+            background: transparent;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            padding: 6px;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.15s;
+        }
+        .settings-btn:hover { background: var(--header-link-hover); color: var(--text-primary); }
+        .settings-btn svg { width: 18px; height: 18px; }
+        /* Settings modal */
+        .settings-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+        .settings-modal.open { display: flex; }
+        .settings-content {
+            background: var(--card-bg);
+            border-radius: 8px;
+            padding: 20px 24px;
+            min-width: 280px;
+            box-shadow: 0 4px 20px var(--shadow-heavy);
+            border: 1px solid var(--border-color);
+        }
+        .settings-content h3 {
+            margin: 0 0 16px 0;
+            font-size: 16px;
+            color: var(--text-primary);
+        }
+        .settings-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            margin-bottom: 20px;
+        }
+        .settings-group label {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+            font-size: 14px;
+            color: var(--text-primary);
+        }
+        .settings-group input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        .settings-close-btn {
+            width: 100%;
+            padding: 8px 16px;
+            background: var(--bg-tertiary);
+            color: var(--text-primary);
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+        }
+        .settings-close-btn:hover { background: var(--card-hover); }
+        /* Fixed tooltip in top-right */
+        .tooltip.fixed {
+            left: auto !important;
+            right: 20px;
+            top: 60px !important;
+        }
     </style>"##;
 
     let content = format!(r##"
@@ -2394,6 +2472,13 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             <div class="separator"></div>
             <a href="{base_path}/edit/{view_key}">Edit</a>
             <a href="{svg_url}" download="{view_key}.svg">Download SVG</a>
+            <div class="separator"></div>
+            <button class="settings-btn" onclick="openSettings()" title="Settings">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <circle cx="12" cy="12" r="3"></circle>
+                    <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+                </svg>
+            </button>
         </div>
         <div class="diagram-container" id="diagram-container">
             <canvas id="diagram-canvas"></canvas>
@@ -2405,6 +2490,22 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
         </div>
         <div class="keyboard-help">
             Scroll to zoom • Drag to pan • Double-click to drill down • Hover for info • Esc to go back
+        </div>
+        <div class="settings-modal" id="settings-modal" onclick="if(event.target===this)closeSettings()">
+            <div class="settings-content">
+                <h3>Diagram Settings</h3>
+                <div class="settings-group">
+                    <label>
+                        <input type="checkbox" id="setting-tooltips" checked>
+                        Show tooltips on hover
+                    </label>
+                    <label>
+                        <input type="checkbox" id="setting-outbound-arrows">
+                        Show outbound relationship arrows
+                    </label>
+                </div>
+                <button class="settings-close-btn" onclick="closeSettings()">Close</button>
+            </div>
         </div>
     "##, base_path = base_path, view_key = view_key, svg_url = svg_url);
 
@@ -2435,6 +2536,68 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             'custom': 'Cst',
             'image': 'Img'
         }};
+
+        // Settings management
+        const SETTINGS_KEY = 'structurizr-diagram-settings';
+        const defaultSettings = {{
+            tooltipsEnabled: true,
+            outboundArrowsEnabled: false  // OFF by default
+        }};
+
+        function loadSettings() {{
+            try {{
+                const stored = localStorage.getItem(SETTINGS_KEY);
+                if (stored) {{
+                    return {{ ...defaultSettings, ...JSON.parse(stored) }};
+                }}
+            }} catch (e) {{}}
+            return {{ ...defaultSettings }};
+        }}
+
+        function saveSettings(settings) {{
+            try {{
+                localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+            }} catch (e) {{}}
+        }}
+
+        let settings = loadSettings();
+
+        function applySettingsToUI() {{
+            document.getElementById('setting-tooltips').checked = settings.tooltipsEnabled;
+            document.getElementById('setting-outbound-arrows').checked = settings.outboundArrowsEnabled;
+            // Apply fixed class to tooltip if tooltips are enabled
+            const tooltipEl = document.getElementById('tooltip');
+            if (tooltipEl) {{
+                tooltipEl.classList.add('fixed');
+            }}
+        }}
+
+        function openSettings() {{
+            document.getElementById('settings-modal').classList.add('open');
+        }}
+
+        function closeSettings() {{
+            document.getElementById('settings-modal').classList.remove('open');
+        }}
+
+        // Initialize settings UI after DOM is ready
+        document.addEventListener('DOMContentLoaded', () => {{
+            applySettingsToUI();
+
+            document.getElementById('setting-tooltips').addEventListener('change', (e) => {{
+                settings.tooltipsEnabled = e.target.checked;
+                saveSettings(settings);
+                if (!settings.tooltipsEnabled) {{
+                    document.getElementById('tooltip').style.display = 'none';
+                }}
+            }});
+
+            document.getElementById('setting-outbound-arrows').addEventListener('change', (e) => {{
+                settings.outboundArrowsEnabled = e.target.checked;
+                saveSettings(settings);
+                render();
+            }});
+        }});
 
         // Render breadcrumbs
         function renderBreadcrumbs() {{
@@ -2656,6 +2819,8 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
 
         // Render highlight overlays for outbound relationships from hovered element
         function renderRelationshipHighlights() {{
+            // Check if outbound arrows are enabled in settings
+            if (!settings.outboundArrowsEnabled) return;
             if (!hoveredElement) return;
 
             // Find outbound relationships from the hovered element
@@ -2773,6 +2938,11 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
         }}
 
         function showTooltip(element, screenX, screenY) {{
+            // Check if tooltips are enabled in settings
+            if (!settings.tooltipsEnabled) {{
+                tooltip.style.display = 'none';
+                return;
+            }}
             if (element) {{
                 let html = `<h4>${{element.name}}</h4><div class="type">${{element.type}}</div>`;
                 if (element.description) {{
@@ -2785,8 +2955,7 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
                     html += `<div class="drill-hint">Double-click to view ${{element.targetType.toLowerCase()}}s</div>`;
                 }}
                 tooltip.innerHTML = html;
-                tooltip.style.left = (screenX + 15) + 'px';
-                tooltip.style.top = (screenY + 15) + 'px';
+                // Fixed position in top-right corner (CSS handles positioning)
                 tooltip.style.display = 'block';
             }} else {{
                 tooltip.style.display = 'none';
@@ -2874,10 +3043,8 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
                     }}
                     // Re-render to show/hide relationship highlights
                     render();
-                }} else if (element) {{
-                    tooltip.style.left = (e.clientX + 15) + 'px';
-                    tooltip.style.top = (e.clientY + 15) + 'px';
                 }}
+                // Tooltip is now fixed in top-right corner, no position updates needed
             }}
         }});
 
