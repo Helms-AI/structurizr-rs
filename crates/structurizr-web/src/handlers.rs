@@ -2296,6 +2296,8 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             align-items: center;
             gap: 20px;
             border-bottom: 1px solid var(--toolbar-border);
+            position: relative;
+            z-index: 1001;
         }
         .view-toolbar a { color: var(--link-color); text-decoration: none; }
         .view-toolbar a:hover { text-decoration: underline; }
@@ -2355,7 +2357,7 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
         }
         .minimap .viewport:hover { background: rgba(0,102,204,0.25); }
         .keyboard-help { position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: var(--text-muted); }
-        .view-breadcrumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; max-width: 500px; overflow: hidden; }
+        .view-breadcrumbs { display: flex; align-items: center; gap: 6px; font-size: 13px; flex: 1; min-width: 0; overflow: hidden; }
         .breadcrumb {
             display: flex;
             align-items: center;
@@ -2450,18 +2452,17 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             font-size: 14px;
         }
         .settings-close-btn:hover { background: var(--card-hover); }
-        /* Fixed tooltip in top-right */
+        /* Fixed tooltip in top-right, below toolbar */
         .tooltip.fixed {
             left: auto !important;
             right: 20px;
-            top: 60px !important;
+            top: 150px !important;
         }
     </style>"##;
 
     let content = format!(r##"
         <div class="view-toolbar">
             <nav class="view-breadcrumbs" id="breadcrumbs"></nav>
-            <div class="separator"></div>
             <div class="zoom-controls">
                 <button onclick="zoomOut()">−</button>
                 <span class="zoom-level" id="zoom-level">100%</span>
@@ -2660,6 +2661,7 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
         let svgHeight = 0;
         let svgMinX = 0;
         let svgMinY = 0;
+        let relationshipPaths = {{}};  // Map of "sourceId-targetId" -> path data
 
         // Transform state
         let scale = 1;
@@ -2714,6 +2716,32 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
                             svgMinY = parts[1];
                         }}
                     }}
+
+                    // Parse relationship paths from SVG for hover highlighting
+                    const parser = new DOMParser();
+                    const svgDoc = parser.parseFromString(svgText, 'image/svg+xml');
+
+                    // Extract <path> elements with data-source/data-target (orthogonal/curved routing)
+                    svgDoc.querySelectorAll('path.relationship[data-source][data-target]').forEach(path => {{
+                        const key = path.getAttribute('data-source') + '-' + path.getAttribute('data-target');
+                        relationshipPaths[key] = {{
+                            d: path.getAttribute('d'),
+                            routing: path.getAttribute('data-routing') || 'orthogonal'
+                        }};
+                    }});
+
+                    // Extract <line> elements (direct routing)
+                    svgDoc.querySelectorAll('line.relationship[data-source][data-target]').forEach(line => {{
+                        const key = line.getAttribute('data-source') + '-' + line.getAttribute('data-target');
+                        relationshipPaths[key] = {{
+                            x1: parseFloat(line.getAttribute('x1')),
+                            y1: parseFloat(line.getAttribute('y1')),
+                            x2: parseFloat(line.getAttribute('x2')),
+                            y2: parseFloat(line.getAttribute('y2')),
+                            routing: 'direct'
+                        }};
+                    }});
+
                     fitToScreen();
                 }})
                 .catch(() => {{
@@ -2828,63 +2856,38 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
             if (outboundRels.length === 0) return;
 
             ctx.save();
-            ctx.globalAlpha = 0.8;
 
             for (const rel of outboundRels) {{
-                // Find source and target elements
-                const sourceEl = elements.find(el => el.id === rel.source);
-                const targetEl = elements.find(el => el.id === rel.target);
-                if (!sourceEl || !targetEl) continue;
+                // Look up the actual path data from the SVG
+                const key = rel.source + '-' + rel.target;
+                const pathData = relationshipPaths[key];
+                if (!pathData) continue;
 
-                // Calculate connection points (center of elements)
-                const srcX = sourceEl.x - svgMinX + sourceEl.width / 2;
-                const srcY = sourceEl.y - svgMinY + sourceEl.height / 2;
-                const tgtX = targetEl.x - svgMinX + targetEl.width / 2;
-                const tgtY = targetEl.y - svgMinY + targetEl.height / 2;
-
-                // Draw highlight line
+                // Draw the actual path in green (highlighting the existing connector)
                 ctx.strokeStyle = 'rgba(0, 200, 100, 0.9)';
                 ctx.lineWidth = 6;
                 ctx.lineCap = 'round';
+                ctx.lineJoin = 'round';
                 ctx.setLineDash([]);
 
-                ctx.beginPath();
-                ctx.moveTo(srcX, srcY);
-                ctx.lineTo(tgtX, tgtY);
-                ctx.stroke();
-
-                // Draw arrow head at target
-                const angle = Math.atan2(tgtY - srcY, tgtX - srcX);
-                const arrowLength = 15;
-                ctx.beginPath();
-                ctx.moveTo(tgtX, tgtY);
-                ctx.lineTo(
-                    tgtX - arrowLength * Math.cos(angle - Math.PI / 6),
-                    tgtY - arrowLength * Math.sin(angle - Math.PI / 6)
-                );
-                ctx.lineTo(
-                    tgtX - arrowLength * Math.cos(angle + Math.PI / 6),
-                    tgtY - arrowLength * Math.sin(angle + Math.PI / 6)
-                );
-                ctx.closePath();
-                ctx.fillStyle = 'rgba(0, 200, 100, 0.9)';
-                ctx.fill();
-
-                // Draw relationship description label
-                if (rel.description) {{
-                    const midX = (srcX + tgtX) / 2;
-                    const midY = (srcY + tgtY) / 2 - 10;
-                    ctx.font = 'bold 12px system-ui, sans-serif';
-                    ctx.textAlign = 'center';
-                    const labelWidth = ctx.measureText(rel.description).width + 12;
-
-                    ctx.fillStyle = 'rgba(0, 200, 100, 0.95)';
+                if (pathData.routing === 'direct') {{
+                    // Draw line for direct routing
+                    const x1 = pathData.x1 - svgMinX;
+                    const y1 = pathData.y1 - svgMinY;
+                    const x2 = pathData.x2 - svgMinX;
+                    const y2 = pathData.y2 - svgMinY;
                     ctx.beginPath();
-                    ctx.roundRect(midX - labelWidth/2, midY - 10, labelWidth, 20, 4);
-                    ctx.fill();
-
-                    ctx.fillStyle = 'white';
-                    ctx.fillText(rel.description, midX, midY + 4);
+                    ctx.moveTo(x1, y1);
+                    ctx.lineTo(x2, y2);
+                    ctx.stroke();
+                }} else {{
+                    // Draw SVG path using Path2D for orthogonal/curved routing
+                    // Adjust path coordinates by translating context
+                    ctx.save();
+                    ctx.translate(-svgMinX, -svgMinY);
+                    const path = new Path2D(pathData.d);
+                    ctx.stroke(path);
+                    ctx.restore();
                 }}
             }}
 
