@@ -29,6 +29,21 @@ User-facing documentation for structurizr-rs features:
 
 Implementation details and architecture documentation:
 
+### Core Rendering System
+
+| Document | Description |
+|----------|-------------|
+| [SVG Rendering Pipeline](development/svg-rendering-pipeline.md) | Complete SVG rendering system architecture and pipeline |
+| [Layout Algorithms](development/layout-algorithms.md) | Grid, Adaptive, and Sugiyama hierarchical layout implementations |
+| [Style System](development/style-system.md) | Cascading style resolution and theming |
+| [Shape Rendering](development/shape-rendering.md) | All 14 shape types and their SVG implementations |
+| [Edge Routing](development/edge-routing.md) | Relationship routing strategies (Direct, Orthogonal, Curved) |
+| [Text Handling](development/text-handling.md) | Text rendering, word wrapping, and collision detection |
+| [Coordinate Systems](development/coordinate-systems.md) | Positioning, transformations, and viewBox management |
+| [SVG Integration Patterns](development/svg-integration-patterns.md) | CLI, Web, and export integration patterns |
+
+### Feature Implementations
+
 | Document | Description |
 |----------|-------------|
 | [Animation Implementation](development/animation-impl.md) | How dynamic view animation works |
