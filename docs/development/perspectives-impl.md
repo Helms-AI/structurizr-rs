@@ -8,7 +8,7 @@ This document describes the implementation of the perspectives feature for struc
 
 ### 1. Core Data Structures
 
-#### `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/workspace.rs`
+#### `crates/structurizr-core/src/workspace.rs`
 
 **Added:**
 - `Perspective` struct with name and optional description
@@ -26,7 +26,7 @@ pub struct Perspective {
 }
 ```
 
-#### `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/model.rs`
+#### `crates/structurizr-core/src/model.rs`
 
 **Added:**
 - `perspectives: Vec<String>` field to `ElementProperties`
@@ -36,7 +36,7 @@ pub struct Perspective {
 
 Elements with empty perspectives list are visible in all perspectives.
 
-#### `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/lib.rs`
+#### `crates/structurizr-core/src/lib.rs`
 
 **Updated exports:**
 ```rust
@@ -45,7 +45,7 @@ pub use workspace::{Perspective, Workspace};
 
 ### 2. Web Handler Support
 
-#### `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-web/src/handlers.rs`
+#### `crates/structurizr-web/src/handlers.rs`
 
 **Added:**
 
@@ -96,7 +96,7 @@ pub async fn render_svg(
 
 ### 3. Testing
 
-#### `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/perspective_tests.rs`
+#### `crates/structurizr-core/src/perspective_tests.rs`
 
 Comprehensive test suite covering:
 - Perspective creation
@@ -109,7 +109,7 @@ All 8 tests pass successfully.
 
 ### 4. Documentation and Examples
 
-#### `/Users/kon1790/GitHub/structurizr-rs/PERSPECTIVES.md`
+#### `PERSPECTIVES.md`
 
 Comprehensive documentation including:
 - Feature overview
@@ -119,7 +119,7 @@ Comprehensive documentation including:
 - Use cases for different stakeholder types
 - Future enhancement ideas
 
-#### `/Users/kon1790/GitHub/structurizr-rs/workspaces/perspectives_example.rs`
+#### `workspaces/perspectives_example.rs`
 
 Working example demonstrating:
 - Creating an e-commerce system
@@ -224,16 +224,16 @@ Potential improvements identified during implementation:
 ## Files Modified/Created
 
 ### Modified:
-1. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/model.rs`
-2. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/workspace.rs`
-3. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/lib.rs`
-4. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-web/src/handlers.rs`
+1. `crates/structurizr-core/src/model.rs`
+2. `crates/structurizr-core/src/workspace.rs`
+3. `crates/structurizr-core/src/lib.rs`
+4. `crates/structurizr-web/src/handlers.rs`
 
 ### Created:
-1. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-core/src/perspective_tests.rs`
-2. `/Users/kon1790/GitHub/structurizr-rs/workspaces/perspectives_example.rs`
-3. `/Users/kon1790/GitHub/structurizr-rs/PERSPECTIVES.md`
-4. `/Users/kon1790/GitHub/structurizr-rs/PERSPECTIVES_IMPLEMENTATION.md` (this file)
+1. `crates/structurizr-core/src/perspective_tests.rs`
+2. `workspaces/perspectives_example.rs`
+3. `PERSPECTIVES.md`
+4. `PERSPECTIVES_IMPLEMENTATION.md` (this file)
 
 ## Build Status
 

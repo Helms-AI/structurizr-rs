@@ -6,7 +6,7 @@ Implemented an animated viewer for dynamic views in structurizr-web that shows s
 
 ## Files Modified
 
-### 1. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-web/src/handlers.rs`
+### 1. `crates/structurizr-web/src/handlers.rs`
 
 Added new handler function `view_dynamic_animated` that:
 - Retrieves the workspace and finds the specified dynamic view
@@ -25,7 +25,7 @@ Key features:
   - R: Reset
   - 0-9: Jump to specific step
 
-### 2. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-web/src/server.rs`
+### 2. `crates/structurizr-web/src/server.rs`
 
 Added new route:
 ```rust
@@ -34,7 +34,7 @@ Added new route:
 
 This creates the endpoint `/view/{view_key}/animate` for accessing animated dynamic views.
 
-### 3. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-web/src/handlers.rs` (index handler)
+### 3. `crates/structurizr-web/src/handlers.rs` (index handler)
 
 Enhanced the home page to show an "Animate" link for dynamic views:
 - Collects all dynamic view keys in a HashSet
@@ -92,7 +92,7 @@ Space to play/pause • ← → to step • R to reset • 1-9 to jump to step
 
 ## Testing
 
-A test DSL file has been created at `/Users/kon1790/GitHub/structurizr-rs/test_dynamic_animation.dsl` with:
+A test DSL file has been created at `test_dynamic_animation.dsl` with:
 - E-commerce system with multiple containers
 - Dynamic view showing 10-step order placement flow
 - Customer → Web App → API Gateway → Services → Database → Payment Gateway

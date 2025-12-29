@@ -15,7 +15,7 @@ A legend rendering system has been added to the SVG renderer that automatically 
 
 ### Location
 
-File: `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-render/src/svg.rs`
+File: `crates/structurizr-render/src/svg.rs`
 
 ### Key Components
 
@@ -201,7 +201,7 @@ Three example files were created:
 
 ## Files Modified
 
-1. `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-render/src/svg.rs`
+1. `crates/structurizr-render/src/svg.rs`
    - Added `show_legend` field to `SvgRenderer`
    - Added three public API methods
    - Added two legend data structures
@@ -211,10 +211,10 @@ Three example files were created:
 
 ## Files Created
 
-1. `/Users/kon1790/GitHub/structurizr-rs/workspaces/render_with_legend.rs`
-2. `/Users/kon1790/GitHub/structurizr-rs/workspaces/legend_example.dsl`
-3. `/Users/kon1790/GitHub/structurizr-rs/workspaces/README_legend.md`
-4. `/Users/kon1790/GitHub/structurizr-rs/LEGEND_IMPLEMENTATION.md` (this file)
+1. `workspaces/render_with_legend.rs`
+2. `workspaces/legend_example.dsl`
+3. `workspaces/README_legend.md`
+4. `LEGEND_IMPLEMENTATION.md` (this file)
 
 ## Build Verification
 

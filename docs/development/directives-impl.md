@@ -17,7 +17,7 @@ All DSL directives that were previously parsed but not executed have now been im
 - Works in: names, descriptions, technologies, view properties
 
 **Files Modified:**
-- `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-dsl/src/parser.rs`
+- `crates/structurizr-dsl/src/parser.rs`
   - Added `substitute_constants()` function
   - Added `apply_constants_to_ast()` and helper functions
   - Modified `build_workspace()` to process constants first
@@ -37,7 +37,7 @@ All DSL directives that were previously parsed but not executed have now been im
 - Implied relationships have empty descriptions
 
 **Files Modified:**
-- `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-dsl/src/parser.rs`
+- `crates/structurizr-dsl/src/parser.rs`
   - Added `generate_implied_relationships()` function
   - Modified `build_workspace()` to call after relationship building
 
@@ -56,11 +56,11 @@ All DSL directives that were previously parsed but not executed have now been im
 - Paths are relative to the including file's directory
 
 **Files Modified:**
-- `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-dsl/src/parser.rs`
+- `crates/structurizr-dsl/src/parser.rs`
   - Added `parse_with_base_path()` public function
   - Added `process_includes()` function
   - Modified `parse()` to call `parse_with_base_path()`
-- `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-dsl/src/lib.rs`
+- `crates/structurizr-dsl/src/lib.rs`
   - Exported `parse_with_base_path`
 
 **Notes:**
@@ -75,7 +75,7 @@ All DSL directives that were previously parsed but not executed have now been im
 - Can be retrieved using `workspace.get_property("structurizr.docs")`
 
 **Files Modified:**
-- `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-dsl/src/parser.rs`
+- `crates/structurizr-dsl/src/parser.rs`
   - Added property storage in `build_workspace()`
 
 **Tests:**
@@ -88,7 +88,7 @@ All DSL directives that were previously parsed but not executed have now been im
 - Can be retrieved using `workspace.get_property("structurizr.adrs")`
 
 **Files Modified:**
-- `/Users/kon1790/GitHub/structurizr-rs/crates/structurizr-dsl/src/parser.rs`
+- `crates/structurizr-dsl/src/parser.rs`
   - Added property storage in `build_workspace()`
 
 **Tests:**
@@ -156,14 +156,14 @@ All 16 tests pass:
 ## Examples
 
 ### Example DSL File
-- `/Users/kon1790/GitHub/structurizr-rs/workspaces/directives_example.dsl`
+- `workspaces/directives_example.dsl`
   - Demonstrates all directive features
   - Shows constants, implied relationships, and property storage
 
 ## Documentation
 
 ### User Documentation
-- `/Users/kon1790/GitHub/structurizr-rs/DIRECTIVES.md`
+- `DIRECTIVES.md`
   - Complete user guide for all directives
   - Syntax, usage examples, and API documentation
   - Implementation details and limitations
