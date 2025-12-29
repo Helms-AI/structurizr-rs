@@ -3530,6 +3530,430 @@ fn generate_editor_html(workspace: &Workspace, view_key: &str, base_path: &str, 
         let undoStack = [];
         let redoStack = [];
 
+        // Connector manager for real-time connector updates during drag
+        let connectorManager = null;
+        let pendingConnectorUpdate = null;
+
+        class ConnectorManager {{
+            constructor() {{
+                this.connectors = new Map();      // connectorKey -> {{element, sourceId, targetId, routingType}}
+                this.elementConnectors = new Map(); // elementId -> Set<connectorKey>
+                this.elementBounds = new Map();    // elementId -> {{baseX, baseY, width, height}}
+                this.connectorLabels = new Map();  // connectorKey -> {{descElement, techElement}}
+            }}
+
+            // Index all connectors from SVG
+            indexConnectors(svg) {{
+                svg.querySelectorAll('[data-source][data-target]').forEach(el => {{
+                    const sourceId = el.getAttribute('data-source');
+                    const targetId = el.getAttribute('data-target');
+                    const key = `${{sourceId}}_${{targetId}}`;
+                    const routingType = el.getAttribute('data-routing') || 'direct';
+
+                    this.connectors.set(key, {{
+                        element: el,
+                        sourceId,
+                        targetId,
+                        type: el.tagName.toLowerCase(),
+                        routingType
+                    }});
+
+                    // Build reverse index
+                    if (!this.elementConnectors.has(sourceId)) {{
+                        this.elementConnectors.set(sourceId, new Set());
+                    }}
+                    this.elementConnectors.get(sourceId).add(key);
+
+                    if (!this.elementConnectors.has(targetId)) {{
+                        this.elementConnectors.set(targetId, new Set());
+                    }}
+                    this.elementConnectors.get(targetId).add(key);
+                }});
+                console.log('Indexed', this.connectors.size, 'connectors');
+            }}
+
+            // Index all draggable elements
+            indexElements(svg) {{
+                svg.querySelectorAll('.draggable-element').forEach(group => {{
+                    const elementId = group.getAttribute('data-element-id');
+                    // Find the shape element (rect, ellipse, polygon, etc.)
+                    const shape = group.querySelector('rect, ellipse, polygon, circle, path');
+                    if (shape) {{
+                        let bounds;
+                        if (shape.tagName === 'rect') {{
+                            bounds = {{
+                                baseX: parseFloat(shape.getAttribute('x')) || 0,
+                                baseY: parseFloat(shape.getAttribute('y')) || 0,
+                                width: parseFloat(shape.getAttribute('width')) || 0,
+                                height: parseFloat(shape.getAttribute('height')) || 0
+                            }};
+                        }} else if (shape.tagName === 'ellipse') {{
+                            const cx = parseFloat(shape.getAttribute('cx')) || 0;
+                            const cy = parseFloat(shape.getAttribute('cy')) || 0;
+                            const rx = parseFloat(shape.getAttribute('rx')) || 0;
+                            const ry = parseFloat(shape.getAttribute('ry')) || 0;
+                            bounds = {{
+                                baseX: cx - rx,
+                                baseY: cy - ry,
+                                width: rx * 2,
+                                height: ry * 2
+                            }};
+                        }} else if (shape.tagName === 'circle') {{
+                            const cx = parseFloat(shape.getAttribute('cx')) || 0;
+                            const cy = parseFloat(shape.getAttribute('cy')) || 0;
+                            const r = parseFloat(shape.getAttribute('r')) || 0;
+                            bounds = {{
+                                baseX: cx - r,
+                                baseY: cy - r,
+                                width: r * 2,
+                                height: r * 2
+                            }};
+                        }} else {{
+                            // Fallback: use getBBox if available
+                            try {{
+                                const bbox = shape.getBBox();
+                                bounds = {{
+                                    baseX: bbox.x,
+                                    baseY: bbox.y,
+                                    width: bbox.width,
+                                    height: bbox.height
+                                }};
+                            }} catch (e) {{
+                                bounds = {{ baseX: 0, baseY: 0, width: 100, height: 80 }};
+                            }}
+                        }}
+                        this.elementBounds.set(elementId, bounds);
+                    }}
+                }});
+                console.log('Indexed', this.elementBounds.size, 'element bounds');
+            }}
+
+            // Get element rect with current transform applied
+            getEffectiveRect(elementId) {{
+                const base = this.elementBounds.get(elementId);
+                if (!base) return null;
+
+                const group = document.querySelector(`[data-element-id="${{elementId}}"]`);
+                const transform = group?.getAttribute('transform') || 'translate(0, 0)';
+                const match = transform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+                const offsetX = match ? parseFloat(match[1]) : 0;
+                const offsetY = match ? parseFloat(match[2]) : 0;
+
+                return {{
+                    x: base.baseX + offsetX,
+                    y: base.baseY + offsetY,
+                    width: base.width,
+                    height: base.height,
+                    cx: base.baseX + offsetX + base.width / 2,
+                    cy: base.baseY + offsetY + base.height / 2
+                }};
+            }}
+
+            // Update all connectors attached to an element
+            updateConnectorsForElement(elementId) {{
+                const connectorKeys = this.elementConnectors.get(elementId);
+                if (!connectorKeys) return;
+
+                for (const key of connectorKeys) {{
+                    this.updateConnector(key);
+                }}
+            }}
+
+            updateConnector(key) {{
+                const connector = this.connectors.get(key);
+                if (!connector) return;
+
+                const sourceRect = this.getEffectiveRect(connector.sourceId);
+                const targetRect = this.getEffectiveRect(connector.targetId);
+
+                if (!sourceRect || !targetRect) return;
+
+                switch (connector.routingType) {{
+                    case 'direct':
+                        this.updateDirectConnector(key, connector, sourceRect, targetRect);
+                        break;
+                    case 'curved':
+                        this.updateCurvedConnector(key, connector, sourceRect, targetRect);
+                        break;
+                    case 'orthogonal':
+                        this.updateOrthogonalConnector(key, connector, sourceRect, targetRect);
+                        break;
+                }}
+            }}
+
+            // Line-rectangle intersection calculation
+            lineRectIntersection(fromX, fromY, toX, toY, rect) {{
+                const {{ x, y, width, height }} = rect;
+                const dx = toX - fromX;
+                const dy = toY - fromY;
+
+                if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) {{
+                    return {{ x: fromX, y: fromY }};
+                }}
+
+                // Check all 4 edges
+                const edges = [
+                    {{ t: dx !== 0 ? (x - fromX) / dx : Infinity, edge: 'left', getCoord: (t) => ({{ x: x, y: fromY + t * dy }}), min: y, max: y + height, isY: true }},
+                    {{ t: dx !== 0 ? (x + width - fromX) / dx : Infinity, edge: 'right', getCoord: (t) => ({{ x: x + width, y: fromY + t * dy }}), min: y, max: y + height, isY: true }},
+                    {{ t: dy !== 0 ? (y - fromY) / dy : Infinity, edge: 'top', getCoord: (t) => ({{ x: fromX + t * dx, y: y }}), min: x, max: x + width, isY: false }},
+                    {{ t: dy !== 0 ? (y + height - fromY) / dy : Infinity, edge: 'bottom', getCoord: (t) => ({{ x: fromX + t * dx, y: y + height }}), min: x, max: x + width, isY: false }}
+                ];
+
+                let result = {{ x: toX, y: toY }};
+                let bestT = Infinity;
+
+                for (const e of edges) {{
+                    if (e.t > 0.001 && e.t < 1) {{
+                        const coord = e.getCoord(e.t);
+                        const checkVal = e.isY ? coord.y : coord.x;
+                        if (checkVal >= e.min && checkVal <= e.max) {{
+                            if (e.t < bestT) {{
+                                bestT = e.t;
+                                result = coord;
+                            }}
+                        }}
+                    }}
+                }}
+
+                return result;
+            }}
+
+            // Direct routing - simple line
+            updateDirectConnector(key, connector, sourceRect, targetRect) {{
+                const start = this.lineRectIntersection(
+                    targetRect.cx, targetRect.cy, sourceRect.cx, sourceRect.cy, sourceRect
+                );
+                const end = this.lineRectIntersection(
+                    sourceRect.cx, sourceRect.cy, targetRect.cx, targetRect.cy, targetRect
+                );
+
+                if (connector.type === 'line') {{
+                    connector.element.setAttribute('x1', start.x.toFixed(1));
+                    connector.element.setAttribute('y1', start.y.toFixed(1));
+                    connector.element.setAttribute('x2', end.x.toFixed(1));
+                    connector.element.setAttribute('y2', end.y.toFixed(1));
+                }} else {{
+                    connector.element.setAttribute('d', `M ${{start.x.toFixed(1)}} ${{start.y.toFixed(1)}} L ${{end.x.toFixed(1)}} ${{end.y.toFixed(1)}}`);
+                }}
+
+                // Update labels to follow the connector
+                this.updateLabelPosition(key, start, end);
+            }}
+
+            // Curved routing - cubic Bezier
+            updateCurvedConnector(key, connector, sourceRect, targetRect) {{
+                const start = this.lineRectIntersection(
+                    targetRect.cx, targetRect.cy, sourceRect.cx, sourceRect.cy, sourceRect
+                );
+                const end = this.lineRectIntersection(
+                    sourceRect.cx, sourceRect.cy, targetRect.cx, targetRect.cy, targetRect
+                );
+
+                const dx = end.x - start.x;
+                const dy = end.y - start.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+
+                if (length < 10) {{
+                    // Too close, use straight line
+                    connector.element.setAttribute('d', `M ${{start.x.toFixed(1)}} ${{start.y.toFixed(1)}} L ${{end.x.toFixed(1)}} ${{end.y.toFixed(1)}}`);
+                    this.updateLabelPosition(key, start, end);
+                    return;
+                }}
+
+                // Unit vector and perpendicular
+                const ux = dx / length;
+                const uy = dy / length;
+                const perpX = -uy;
+                const perpY = ux;
+
+                // Control point distance and curve offset
+                const ctrlDist = length / 3;
+                const baseCurveOffset = Math.min(Math.max(length * 0.15, 10), 50);
+
+                // Control points
+                const ctrl1x = start.x + ux * ctrlDist + perpX * baseCurveOffset;
+                const ctrl1y = start.y + uy * ctrlDist + perpY * baseCurveOffset;
+                const ctrl2x = end.x - ux * ctrlDist + perpX * baseCurveOffset;
+                const ctrl2y = end.y - uy * ctrlDist + perpY * baseCurveOffset;
+
+                connector.element.setAttribute('d',
+                    `M ${{start.x.toFixed(1)}} ${{start.y.toFixed(1)}} C ${{ctrl1x.toFixed(1)}} ${{ctrl1y.toFixed(1)}} ${{ctrl2x.toFixed(1)}} ${{ctrl2y.toFixed(1)}} ${{end.x.toFixed(1)}} ${{end.y.toFixed(1)}}`
+                );
+
+                // Update labels to follow the connector
+                this.updateLabelPosition(key, start, end);
+            }}
+
+            // Orthogonal routing - L or Z shaped paths
+            updateOrthogonalConnector(key, connector, sourceRect, targetRect) {{
+                const portClearance = 20;
+
+                // Determine primary direction
+                const deltaY = targetRect.cy - sourceRect.cy;
+                const deltaX = targetRect.cx - sourceRect.cx;
+
+                let waypoints = [];
+
+                if (Math.abs(deltaY) > Math.abs(deltaX)) {{
+                    // Primarily vertical
+                    const exitY = deltaY > 0 ? sourceRect.y + sourceRect.height : sourceRect.y;
+                    const entryY = deltaY > 0 ? targetRect.y : targetRect.y + targetRect.height;
+
+                    const startX = sourceRect.cx;
+                    const startY = exitY;
+                    const endX = targetRect.cx;
+                    const endY = entryY;
+
+                    const midY = (startY + endY) / 2;
+
+                    waypoints = [
+                        {{ x: startX, y: startY }},
+                        {{ x: startX, y: midY }},
+                        {{ x: endX, y: midY }},
+                        {{ x: endX, y: endY }}
+                    ];
+                }} else {{
+                    // Primarily horizontal
+                    const exitX = deltaX > 0 ? sourceRect.x + sourceRect.width : sourceRect.x;
+                    const entryX = deltaX > 0 ? targetRect.x : targetRect.x + targetRect.width;
+
+                    const startX = exitX;
+                    const startY = sourceRect.cy;
+                    const endX = entryX;
+                    const endY = targetRect.cy;
+
+                    const midX = (startX + endX) / 2;
+
+                    waypoints = [
+                        {{ x: startX, y: startY }},
+                        {{ x: midX, y: startY }},
+                        {{ x: midX, y: endY }},
+                        {{ x: endX, y: endY }}
+                    ];
+                }}
+
+                // Simplify path (remove collinear points)
+                waypoints = this.simplifyPath(waypoints);
+
+                // Build path string
+                let d = `M ${{waypoints[0].x.toFixed(1)}} ${{waypoints[0].y.toFixed(1)}}`;
+                for (let i = 1; i < waypoints.length; i++) {{
+                    d += ` L ${{waypoints[i].x.toFixed(1)}} ${{waypoints[i].y.toFixed(1)}}`;
+                }}
+
+                connector.element.setAttribute('d', d);
+
+                // Update labels to follow the connector (use first and last waypoints)
+                const start = waypoints[0];
+                const end = waypoints[waypoints.length - 1];
+                this.updateLabelPosition(key, start, end);
+            }}
+
+            simplifyPath(waypoints) {{
+                if (waypoints.length <= 2) return waypoints;
+
+                const result = [waypoints[0]];
+                for (let i = 1; i < waypoints.length - 1; i++) {{
+                    const prev = result[result.length - 1];
+                    const curr = waypoints[i];
+                    const next = waypoints[i + 1];
+
+                    const isHorizontal = Math.abs(prev.y - curr.y) < 0.1 && Math.abs(curr.y - next.y) < 0.1;
+                    const isVertical = Math.abs(prev.x - curr.x) < 0.1 && Math.abs(curr.x - next.x) < 0.1;
+
+                    if (!isHorizontal && !isVertical) {{
+                        result.push(curr);
+                    }}
+                }}
+                result.push(waypoints[waypoints.length - 1]);
+                return result;
+            }}
+
+            // Index all relationship labels from SVG
+            indexLabels(svg) {{
+                svg.querySelectorAll('.relationship-label').forEach(el => {{
+                    const sourceId = el.getAttribute('data-source');
+                    const targetId = el.getAttribute('data-target');
+                    const labelType = el.getAttribute('data-label-type');
+                    if (!sourceId || !targetId) return;
+
+                    const key = `${{sourceId}}_${{targetId}}`;
+
+                    if (!this.connectorLabels.has(key)) {{
+                        this.connectorLabels.set(key, {{}});
+                    }}
+                    const labels = this.connectorLabels.get(key);
+                    if (labelType === 'description') {{
+                        labels.descElement = el;
+                    }} else if (labelType === 'technology') {{
+                        labels.techElement = el;
+                    }}
+                }});
+                console.log('Indexed', this.connectorLabels.size, 'connector label groups');
+            }}
+
+            // Update label positions for a connector
+            updateLabelPosition(key, startPoint, endPoint) {{
+                const labels = this.connectorLabels.get(key);
+                if (!labels) return;
+
+                // Calculate midpoint
+                const midX = (startPoint.x + endPoint.x) / 2;
+                const midY = (startPoint.y + endPoint.y) / 2;
+
+                // Calculate angle for rotation
+                const dx = endPoint.x - startPoint.x;
+                const dy = endPoint.y - startPoint.y;
+                const length = Math.sqrt(dx * dx + dy * dy);
+
+                // Calculate angle in degrees
+                let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+                // Normalize angle for readability (avoid upside-down text)
+                if (angle > 90 || angle < -90) {{
+                    angle += 180;
+                }}
+
+                // Calculate perpendicular offset direction
+                const perpX = length > 0.1 ? -dy / length : 0;
+                const perpY = length > 0.1 ? dx / length : 0;
+
+                // Update description label (above the line)
+                if (labels.descElement) {{
+                    const offset = -12;  // Above the line
+                    const labelX = midX + perpX * offset;
+                    const labelY = midY + perpY * offset;
+
+                    labels.descElement.setAttribute('x', labelX.toFixed(1));
+                    labels.descElement.setAttribute('y', labelY.toFixed(1));
+                    labels.descElement.setAttribute('transform',
+                        `rotate(${{angle.toFixed(1)}}, ${{labelX.toFixed(1)}}, ${{labelY.toFixed(1)}})`);
+                }}
+
+                // Update technology label (below the line)
+                if (labels.techElement) {{
+                    const offset = 18;  // Below the line (accounts for font height)
+                    const labelX = midX + perpX * offset;
+                    const labelY = midY + perpY * offset;
+
+                    labels.techElement.setAttribute('x', labelX.toFixed(1));
+                    labels.techElement.setAttribute('y', labelY.toFixed(1));
+                    labels.techElement.setAttribute('transform',
+                        `rotate(${{angle.toFixed(1)}}, ${{labelX.toFixed(1)}}, ${{labelY.toFixed(1)}})`);
+                }}
+            }}
+        }}
+
+        // Schedule connector updates with requestAnimationFrame for performance
+        function scheduleConnectorUpdate(elementId) {{
+            if (pendingConnectorUpdate) return;
+            pendingConnectorUpdate = requestAnimationFrame(() => {{
+                if (connectorManager) {{
+                    connectorManager.updateConnectorsForElement(elementId);
+                }}
+                pendingConnectorUpdate = null;
+            }});
+        }}
+
         const container = document.getElementById('canvas-container');
         const wrapper = document.getElementById('svg-wrapper');
         const statusEl = document.getElementById('status');
@@ -3659,6 +4083,12 @@ fn generate_editor_html(workspace: &Workspace, view_key: &str, base_path: &str, 
 
                 // Set up drag handlers for elements
                 setupDragHandlers();
+
+                // Initialize connector manager for real-time connector updates
+                connectorManager = new ConnectorManager();
+                connectorManager.indexConnectors(wrapper);
+                connectorManager.indexElements(wrapper);
+                connectorManager.indexLabels(wrapper);
             }} catch (error) {{
                 console.error('Failed to load SVG:', error);
             }}
@@ -3732,6 +4162,10 @@ fn generate_editor_html(workspace: &Workspace, view_key: &str, base_path: &str, 
 
                 // Update element transform
                 selectedElement.setAttribute('transform', `translate(${{newX}}, ${{newY}})`);
+
+                // Update connectors attached to this element in real-time
+                const elementId = selectedElement.getAttribute('data-element-id');
+                scheduleConnectorUpdate(elementId);
             }} else if (isPanning) {{
                 // Pan the canvas (like viewer)
                 offsetX = panStartOffsetX + (e.clientX - panStartX);

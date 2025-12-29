@@ -247,90 +247,95 @@ fn extract_adr_id(filename: &str) -> String {
 }
 
 /// Load documentation files from the directory specified by !docs and !adrs directives.
+/// Defaults to "docs" and "adrs" directories if not explicitly specified.
 pub async fn load_documentation(workspace: &mut Workspace, data_dir: &std::path::Path) -> crate::Result<()> {
-    // Load docs if !docs directive was specified
-    if let Some(docs_path) = workspace.get_property("structurizr.docs").cloned() {
-        let docs_dir = data_dir.join(&docs_path);
-        if docs_dir.exists() && docs_dir.is_dir() {
-            let mut entries: Vec<_> = Vec::new();
-            let mut read_dir = tokio::fs::read_dir(&docs_dir).await?;
-            while let Some(entry) = read_dir.next_entry().await? {
-                entries.push(entry);
-            }
+    // Load docs - defaults to "docs" if !docs directive was not specified
+    let docs_path = workspace
+        .get_property("structurizr.docs")
+        .cloned()
+        .unwrap_or_else(|| "docs".to_string());
+    let docs_dir = data_dir.join(&docs_path);
+    if docs_dir.exists() && docs_dir.is_dir() {
+        let mut entries: Vec<_> = Vec::new();
+        let mut read_dir = tokio::fs::read_dir(&docs_dir).await?;
+        while let Some(entry) = read_dir.next_entry().await? {
+            entries.push(entry);
+        }
 
-            // Sort entries by filename for consistent ordering
-            entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        // Sort entries by filename for consistent ordering
+        entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
-            let mut order = 1u32;
-            for entry in entries {
-                let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "md") {
-                    let content = tokio::fs::read_to_string(&path).await?;
-                    let filename = path.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("Untitled");
+        let mut order = 1u32;
+        for entry in entries {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "md") {
+                let content = tokio::fs::read_to_string(&path).await?;
+                let filename = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("Untitled");
 
-                    // Use "index" as a special case for the main page
-                    // Strip numeric prefix (e.g., "001_" or "002-") from filename
-                    let title = if filename.to_lowercase() == "index" {
-                        Some("Overview".to_string())
-                    } else {
-                        let clean_name = filename
-                            .trim_start_matches(|c: char| c.is_ascii_digit())
-                            .trim_start_matches(|c: char| c == '_' || c == '-');
-                        Some(titlecase(&clean_name.replace("-", " ").replace("_", " ")))
-                    };
+                // Use "index" as a special case for the main page
+                // Strip numeric prefix (e.g., "001_" or "002-") from filename
+                let title = if filename.to_lowercase() == "index" {
+                    Some("Overview".to_string())
+                } else {
+                    let clean_name = filename
+                        .trim_start_matches(|c: char| c.is_ascii_digit())
+                        .trim_start_matches(|c: char| c == '_' || c == '-');
+                    Some(titlecase(&clean_name.replace("-", " ").replace("_", " ")))
+                };
 
-                    workspace.documentation.sections.push(DocumentationSection {
-                        title,
-                        content,
-                        format: DocumentationFormat::Markdown,
-                        order,
-                    });
-                    order += 1;
-                }
+                workspace.documentation.sections.push(DocumentationSection {
+                    title,
+                    content,
+                    format: DocumentationFormat::Markdown,
+                    order,
+                });
+                order += 1;
             }
         }
     }
 
-    // Load ADRs if !adrs directive was specified
-    if let Some(adrs_path) = workspace.get_property("structurizr.adrs").cloned() {
-        let adrs_dir = data_dir.join(&adrs_path);
-        if adrs_dir.exists() && adrs_dir.is_dir() {
-            let mut entries: Vec<_> = Vec::new();
-            let mut read_dir = tokio::fs::read_dir(&adrs_dir).await?;
-            while let Some(entry) = read_dir.next_entry().await? {
-                entries.push(entry);
-            }
+    // Load ADRs - defaults to "adrs" if !adrs directive was not specified
+    let adrs_path = workspace
+        .get_property("structurizr.adrs")
+        .cloned()
+        .unwrap_or_else(|| "adrs".to_string());
+    let adrs_dir = data_dir.join(&adrs_path);
+    if adrs_dir.exists() && adrs_dir.is_dir() {
+        let mut entries: Vec<_> = Vec::new();
+        let mut read_dir = tokio::fs::read_dir(&adrs_dir).await?;
+        while let Some(entry) = read_dir.next_entry().await? {
+            entries.push(entry);
+        }
 
-            // Sort entries by filename for consistent ordering
-            entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+        // Sort entries by filename for consistent ordering
+        entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
 
-            for entry in entries {
-                let path = entry.path();
-                if path.extension().map_or(false, |ext| ext == "md") {
-                    let content = tokio::fs::read_to_string(&path).await?;
-                    let filename = path.file_stem()
-                        .and_then(|s| s.to_str())
-                        .unwrap_or("untitled");
+        for entry in entries {
+            let path = entry.path();
+            if path.extension().map_or(false, |ext| ext == "md") {
+                let content = tokio::fs::read_to_string(&path).await?;
+                let filename = path.file_stem()
+                    .and_then(|s| s.to_str())
+                    .unwrap_or("untitled");
 
-                    let id = extract_adr_id(filename);
-                    let title = extract_adr_title(filename, &content);
-                    let status = parse_adr_status(&content);
+                let id = extract_adr_id(filename);
+                let title = extract_adr_title(filename, &content);
+                let status = parse_adr_status(&content);
 
-                    // Try to extract date from content or use current date
-                    let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
+                // Try to extract date from content or use current date
+                let date = chrono::Utc::now().format("%Y-%m-%d").to_string();
 
-                    workspace.documentation.decisions.push(Decision {
-                        id,
-                        title,
-                        content,
-                        format: DocumentationFormat::Markdown,
-                        status,
-                        date,
-                        links: Vec::new(),
-                    });
-                }
+                workspace.documentation.decisions.push(Decision {
+                    id,
+                    title,
+                    content,
+                    format: DocumentationFormat::Markdown,
+                    status,
+                    date,
+                    links: Vec::new(),
+                });
             }
         }
     }

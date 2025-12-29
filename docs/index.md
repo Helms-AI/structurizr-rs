@@ -2,13 +2,6 @@
 
 Welcome to the documentation for **structurizr-rs**, a Rust implementation of Structurizr Lite for creating software architecture diagrams using the C4 model.
 
-## Quick Links
-
-- [Demo Workspace](../demo/README.md) - Get started with the demo
-- [Examples](../workspaces/) - Example DSL files and code
-
----
-
 ## Feature Guides
 
 User-facing documentation for structurizr-rs features:

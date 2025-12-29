@@ -2050,6 +2050,8 @@ impl SvgRenderer {
             y1: f64,
             x2: f64,
             y2: f64,
+            source_id: String,
+            target_id: String,
             description: Option<String>,
             technology: Option<String>,
             font_size: u32,
@@ -2161,7 +2163,7 @@ impl SvgRenderer {
 
                         // Build path attributes with bold styling for outbound relationships
                         let mut path_attrs = format!(
-                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" role="graphics-symbol" aria-label="{}""#,
+                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" data-routing="orthogonal" role="graphics-symbol" aria-label="{}""#,
                             path_data, rel_style.color, effective_thickness, effective_opacity, css_class, source_id, target_id, escape_xml(&aria_label)
                         );
 
@@ -2226,7 +2228,7 @@ impl SvgRenderer {
 
                         // Build path attributes with bold styling for outbound relationships
                         let mut path_attrs = format!(
-                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" role="graphics-symbol" aria-label="{}""#,
+                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" data-routing="curved" role="graphics-symbol" aria-label="{}""#,
                             path_data, rel_style.color, effective_thickness, effective_opacity, css_class, source_id, target_id, escape_xml(&aria_label)
                         );
 
@@ -2298,7 +2300,7 @@ impl SvgRenderer {
 
                     // Build line attributes with bold styling for outbound relationships
                     let mut line_attrs = format!(
-                        r#"x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" role="graphics-symbol" aria-label="{}""#,
+                        r#"x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" data-routing="direct" role="graphics-symbol" aria-label="{}""#,
                         x1, y1, x2, y2, rel_style.color, effective_thickness, effective_opacity, css_class, source_id, target_id, escape_xml(&aria_label)
                     );
 
@@ -2330,6 +2332,8 @@ impl SvgRenderer {
                     y1,
                     x2,
                     y2,
+                    source_id: source_id.clone(),
+                    target_id: target_id.clone(),
                     description: rel.description.clone(),
                     technology: rel.technology.clone(),
                     font_size: rel_style.font_size,
@@ -2368,8 +2372,8 @@ impl SvgRenderer {
                 let font_weight = if rel_data.is_outbound_from_active { "bold" } else { "normal" };
 
                 svg.push_str(&format!(
-                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" font-weight="{}" fill="{}" transform="rotate({:.1}, {:.0}, {:.0})">{}</text>"#,
-                    label_x, label_y, rel_data.font_size, font_weight, rel_data.color, angle, label_x, label_y, escape_xml(desc)
+                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" font-weight="{}" fill="{}" transform="rotate({:.1}, {:.0}, {:.0})" class="relationship-label" data-source="{}" data-target="{}" data-label-type="description">{}</text>"#,
+                    label_x, label_y, rel_data.font_size, font_weight, rel_data.color, angle, label_x, label_y, rel_data.source_id, rel_data.target_id, escape_xml(desc)
                 ));
                 svg.push('\n');
 
@@ -2398,8 +2402,8 @@ impl SvgRenderer {
                 let font_weight = if rel_data.is_outbound_from_active { "bold" } else { "normal" };
 
                 svg.push_str(&format!(
-                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" font-weight="{}" fill="{}" transform="rotate({:.1}, {:.0}, {:.0})">{}</text>"#,
-                    label_x, label_y, tech_font_size, font_weight, rel_data.color, angle, label_x, label_y, escape_xml(&tech_text)
+                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" font-weight="{}" fill="{}" transform="rotate({:.1}, {:.0}, {:.0})" class="relationship-label" data-source="{}" data-target="{}" data-label-type="technology">{}</text>"#,
+                    label_x, label_y, tech_font_size, font_weight, rel_data.color, angle, label_x, label_y, rel_data.source_id, rel_data.target_id, escape_xml(&tech_text)
                 ));
                 svg.push('\n');
 
