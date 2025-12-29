@@ -100,6 +100,7 @@ pub struct RelationshipNode {
     pub technology: Option<String>,
     pub tags: Vec<String>,
     pub properties: HashMap<String, String>,
+    pub perspectives: HashMap<String, String>,
 }
 
 /// A group of elements.

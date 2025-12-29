@@ -402,6 +402,10 @@ pub struct Relationship {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub properties: HashMap<String, String>,
+    /// Perspectives provide different stakeholder viewpoints on this relationship.
+    /// Keys are perspective names (e.g., "Security", "Performance"), values are descriptions.
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub perspectives: HashMap<String, String>,
 }
 
 impl Relationship {
@@ -415,6 +419,7 @@ impl Relationship {
             interaction_style: InteractionStyle::default(),
             tags: vec!["Relationship".to_string()],
             properties: HashMap::new(),
+            perspectives: HashMap::new(),
         }
     }
 
@@ -497,6 +502,31 @@ impl Model {
         if let Some(tech) = technology {
             rel = rel.with_technology(tech);
         }
+        let id = rel.id;
+        self.relationships.push(rel);
+        id
+    }
+
+    /// Add a relationship with full metadata including tags, properties, and perspectives.
+    pub fn add_relationship_with_metadata(
+        &mut self,
+        source_id: ElementId,
+        destination_id: ElementId,
+        description: impl Into<String>,
+        technology: Option<String>,
+        tags: Vec<String>,
+        properties: HashMap<String, String>,
+        perspectives: HashMap<String, String>,
+    ) -> ElementId {
+        let mut rel = Relationship::new(source_id, destination_id)
+            .with_description(description);
+        if let Some(tech) = technology {
+            rel = rel.with_technology(tech);
+        }
+        // Add tags (append to default "Relationship" tag)
+        rel.tags.extend(tags);
+        rel.properties = properties;
+        rel.perspectives = perspectives;
         let id = rel.id;
         self.relationships.push(rel);
         id

@@ -1,7 +1,7 @@
 //! Web server implementation.
 
 use axum::{
-    routing::{get, put},
+    routing::{get, post, put},
     Router,
 };
 use tower_http::cors::CorsLayer;
@@ -61,6 +61,8 @@ impl Server {
             .route("/w/:workspace_id/api/search", get(handlers::workspace_search_api))
             .route("/w/:workspace_id/api/view/:view_key/positions", get(editor::workspace_get_positions))
             .route("/w/:workspace_id/api/view/:view_key/positions", put(editor::workspace_batch_update_positions))
+            .route("/w/:workspace_id/api/view/:view_key/notes", get(handlers::workspace_get_notes))
+            .route("/w/:workspace_id/api/view/:view_key/notes", post(handlers::workspace_add_note))
             .route("/w/:workspace_id/export/json", get(handlers::workspace_export_json))
 
             // Two-level workspace routes (e.g., /w/small/startup-saas)
@@ -84,6 +86,8 @@ impl Server {
             .route("/w/:category/:workspace_id/api/search", get(handlers::workspace_search_api_nested))
             .route("/w/:category/:workspace_id/api/view/:view_key/positions", get(editor::workspace_get_positions_nested))
             .route("/w/:category/:workspace_id/api/view/:view_key/positions", put(editor::workspace_batch_update_positions_nested))
+            .route("/w/:category/:workspace_id/api/view/:view_key/notes", get(handlers::workspace_get_notes_nested))
+            .route("/w/:category/:workspace_id/api/view/:view_key/notes", post(handlers::workspace_add_note_nested))
             .route("/w/:category/:workspace_id/export/json", get(handlers::workspace_export_json_nested))
 
             // Middleware

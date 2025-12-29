@@ -556,6 +556,7 @@ impl Parser {
             technology,
             tags: Vec::new(),
             properties: HashMap::new(),
+            perspectives: HashMap::new(),
         };
 
         // Check for optional block
@@ -578,6 +579,10 @@ impl Parser {
                     Some(TokenKind::Properties) => {
                         self.advance();
                         rel.properties.extend(self.parse_properties_block()?);
+                    }
+                    Some(TokenKind::Perspectives) => {
+                        self.advance();
+                        rel.perspectives.extend(self.parse_perspectives_block()?);
                     }
                     _ => break,
                 }
@@ -1272,6 +1277,33 @@ impl Parser {
         }
 
         Ok(props)
+    }
+
+    /// Parse a perspectives block: perspectives { "Name" "Description" ... }
+    fn parse_perspectives_block(&mut self) -> Result<HashMap<String, String>> {
+        self.skip_newlines_and_comments();
+        self.expect(TokenKind::OpenBrace)?;
+
+        let mut perspectives = HashMap::new();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::String(_)) => {
+                    let name = self.expect_string()?;
+                    let description = self.expect_string()?;
+                    perspectives.insert(name, description);
+                }
+                _ => break,
+            }
+        }
+
+        Ok(perspectives)
     }
 }
 
@@ -2062,11 +2094,14 @@ fn build_relationship(
         Error::UndefinedIdentifier(rel.destination.clone())
     })?;
 
-    workspace.model_mut().add_relationship(
+    workspace.model_mut().add_relationship_with_metadata(
         *source_id,
         *dest_id,
         rel.description.clone().unwrap_or_default(),
         rel.technology.clone(),
+        rel.tags.clone(),
+        rel.properties.clone(),
+        rel.perspectives.clone(),
     );
 
     Ok(())
@@ -2087,11 +2122,14 @@ fn build_element_relationships(
     if let Some(source_id) = source_id {
         for rel in &element.relationships {
             if let Some(&dest_id) = identifiers.get(&rel.destination) {
-                workspace.model_mut().add_relationship(
+                workspace.model_mut().add_relationship_with_metadata(
                     source_id,
                     dest_id,
                     rel.description.clone().unwrap_or_default(),
                     rel.technology.clone(),
+                    rel.tags.clone(),
+                    rel.properties.clone(),
+                    rel.perspectives.clone(),
                 );
             }
         }

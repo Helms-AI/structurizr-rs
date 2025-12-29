@@ -25,6 +25,7 @@ use structurizr_render::layout::{GridLayout, LayoutEdge, Size};
 use crate::error::{Error, Result};
 use crate::layout::{ContentType, LayoutConfig, NavItem, generate_page_layout};
 use crate::markdown::{escape_html, render_markdown, render_markdown_with_heading_ids, ExtractedHeading};
+use crate::notes::{AddNoteRequest, NotesFile, ViewNotes};
 use crate::state::AppState;
 
 
@@ -1883,6 +1884,53 @@ pub async fn workspace_export_json(
     Ok(([(header::CONTENT_TYPE, "application/json")], json))
 }
 
+/// Workspace-scoped get notes handler.
+pub async fn workspace_get_notes(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+) -> Result<Json<ViewNotes>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let info = state.get_workspace_info(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let notes_file = NotesFile::load(&info.path).await;
+    let view_notes = notes_file
+        .get_view_notes(&view_key)
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(Json(view_notes))
+}
+
+/// Workspace-scoped add note handler.
+pub async fn workspace_add_note(
+    State(state): State<AppState>,
+    Path((workspace_id, view_key)): Path<(String, String)>,
+    Json(req): Json<AddNoteRequest>,
+) -> Result<Json<ViewNotes>> {
+    let workspace_id = extract_workspace_id(&workspace_id);
+    let info = state.get_workspace_info(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let mut notes_file = NotesFile::load(&info.path).await;
+    notes_file.add_note(
+        &view_key,
+        req.step_index,
+        req.first_name,
+        req.last_name,
+        req.content,
+    );
+    notes_file.save(&info.path).await
+        .map_err(|e| Error::Server(format!("Failed to save notes: {}", e)))?;
+
+    let view_notes = notes_file
+        .get_view_notes(&view_key)
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(Json(view_notes))
+}
+
 /// Workspace-scoped render SVG handler.
 pub async fn workspace_render_svg(
     State(state): State<AppState>,
@@ -3254,16 +3302,92 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
     // Count steps for animation
     let step_count = dynamic_view.steps.len();
 
-    // Build step data as JSON
+    // Build step data as JSON with enhanced metadata
     let mut steps_json = String::from("[");
     for (i, step) in dynamic_view.steps.iter().enumerate() {
         if i > 0 { steps_json.push(','); }
+
+        // Find the relationship for this step
+        let relationship = workspace.model().relationships.iter()
+            .find(|r| r.source_id == step.source_id && r.destination_id == step.destination_id);
+
+        // Get source and destination elements
+        let source_element = workspace.model().find_element(step.source_id);
+        let dest_element = workspace.model().find_element(step.destination_id);
+
+        // Build tags array
+        let tags_json = if let Some(rel) = relationship {
+            let tags_str: Vec<String> = rel.tags.iter()
+                .map(|t| format!("\"{}\"", escape_json(t)))
+                .collect();
+            format!("[{}]", tags_str.join(","))
+        } else {
+            "[]".to_string()
+        };
+
+        // Build properties object
+        let props_json = if let Some(rel) = relationship {
+            if !rel.properties.is_empty() {
+                let props_str: Vec<String> = rel.properties.iter()
+                    .map(|(k, v)| format!("\"{}\":\"{}\"", escape_json(k), escape_json(v)))
+                    .collect();
+                format!("{{{}}}", props_str.join(","))
+            } else {
+                "{}".to_string()
+            }
+        } else {
+            "{}".to_string()
+        };
+
+        // Build perspectives object
+        let perspectives_json = if let Some(rel) = relationship {
+            if !rel.perspectives.is_empty() {
+                let persp_str: Vec<String> = rel.perspectives.iter()
+                    .map(|(k, v)| format!("\"{}\":\"{}\"", escape_json(k), escape_json(v)))
+                    .collect();
+                format!("{{{}}}", persp_str.join(","))
+            } else {
+                "{}".to_string()
+            }
+        } else {
+            "{}".to_string()
+        };
+
         steps_json.push_str(&format!(
-            r#"{{"order":{},"sourceId":"{}","destId":"{}","description":{}}}"#,
+            r#"{{"order":{},"sourceId":"{}","destId":"{}","description":{},"technology":{},"interactionStyle":"{}","tags":{},"properties":{},"perspectives":{},"sourceName":"{}","sourceType":"{}","destName":"{}","destType":"{}"}}"#,
             step.order,
             step.source_id,
             step.destination_id,
-            step.description.as_ref().map(|d| format!("\"{}\"", escape_json(d))).unwrap_or_else(|| "null".to_string())
+            step.description.as_ref()
+                .or_else(|| relationship.and_then(|r| r.description.as_ref()))
+                .map(|d| format!("\"{}\"", escape_json(d)))
+                .unwrap_or_else(|| "null".to_string()),
+            relationship.and_then(|r| r.technology.as_ref())
+                .map(|t| format!("\"{}\"", escape_json(t)))
+                .unwrap_or_else(|| "null".to_string()),
+            relationship.map(|r| match r.interaction_style {
+                structurizr_core::model::InteractionStyle::Synchronous => "Synchronous",
+                structurizr_core::model::InteractionStyle::Asynchronous => "Asynchronous",
+            }).unwrap_or("Synchronous"),
+            tags_json,
+            props_json,
+            perspectives_json,
+            source_element.map(|e| escape_json(&e.name())).unwrap_or_else(|| "Unknown".to_string()),
+            source_element.map(|e| match e {
+                structurizr_core::model::ElementRef::Person(_) => "Person",
+                structurizr_core::model::ElementRef::SoftwareSystem(_) => "Software System",
+                structurizr_core::model::ElementRef::Container(_) => "Container",
+                structurizr_core::model::ElementRef::Component(_) => "Component",
+                structurizr_core::model::ElementRef::DeploymentNode(_) => "Deployment Node",
+            }).unwrap_or("Unknown"),
+            dest_element.map(|e| escape_json(&e.name())).unwrap_or_else(|| "Unknown".to_string()),
+            dest_element.map(|e| match e {
+                structurizr_core::model::ElementRef::Person(_) => "Person",
+                structurizr_core::model::ElementRef::SoftwareSystem(_) => "Software System",
+                structurizr_core::model::ElementRef::Container(_) => "Container",
+                structurizr_core::model::ElementRef::Component(_) => "Component",
+                structurizr_core::model::ElementRef::DeploymentNode(_) => "Deployment Node",
+            }).unwrap_or("Unknown")
         ));
     }
     steps_json.push(']');
@@ -3306,6 +3430,506 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
         .step-overlay .step-desc {{ font-size: 15px; line-height: 1.4; }}
         .keyboard-help {{ position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: #666; z-index: 50; }}
         .loading {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-size: 16px; }}
+
+        /* Snackbar Styles */
+        .snackbar {{
+            position: fixed;
+            top: 50px;
+            right: -400px;
+            width: 380px;
+            max-width: 95vw;
+            height: calc(100vh - 50px);
+            background: #2a2a2a;
+            border-left: 1px solid #444;
+            box-shadow: -4px 0 12px rgba(0, 0, 0, 0.3);
+            transition: right 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            z-index: 200;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+        }}
+
+        .snackbar.open {{
+            right: 0;
+        }}
+
+        .snackbar-header {{
+            padding: 16px 20px;
+            background: #333;
+            border-bottom: 1px solid #444;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            flex-shrink: 0;
+        }}
+
+        .snackbar-title {{
+            font-size: 16px;
+            font-weight: 600;
+            color: white;
+            margin: 0;
+        }}
+
+        .snackbar-close {{
+            background: transparent;
+            border: none;
+            color: #999;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 32px;
+            height: 32px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }}
+
+        .snackbar-close:hover {{
+            background: #444;
+            color: white;
+        }}
+
+        .snackbar-content {{
+            padding: 20px;
+            overflow-y: auto;
+            flex: 1;
+        }}
+
+        .metadata-section {{
+            margin-bottom: 24px;
+        }}
+
+        .metadata-section h4 {{
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: #888;
+            margin: 0 0 12px 0;
+            letter-spacing: 0.5px;
+        }}
+
+        .step-description {{
+            font-size: 16px;
+            color: white;
+            margin: 0;
+            line-height: 1.5;
+        }}
+
+        .metadata-grid {{
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+        }}
+
+        .metadata-item {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #3a3a3a;
+        }}
+
+        .metadata-item label {{
+            font-size: 13px;
+            color: #999;
+        }}
+
+        .metadata-item span {{
+            font-size: 13px;
+            color: white;
+            text-align: right;
+        }}
+
+        .tech-badge, .style-badge {{
+            background: #444;
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-family: monospace;
+            font-size: 12px;
+        }}
+
+        .tech-badge {{
+            background: #0066cc;
+        }}
+
+        .style-badge.async {{
+            background: #6b46c1;
+        }}
+
+        .tag-list {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+        }}
+
+        .tag {{
+            display: inline-block;
+            background: #3a3a3a;
+            color: #aaa;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 12px;
+        }}
+
+        .properties-list {{
+            margin: 0;
+        }}
+
+        .properties-list dt {{
+            font-size: 12px;
+            color: #999;
+            display: inline;
+        }}
+
+        .properties-list dd {{
+            font-size: 12px;
+            color: white;
+            display: inline;
+            margin: 0 12px 0 4px;
+        }}
+
+        .properties-list div {{
+            padding: 4px 0;
+        }}
+
+        .perspectives-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }}
+
+        .perspective-item {{
+            background: #333;
+            border-radius: 8px;
+            padding: 12px;
+            border-left: 3px solid #0066cc;
+        }}
+
+        .perspective-item .perspective-name {{
+            font-size: 13px;
+            font-weight: 600;
+            color: #0066cc;
+            margin-bottom: 6px;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+        }}
+
+        .perspective-item .perspective-name::before {{
+            content: "";
+            display: inline-block;
+            width: 8px;
+            height: 8px;
+            background: #0066cc;
+            border-radius: 50%;
+        }}
+
+        .perspective-item .perspective-desc {{
+            font-size: 12px;
+            color: #ccc;
+            line-height: 1.5;
+        }}
+
+        .snackbar-actions {{
+            margin-top: 24px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }}
+
+        .action-btn {{
+            background: #444;
+            color: white;
+            border: none;
+            padding: 10px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 13px;
+            transition: background 0.2s;
+            text-align: center;
+        }}
+
+        .action-btn:hover {{
+            background: #555;
+        }}
+
+        /* Tab Navigation */
+        .snackbar-tabs {{
+            display: flex;
+            border-bottom: 1px solid #444;
+            background: #333;
+            flex-shrink: 0;
+        }}
+
+        .tab-btn {{
+            flex: 1;
+            padding: 12px 16px;
+            background: transparent;
+            border: none;
+            color: #888;
+            cursor: pointer;
+            font-size: 14px;
+            transition: all 0.2s;
+            border-bottom: 2px solid transparent;
+        }}
+
+        .tab-btn:hover {{
+            color: #ccc;
+            background: rgba(255, 255, 255, 0.05);
+        }}
+
+        .tab-btn.active {{
+            color: white;
+            border-bottom-color: #0066cc;
+        }}
+
+        .note-count {{
+            font-size: 12px;
+            opacity: 0.7;
+        }}
+
+        .tab-content {{
+            display: none;
+            flex: 1;
+            overflow-y: auto;
+        }}
+
+        .tab-content.active {{
+            display: flex;
+            flex-direction: column;
+        }}
+
+        /* Notes Container */
+        .notes-container {{
+            display: flex;
+            flex-direction: column;
+            height: 100%;
+        }}
+
+        .notes-list {{
+            flex: 1;
+            overflow-y: auto;
+            padding: 0;
+        }}
+
+        .no-notes {{
+            padding: 40px 20px;
+            text-align: center;
+            color: #666;
+            font-style: italic;
+        }}
+
+        .note-item {{
+            padding: 16px 20px;
+            border-bottom: 1px solid #3a3a3a;
+        }}
+
+        .note-item:nth-child(odd) {{
+            background: #2a2a2a;
+        }}
+
+        .note-item:nth-child(even) {{
+            background: #262626;
+        }}
+
+        .note-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }}
+
+        .note-author {{
+            font-weight: 600;
+            color: #0066cc;
+            font-size: 14px;
+        }}
+
+        .note-timestamp {{
+            color: #666;
+            font-size: 12px;
+        }}
+
+        .note-content {{
+            color: #ccc;
+            line-height: 1.6;
+            white-space: pre-wrap;
+            font-size: 13px;
+        }}
+
+        /* Add Note Section */
+        .add-note-section {{
+            padding: 16px 20px;
+            border-top: 1px solid #444;
+            background: #333;
+            flex-shrink: 0;
+        }}
+
+        #note-input {{
+            width: 100%;
+            min-height: 80px;
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-radius: 4px;
+            color: white;
+            padding: 12px;
+            resize: vertical;
+            margin-bottom: 8px;
+            font-family: inherit;
+            font-size: 13px;
+        }}
+
+        #note-input:focus {{
+            outline: none;
+            border-color: #0066cc;
+        }}
+
+        #note-input::placeholder {{
+            color: #666;
+        }}
+
+        .add-note-btn {{
+            width: 100%;
+            padding: 10px;
+            background: #0066cc;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }}
+
+        .add-note-btn:hover {{
+            background: #0077ee;
+        }}
+
+        /* Name Modal */
+        .name-modal {{
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 300;
+            justify-content: center;
+            align-items: center;
+        }}
+
+        .name-modal.open {{
+            display: flex;
+        }}
+
+        .name-modal-content {{
+            background: #2a2a2a;
+            padding: 24px;
+            border-radius: 8px;
+            width: 320px;
+            max-width: 90vw;
+        }}
+
+        .name-modal-content h3 {{
+            margin: 0 0 8px 0;
+            color: white;
+            font-size: 18px;
+        }}
+
+        .name-modal-content p {{
+            margin: 0 0 16px 0;
+            color: #888;
+            font-size: 13px;
+        }}
+
+        .name-modal-content input {{
+            width: 100%;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            background: #333;
+            border: 1px solid #444;
+            color: white;
+            border-radius: 4px;
+            font-size: 14px;
+        }}
+
+        .name-modal-content input:focus {{
+            outline: none;
+            border-color: #0066cc;
+        }}
+
+        .name-modal-content input::placeholder {{
+            color: #666;
+        }}
+
+        .name-modal-actions {{
+            display: flex;
+            gap: 12px;
+            margin-top: 8px;
+        }}
+
+        .name-modal-actions button {{
+            flex: 1;
+            padding: 10px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 14px;
+            border: none;
+        }}
+
+        .name-modal-actions .cancel-btn {{
+            background: #444;
+            color: white;
+        }}
+
+        .name-modal-actions .cancel-btn:hover {{
+            background: #555;
+        }}
+
+        .name-modal-actions .save-btn {{
+            background: #0066cc;
+            color: white;
+        }}
+
+        .name-modal-actions .save-btn:hover {{
+            background: #0077ee;
+        }}
+
+        /* Mobile responsive */
+        @media (max-width: 768px) {{
+            .snackbar {{
+                position: fixed;
+                bottom: -60vh;
+                right: 0;
+                left: 0;
+                top: auto;
+                width: 100%;
+                max-width: 100%;
+                height: 60vh;
+                border-left: none;
+                border-top: 1px solid #444;
+                transition: bottom 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+            }}
+
+            .snackbar.open {{
+                bottom: 0;
+                right: 0;
+            }}
+
+            .keyboard-help {{
+                display: none;
+            }}
+        }}
+
+        /* Clickable arrow highlight */
+        .arrow-line {{
+            cursor: pointer;
+            stroke-width: 2;
+        }}
+
+        .arrow-line:hover {{
+            stroke-width: 3;
+            filter: brightness(1.2);
+        }}
     </style>
 </head>
 <body>
@@ -3341,7 +3965,106 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
             <div class="step-desc" id="overlay-desc">Step description</div>
         </div>
     </div>
-    <div class="keyboard-help">Space to play/pause • ← → to step • R to reset • 1-9 to jump to step • Scroll to zoom • Drag to pan</div>
+    <div class="keyboard-help">Space to play/pause • ← → to step • R to reset • 1-9 to jump to step • Scroll to zoom • Drag to pan • Click arrows for details</div>
+
+    <!-- Step Metadata Snackbar -->
+    <div id="step-snackbar" class="snackbar" role="complementary" aria-live="polite">
+        <div class="snackbar-header">
+            <h3 class="snackbar-title">Step <span id="step-number">1</span> Details</h3>
+            <button class="snackbar-close" aria-label="Close details" onclick="closeSnackbar()">×</button>
+        </div>
+
+        <!-- Tab Navigation -->
+        <div class="snackbar-tabs">
+            <button class="tab-btn active" data-tab="metadata" onclick="switchSnackbarTab('metadata')">
+                Metadata
+            </button>
+            <button class="tab-btn" data-tab="notes" onclick="switchSnackbarTab('notes')">
+                Notes <span class="note-count" id="note-count"></span>
+            </button>
+        </div>
+
+        <!-- Metadata Tab -->
+        <div class="tab-content active" id="tab-metadata">
+            <div class="snackbar-content">
+                <div class="metadata-section">
+                    <h4>Interaction</h4>
+                    <p id="step-description" class="step-description">Loading...</p>
+                </div>
+
+                <div class="metadata-grid">
+                    <div class="metadata-item">
+                        <label>Source:</label>
+                        <span id="source-element">-</span>
+                    </div>
+                    <div class="metadata-item">
+                        <label>Destination:</label>
+                        <span id="dest-element">-</span>
+                    </div>
+                    <div class="metadata-item" id="technology-item" style="display: none;">
+                        <label>Technology:</label>
+                        <span id="technology" class="tech-badge">-</span>
+                    </div>
+                    <div class="metadata-item">
+                        <label>Type:</label>
+                        <span id="interaction-style" class="style-badge">-</span>
+                    </div>
+                </div>
+
+                <div class="metadata-section" id="tags-section" style="display: none;">
+                    <h4>Tags</h4>
+                    <div class="tag-list" id="tag-list"></div>
+                </div>
+
+                <div class="metadata-section" id="properties-section" style="display: none;">
+                    <h4>Properties</h4>
+                    <div class="properties-list" id="properties-list"></div>
+                </div>
+
+                <div class="metadata-section" id="perspectives-section" style="display: none;">
+                    <h4>Perspectives</h4>
+                    <div class="perspectives-list" id="perspectives-list"></div>
+                </div>
+
+                <div class="snackbar-actions">
+                    <button onclick="navigateToElement('source')" class="action-btn" id="view-source-btn">
+                        View Source Element
+                    </button>
+                    <button onclick="navigateToElement('destination')" class="action-btn" id="view-dest-btn">
+                        View Target Element
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Notes Tab -->
+        <div class="tab-content" id="tab-notes">
+            <div class="notes-container">
+                <div class="notes-list" id="notes-list">
+                    <div class="no-notes">No notes yet. Be the first to add one!</div>
+                </div>
+                <div class="add-note-section">
+                    <textarea id="note-input" placeholder="Add a note about this step..."></textarea>
+                    <button class="add-note-btn" onclick="submitNote()">Add Note</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Name Prompt Modal -->
+    <div class="name-modal" id="name-modal">
+        <div class="name-modal-content">
+            <h3>Enter Your Name</h3>
+            <p>Your name will be displayed with your notes.</p>
+            <input type="text" id="first-name-input" placeholder="First Name">
+            <input type="text" id="last-name-input" placeholder="Last Name">
+            <div class="name-modal-actions">
+                <button class="cancel-btn" onclick="cancelNameModal()">Cancel</button>
+                <button class="save-btn" onclick="saveName()">Save</button>
+            </div>
+        </div>
+    </div>
+
     <script>
         const steps = {steps_json};
         const totalSteps = {step_count};
@@ -3354,6 +4077,13 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
         let isPanning = false, panStartX = 0, panStartY = 0, panStartOffsetX = 0, panStartOffsetY = 0;
         const container = document.getElementById('diagram-container');
         const wrapper = document.getElementById('svg-wrapper');
+
+        // Notes state
+        const viewKey = '{view_key}';
+        const basePath = '{base_path}';
+        let viewNotes = {{ steps: {{}} }};
+        let pendingNote = null;
+        let notesLoaded = false;
 
         async function loadSVG() {{
             try {{
@@ -3372,8 +4102,11 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
                 arrowTexts.forEach((text, idx) => {{ text.classList.add('arrow-text'); text.dataset.stepIndex = idx; }});
                 fitToScreen();
                 updateDisplay();
+                // Initialize click handlers for step metadata
+                initializeArrowClickHandlers();
             }} catch (err) {{
                 document.getElementById('loading').textContent = 'Failed to load diagram';
+                console.error('Failed to load SVG:', err);
             }}
         }}
 
@@ -3436,7 +4169,7 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
         container.style.cursor = 'grab';
 
         document.addEventListener('keydown', (e) => {{
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT' || e.target.tagName === 'TEXTAREA') return;
             switch(e.key) {{
                 case ' ': e.preventDefault(); togglePlay(); break;
                 case 'ArrowRight': e.preventDefault(); nextStep(); break;
@@ -3445,6 +4178,290 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
                 case 'f': case 'F': fitToScreen(); break;
                 case '0': resetAnimation(); break;
                 default: if (e.key >= '1' && e.key <= '9') {{ const stepNum = parseInt(e.key); if (stepNum <= totalSteps) {{ currentStep = stepNum; updateDisplay(); }} }}
+            }}
+        }});
+
+        // Snackbar functionality
+        let currentSnackbarStep = null;
+        let snackbarOpen = false;
+
+        function showStepMetadata(stepIndex) {{
+            if (stepIndex < 0 || stepIndex >= steps.length) return;
+
+            const step = steps[stepIndex];
+            currentSnackbarStep = stepIndex;
+
+            // Update header
+            document.getElementById('step-number').textContent = step.order;
+
+            // Update description
+            document.getElementById('step-description').textContent = step.description || 'No description';
+
+            // Update source and destination
+            document.getElementById('source-element').textContent = `${{step.sourceName}} [${{step.sourceType}}]`;
+            document.getElementById('dest-element').textContent = `${{step.destName}} [${{step.destType}}]`;
+
+            // Update technology
+            const techItem = document.getElementById('technology-item');
+            const techBadge = document.getElementById('technology');
+            if (step.technology) {{
+                techItem.style.display = 'flex';
+                techBadge.textContent = step.technology;
+            }} else {{
+                techItem.style.display = 'none';
+            }}
+
+            // Update interaction style
+            const styleBadge = document.getElementById('interaction-style');
+            styleBadge.textContent = step.interactionStyle || 'Synchronous';
+            if (step.interactionStyle === 'Asynchronous') {{
+                styleBadge.classList.add('async');
+            }} else {{
+                styleBadge.classList.remove('async');
+            }}
+
+            // Update tags
+            const tagsSection = document.getElementById('tags-section');
+            const tagList = document.getElementById('tag-list');
+            if (step.tags && step.tags.length > 0) {{
+                tagsSection.style.display = 'block';
+                tagList.innerHTML = step.tags.map(tag => `<span class="tag">${{escapeHtml(tag)}}</span>`).join('');
+            }} else {{
+                tagsSection.style.display = 'none';
+            }}
+
+            // Update properties
+            const propsSection = document.getElementById('properties-section');
+            const propsList = document.getElementById('properties-list');
+            if (step.properties && Object.keys(step.properties).length > 0) {{
+                propsSection.style.display = 'block';
+                propsList.innerHTML = Object.entries(step.properties)
+                    .map(([key, value]) => `<div><dt>${{escapeHtml(key)}}:</dt><dd>${{escapeHtml(value)}}</dd></div>`)
+                    .join('');
+            }} else {{
+                propsSection.style.display = 'none';
+            }}
+
+            // Update perspectives
+            const perspSection = document.getElementById('perspectives-section');
+            const perspList = document.getElementById('perspectives-list');
+            if (step.perspectives && Object.keys(step.perspectives).length > 0) {{
+                perspSection.style.display = 'block';
+                perspList.innerHTML = Object.entries(step.perspectives)
+                    .map(([name, description]) => `
+                        <div class="perspective-item">
+                            <div class="perspective-name">${{escapeHtml(name)}}</div>
+                            <div class="perspective-desc">${{escapeHtml(description)}}</div>
+                        </div>
+                    `).join('');
+            }} else {{
+                perspSection.style.display = 'none';
+            }}
+
+            // Open snackbar
+            openSnackbar();
+        }}
+
+        function openSnackbar() {{
+            const snackbar = document.getElementById('step-snackbar');
+            snackbar.classList.add('open');
+            snackbarOpen = true;
+        }}
+
+        function closeSnackbar() {{
+            const snackbar = document.getElementById('step-snackbar');
+            snackbar.classList.remove('open');
+            snackbarOpen = false;
+            currentSnackbarStep = null;
+        }}
+
+        // Tab switching
+        function switchSnackbarTab(tabName) {{
+            document.querySelectorAll('.snackbar .tab-btn').forEach(btn => {{
+                btn.classList.toggle('active', btn.dataset.tab === tabName);
+            }});
+            document.querySelectorAll('.snackbar .tab-content').forEach(content => {{
+                content.classList.toggle('active', content.id === `tab-${{tabName}}`);
+            }});
+
+            // Load notes when switching to notes tab
+            if (tabName === 'notes' && !notesLoaded) {{
+                loadNotes();
+            }}
+        }}
+
+        // Load notes from API
+        async function loadNotes() {{
+            try {{
+                const response = await fetch(`${{basePath}}/api/view/${{viewKey}}/notes`);
+                if (response.ok) {{
+                    viewNotes = await response.json();
+                    notesLoaded = true;
+                    if (currentSnackbarStep !== null) {{
+                        renderNotes(currentSnackbarStep);
+                    }}
+                }}
+            }} catch (err) {{
+                console.error('Failed to load notes:', err);
+            }}
+        }}
+
+        // Render notes for current step
+        function renderNotes(stepIndex) {{
+            const notesList = document.getElementById('notes-list');
+            const stepNotes = viewNotes.steps?.[stepIndex] || [];
+
+            if (stepNotes.length === 0) {{
+                notesList.innerHTML = '<div class="no-notes">No notes yet. Be the first to add one!</div>';
+            }} else {{
+                notesList.innerHTML = stepNotes.map(note => `
+                    <div class="note-item">
+                        <div class="note-header">
+                            <span class="note-author">${{escapeHtml(note.first_name)}} ${{escapeHtml(note.last_name)}}</span>
+                            <span class="note-timestamp">${{formatTimestamp(note.timestamp)}}</span>
+                        </div>
+                        <div class="note-content">${{escapeHtml(note.content)}}</div>
+                    </div>
+                `).join('');
+            }}
+
+            // Update note count badge
+            const totalNotes = Object.values(viewNotes.steps || {{}}).reduce((sum, notes) => sum + notes.length, 0);
+            document.getElementById('note-count').textContent = totalNotes > 0 ? `(${{totalNotes}})` : '';
+        }}
+
+        // Submit note
+        function submitNote() {{
+            const content = document.getElementById('note-input').value.trim();
+            if (!content) return;
+
+            const firstName = localStorage.getItem('structurizr_first_name');
+            const lastName = localStorage.getItem('structurizr_last_name');
+
+            if (!firstName || !lastName) {{
+                pendingNote = content;
+                document.getElementById('name-modal').classList.add('open');
+                return;
+            }}
+
+            sendNote(content, firstName, lastName);
+        }}
+
+        // Save name and submit pending note
+        function saveName() {{
+            const firstName = document.getElementById('first-name-input').value.trim();
+            const lastName = document.getElementById('last-name-input').value.trim();
+
+            if (!firstName || !lastName) {{
+                alert('Please enter both first and last name');
+                return;
+            }}
+
+            localStorage.setItem('structurizr_first_name', firstName);
+            localStorage.setItem('structurizr_last_name', lastName);
+            document.getElementById('name-modal').classList.remove('open');
+
+            if (pendingNote) {{
+                sendNote(pendingNote, firstName, lastName);
+                pendingNote = null;
+            }}
+        }}
+
+        // Cancel name modal
+        function cancelNameModal() {{
+            document.getElementById('name-modal').classList.remove('open');
+            pendingNote = null;
+        }}
+
+        // Send note to API
+        async function sendNote(content, firstName, lastName) {{
+            if (currentSnackbarStep === null) return;
+
+            try {{
+                const response = await fetch(`${{basePath}}/api/view/${{viewKey}}/notes`, {{
+                    method: 'POST',
+                    headers: {{ 'Content-Type': 'application/json' }},
+                    body: JSON.stringify({{
+                        step_index: currentSnackbarStep,
+                        first_name: firstName,
+                        last_name: lastName,
+                        content: content
+                    }})
+                }});
+
+                if (response.ok) {{
+                    document.getElementById('note-input').value = '';
+                    viewNotes = await response.json();
+                    renderNotes(currentSnackbarStep);
+                }} else {{
+                    alert('Failed to save note. Please try again.');
+                }}
+            }} catch (err) {{
+                console.error('Failed to save note:', err);
+                alert('Failed to save note. Please try again.');
+            }}
+        }}
+
+        // Format timestamp for display
+        function formatTimestamp(iso) {{
+            const date = new Date(iso);
+            return date.toLocaleDateString() + ' ' + date.toLocaleTimeString([], {{ hour: '2-digit', minute: '2-digit' }});
+        }}
+
+        function escapeHtml(str) {{
+            const div = document.createElement('div');
+            div.textContent = str;
+            return div.innerHTML;
+        }}
+
+        function navigateToElement(type) {{
+            if (currentSnackbarStep === null) return;
+            const step = steps[currentSnackbarStep];
+
+            const elementId = type === 'source' ? step.sourceId : step.destId;
+            // TODO: Implement navigation to element view
+            console.log(`Navigate to ${{type}} element: ${{elementId}}`);
+            alert(`Navigation to element views will be implemented in a future update.\\nElement ID: ${{elementId}}`);
+        }}
+
+        // Arrow click detection
+        function initializeArrowClickHandlers() {{
+            // This will be called after SVG is loaded
+            const svg = wrapper.querySelector('svg');
+            if (!svg) return;
+
+            arrowLines.forEach((line, idx) => {{
+                line.addEventListener('click', (e) => {{
+                    e.stopPropagation();
+                    showStepMetadata(idx);
+                }});
+
+                // Add visual feedback on hover
+                line.style.cursor = 'pointer';
+            }});
+
+            // Also make text clickable
+            arrowTexts.forEach((text, idx) => {{
+                text.addEventListener('click', (e) => {{
+                    e.stopPropagation();
+                    showStepMetadata(idx);
+                }});
+
+                text.style.cursor = 'pointer';
+            }});
+        }}
+
+        // Keyboard shortcuts for snackbar
+        document.addEventListener('keydown', (e) => {{
+            if (e.key === 'Escape' && snackbarOpen) {{
+                closeSnackbar();
+            }}
+        }});
+
+        // Close snackbar when clicking outside (optional)
+        document.getElementById('step-snackbar').addEventListener('click', (e) => {{
+            if (e.target === e.currentTarget) {{
+                // Clicked on backdrop, don't close for now
             }}
         }});
 
@@ -5714,6 +6731,53 @@ pub async fn workspace_export_json_nested(
         .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
     let json = JsonExporter::export(&workspace)?;
     Ok(([(header::CONTENT_TYPE, "application/json")], json))
+}
+
+/// Nested workspace: Get notes.
+pub async fn workspace_get_notes_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+) -> Result<Json<ViewNotes>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let info = state.get_workspace_info(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+
+    let notes_file = NotesFile::load(&info.path).await;
+    let view_notes = notes_file
+        .get_view_notes(&view_key)
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(Json(view_notes))
+}
+
+/// Nested workspace: Add note.
+pub async fn workspace_add_note_nested(
+    State(state): State<AppState>,
+    Path((category, workspace_id, view_key)): Path<(String, String, String)>,
+    Json(req): Json<AddNoteRequest>,
+) -> Result<Json<ViewNotes>> {
+    let full_id = make_nested_workspace_id(&category, &workspace_id);
+    let info = state.get_workspace_info(&full_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+
+    let mut notes_file = NotesFile::load(&info.path).await;
+    notes_file.add_note(
+        &view_key,
+        req.step_index,
+        req.first_name,
+        req.last_name,
+        req.content,
+    );
+    notes_file.save(&info.path).await
+        .map_err(|e| Error::Server(format!("Failed to save notes: {}", e)))?;
+
+    let view_notes = notes_file
+        .get_view_notes(&view_key)
+        .cloned()
+        .unwrap_or_default();
+
+    Ok(Json(view_notes))
 }
 
 pub async fn workspace_render_svg_nested(
