@@ -10,6 +10,7 @@ pub mod error;
 pub mod handlers;
 pub mod layout;
 pub mod markdown;
+pub mod positions;
 pub mod server;
 pub mod state;
 pub mod watcher;

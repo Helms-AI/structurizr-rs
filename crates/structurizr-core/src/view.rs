@@ -9,7 +9,7 @@
 //! - Deployment: Infrastructure and deployments
 
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use crate::model::ElementId;
 
@@ -56,6 +56,159 @@ impl Default for AutoLayout {
 pub struct ElementPosition {
     pub x: i32,
     pub y: i32,
+}
+
+/// Layout change for undo/redo history.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum LayoutChange {
+    Move {
+        element_id: ElementId,
+        from: ElementPosition,
+        to: ElementPosition,
+        timestamp: u64,
+    },
+    BatchMove {
+        moves: Vec<(ElementId, ElementPosition, ElementPosition)>,
+        timestamp: u64,
+    },
+}
+
+/// Layout state with history management.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutState {
+    pub positions: HashMap<ElementId, ElementPosition>,
+    #[serde(default)]
+    pub history: VecDeque<LayoutChange>,
+    #[serde(default)]
+    pub redo_stack: VecDeque<LayoutChange>,
+    #[serde(skip)]
+    pub dirty: bool,
+    #[serde(skip)]
+    pub last_change_timestamp: Option<u64>,
+}
+
+impl LayoutState {
+    pub fn new() -> Self {
+        Self {
+            positions: HashMap::new(),
+            history: VecDeque::new(),
+            redo_stack: VecDeque::new(),
+            dirty: false,
+            last_change_timestamp: None,
+        }
+    }
+
+    pub fn move_element(&mut self, element_id: ElementId, to: ElementPosition) {
+        if let Some(&from) = self.positions.get(&element_id) {
+            if from.x != to.x || from.y != to.y {
+                let timestamp = std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis() as u64;
+
+                // Check if we should coalesce with the last change
+                let should_coalesce = self.should_coalesce(&element_id, timestamp);
+
+                if should_coalesce {
+                    // Update the last change instead of creating a new one
+                    if let Some(LayoutChange::Move { to: ref mut last_to, .. }) = self.history.back_mut() {
+                        *last_to = to;
+                    }
+                } else {
+                    // Create a new change
+                    let change = LayoutChange::Move {
+                        element_id: element_id.clone(),
+                        from,
+                        to,
+                        timestamp,
+                    };
+                    self.history.push_back(change);
+                    self.redo_stack.clear();
+                }
+
+                self.positions.insert(element_id.clone(), to);
+                self.dirty = true;
+                self.last_change_timestamp = Some(timestamp);
+            }
+        } else {
+            // Element doesn't have a position yet, just set it
+            self.positions.insert(element_id, to);
+            self.dirty = true;
+        }
+    }
+
+    fn should_coalesce(&self, element_id: &ElementId, timestamp: u64) -> bool {
+        if let Some(last_timestamp) = self.last_change_timestamp {
+            if timestamp - last_timestamp < 500 {  // Within 500ms
+                if let Some(LayoutChange::Move { element_id: ref last_id, .. }) = self.history.back() {
+                    return last_id == element_id;
+                }
+            }
+        }
+        false
+    }
+
+    pub fn undo(&mut self) -> bool {
+        if let Some(change) = self.history.pop_back() {
+            match &change {
+                LayoutChange::Move { element_id, from, .. } => {
+                    self.positions.insert(element_id.clone(), *from);
+                }
+                LayoutChange::BatchMove { moves, .. } => {
+                    for (element_id, from, _) in moves {
+                        self.positions.insert(element_id.clone(), *from);
+                    }
+                }
+            }
+            self.redo_stack.push_back(change);
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn redo(&mut self) -> bool {
+        if let Some(change) = self.redo_stack.pop_back() {
+            match &change {
+                LayoutChange::Move { element_id, to, .. } => {
+                    self.positions.insert(element_id.clone(), *to);
+                }
+                LayoutChange::BatchMove { moves, .. } => {
+                    for (element_id, _, to) in moves {
+                        self.positions.insert(element_id.clone(), *to);
+                    }
+                }
+            }
+            self.history.push_back(change);
+            self.dirty = true;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn can_undo(&self) -> bool {
+        !self.history.is_empty()
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo_stack.is_empty()
+    }
+
+    pub fn mark_clean(&mut self) {
+        self.dirty = false;
+    }
+
+    pub fn is_dirty(&self) -> bool {
+        self.dirty
+    }
+}
+
+impl Default for LayoutState {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// Position of a vertex in a relationship.
@@ -129,6 +282,9 @@ pub struct ViewProperties {
     /// Background color for the view (e.g., "#1a1a1a" for dark mode).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub background: Option<String>,
+    /// Layout state for drag-and-drop positioning and history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub layout_state: Option<LayoutState>,
 }
 
 impl ViewProperties {
@@ -142,6 +298,7 @@ impl ViewProperties {
             auto_layout: None,
             properties: HashMap::new(),
             background: None,
+            layout_state: None,
         }
     }
 

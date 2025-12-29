@@ -134,6 +134,21 @@ impl AppState {
         }
     }
 
+    /// Update an element's position in the cached workspace.
+    pub async fn update_cached_position(
+        &self,
+        workspace_id: &str,
+        view_key: &str,
+        element_id: &str,
+        x: i32,
+        y: i32,
+    ) {
+        let registry = self.registry.read().await;
+        if let Some(reg) = registry.as_ref() {
+            reg.update_element_position(workspace_id, view_key, element_id, x, y).await;
+        }
+    }
+
     /// Rediscover workspaces.
     pub async fn rediscover_workspaces(&self) -> crate::Result<()> {
         let mut registry = self.registry.write().await;

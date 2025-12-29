@@ -36,6 +36,7 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, RwLock};
 use tracing::{debug, info, warn};
 
@@ -136,6 +137,9 @@ pub struct BatchUpdatePositionsRequest {
     pub positions: Vec<ElementPosition>,
 }
 
+/// Auto-save debounce delay in milliseconds.
+const AUTO_SAVE_DELAY_MS: u64 = 2000;
+
 /// Shared state for editor broadcasting.
 #[derive(Clone)]
 pub struct EditorState {
@@ -147,6 +151,8 @@ pub struct EditorState {
     pub undo_stack: Arc<RwLock<HashMap<String, Vec<EditorMessage>>>>,
     /// Redo history per view
     pub redo_stack: Arc<RwLock<HashMap<String, Vec<EditorMessage>>>>,
+    /// Workspaces with unsaved changes and their last modification time
+    pub dirty_workspaces: Arc<RwLock<HashMap<String, Instant>>>,
 }
 
 impl Default for EditorState {
@@ -163,7 +169,32 @@ impl EditorState {
             positions: Arc::new(RwLock::new(HashMap::new())),
             undo_stack: Arc::new(RwLock::new(HashMap::new())),
             redo_stack: Arc::new(RwLock::new(HashMap::new())),
+            dirty_workspaces: Arc::new(RwLock::new(HashMap::new())),
         }
+    }
+
+    /// Mark a workspace as having unsaved changes.
+    pub async fn mark_dirty(&self, workspace_id: &str) {
+        let mut dirty = self.dirty_workspaces.write().await;
+        dirty.insert(workspace_id.to_string(), Instant::now());
+    }
+
+    /// Mark a workspace as saved (no longer dirty).
+    pub async fn mark_clean(&self, workspace_id: &str) {
+        let mut dirty = self.dirty_workspaces.write().await;
+        dirty.remove(workspace_id);
+    }
+
+    /// Get workspaces that need saving (dirty for longer than the debounce delay).
+    pub async fn get_workspaces_to_save(&self) -> Vec<String> {
+        let dirty = self.dirty_workspaces.read().await;
+        let now = Instant::now();
+        let delay = Duration::from_millis(AUTO_SAVE_DELAY_MS);
+
+        dirty.iter()
+            .filter(|(_, last_modified)| now.duration_since(**last_modified) >= delay)
+            .map(|(id, _)| id.clone())
+            .collect()
     }
 
     /// Get element positions for a view.
@@ -203,65 +234,6 @@ impl EditorState {
     /// Broadcast a message to all connected clients.
     pub fn broadcast(&self, message: EditorMessage) {
         let _ = self.broadcast.send(message);
-    }
-}
-
-
-/// Update element position in workspace views.
-fn update_element_position_in_workspace(
-    workspace: &mut structurizr_core::Workspace,
-    view_key: &str,
-    element_id: &str,
-    x: i32,
-    y: i32,
-) {
-    // Parse element ID
-    let id = if let Ok(uuid) = element_id.parse::<uuid::Uuid>() {
-        structurizr_core::ElementId::from(uuid)
-    } else {
-        return;
-    };
-
-    // Update in all view types
-    for view in &mut workspace.views_mut().system_landscape_views {
-        if view.properties.key == view_key {
-            update_element_in_view(&mut view.properties.elements, id, x, y);
-            return;
-        }
-    }
-
-    for view in &mut workspace.views_mut().system_context_views {
-        if view.properties.key == view_key {
-            update_element_in_view(&mut view.properties.elements, id, x, y);
-            return;
-        }
-    }
-
-    for view in &mut workspace.views_mut().container_views {
-        if view.properties.key == view_key {
-            update_element_in_view(&mut view.properties.elements, id, x, y);
-            return;
-        }
-    }
-
-    for view in &mut workspace.views_mut().component_views {
-        if view.properties.key == view_key {
-            update_element_in_view(&mut view.properties.elements, id, x, y);
-            return;
-        }
-    }
-}
-
-/// Update element position in view elements list.
-fn update_element_in_view(
-    elements: &mut Vec<structurizr_core::view::ElementView>,
-    element_id: structurizr_core::ElementId,
-    x: i32,
-    y: i32,
-) {
-    if let Some(elem) = elements.iter_mut().find(|e| e.id == element_id) {
-        elem.x = Some(x);
-        elem.y = Some(y);
     }
 }
 
@@ -931,20 +903,54 @@ async fn handle_workspace_editor_message(state: &AppState, workspace_id: &str, m
             debug!("Element {} moved to ({}, {}) in workspace {}", element_id, x, y, workspace_id);
             editor.update_position(view_key, element_id, *x, *y).await;
 
-            // Update workspace
-            if let Some(mut workspace) = state.get_workspace_by_id(workspace_id).await {
-                update_element_position_in_workspace(&mut workspace, view_key, element_id, *x, *y);
-                // Note: Multi-workspace mode doesn't persist changes back to registry
-                // This would require additional registry support
-            }
+            // Update the cached workspace with the new position
+            state.update_cached_position(workspace_id, view_key, element_id, *x, *y).await;
+
+            // Mark workspace as dirty for auto-save
+            editor.mark_dirty(workspace_id).await;
 
             // Broadcast to other clients
             editor.broadcast(message.clone());
         }
         EditorMessage::Save => {
             debug!("Save requested for workspace {}", workspace_id);
-            // Save not yet implemented for multi-workspace mode
-            // Would need to update the workspace file in the discovered directory
+
+            // Get workspace path from registry
+            if let Some(info) = state.get_workspace_info(workspace_id).await {
+                // Collect all positions from editor state
+                let positions_map = editor.positions.read().await;
+                let mut positions_file = crate::positions::PositionsFile::new();
+
+                for (view_key, elements) in positions_map.iter() {
+                    for (element_id, pos) in elements.iter() {
+                        positions_file.update_element_position(view_key, element_id, pos.x, pos.y);
+                    }
+                }
+
+                // Save to file
+                match positions_file.save(&info.path).await {
+                    Ok(()) => {
+                        info!("Saved positions for workspace {} to {:?}", workspace_id, info.path);
+                        // Mark as clean
+                        editor.mark_clean(workspace_id).await;
+                        // Broadcast acknowledgment
+                        editor.broadcast(EditorMessage::Ack {
+                            message_id: Some("save".to_string()),
+                        });
+                    }
+                    Err(e) => {
+                        warn!("Failed to save positions for workspace {}: {}", workspace_id, e);
+                        editor.broadcast(EditorMessage::Error {
+                            message: format!("Failed to save positions: {}", e),
+                        });
+                    }
+                }
+            } else {
+                warn!("Workspace {} not found in registry", workspace_id);
+                editor.broadcast(EditorMessage::Error {
+                    message: format!("Workspace {} not found", workspace_id),
+                });
+            }
         }
         EditorMessage::AutoLayout { view_key } => {
             debug!("Auto-layout requested for view {} in workspace {}", view_key, workspace_id);
@@ -973,4 +979,56 @@ async fn handle_workspace_editor_message(state: &AppState, workspace_id: &str, m
         }
         _ => {}
     }
+}
+
+/// Save positions for a specific workspace.
+pub async fn save_workspace_positions(state: &AppState, workspace_id: &str) -> Result<()> {
+    let editor = &state.editor;
+
+    // Get workspace path from registry
+    let info = state.get_workspace_info(workspace_id).await
+        .ok_or_else(|| crate::error::Error::WorkspaceNotFound(workspace_id.to_string()))?;
+
+    // Collect all positions from editor state
+    let positions_map = editor.positions.read().await;
+    let mut positions_file = crate::positions::PositionsFile::new();
+
+    for (view_key, elements) in positions_map.iter() {
+        for (element_id, pos) in elements.iter() {
+            positions_file.update_element_position(view_key, element_id, pos.x, pos.y);
+        }
+    }
+
+    // Save to file
+    positions_file.save(&info.path).await
+        .map_err(|e| crate::error::Error::Io(e))?;
+
+    // Mark as clean
+    editor.mark_clean(workspace_id).await;
+
+    info!("Auto-saved positions for workspace {} to {:?}", workspace_id, info.path);
+    Ok(())
+}
+
+/// Start the auto-save background task.
+///
+/// This task periodically checks for workspaces with unsaved changes and saves them
+/// after a debounce delay.
+pub fn start_auto_save_task(state: AppState) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let check_interval = Duration::from_millis(1000); // Check every second
+
+        loop {
+            tokio::time::sleep(check_interval).await;
+
+            // Get workspaces that need saving
+            let workspaces_to_save = state.editor.get_workspaces_to_save().await;
+
+            for workspace_id in workspaces_to_save {
+                if let Err(e) = save_workspace_positions(&state, &workspace_id).await {
+                    warn!("Auto-save failed for workspace {}: {}", workspace_id, e);
+                }
+            }
+        }
+    })
 }

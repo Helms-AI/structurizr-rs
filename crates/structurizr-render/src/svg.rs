@@ -1,6 +1,13 @@
 //! SVG rendering for Structurizr diagrams.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+
+/// Convert a color string (e.g., "#707070") to a valid SVG marker ID.
+/// Removes the '#' prefix and adds a marker prefix.
+fn color_to_marker_id(color: &str) -> String {
+    let clean_color = color.trim_start_matches('#');
+    format!("arrow-{}", clean_color)
+}
 
 use structurizr_core::model::{ElementId, DeploymentNode};
 use structurizr_core::style::{IconPosition, Routing, Styles};
@@ -12,11 +19,33 @@ use structurizr_core::view::{
 use structurizr_core::Workspace;
 
 use crate::error::Result;
-use crate::layout::{GridLayout, LayoutEdge, LayoutNode, Size};
+use crate::layout::{GridLayout, LayoutEdge, LayoutNode, Position, Size};
 use crate::routing::orthogonal::{OrthogonalConfig, OrthogonalRouter};
 use crate::routing::{route_curved, EdgePath};
 use crate::shapes::{render_shape, Bounds};
 use crate::style_resolver::{ElementKind, StyleResolver};
+
+/// Extract explicit positions from view properties' element views.
+/// Returns a HashMap of element_id -> (x, y) for elements with positions set.
+fn extract_explicit_positions(view_props: &ViewProperties) -> HashMap<String, (i32, i32)> {
+    let mut positions = HashMap::new();
+    for element_view in &view_props.elements {
+        if let (Some(x), Some(y)) = (element_view.x, element_view.y) {
+            positions.insert(element_view.id.to_string(), (x, y));
+        }
+    }
+    positions
+}
+
+/// Apply explicit positions to layout nodes, overriding computed positions.
+/// Elements with explicit positions use those; others keep their computed positions.
+fn apply_explicit_positions(nodes: &mut Vec<LayoutNode>, explicit_positions: &HashMap<String, (i32, i32)>) {
+    for node in nodes.iter_mut() {
+        if let Some(&(x, y)) = explicit_positions.get(&node.id) {
+            node.position = Position { x: x as f64, y: y as f64 };
+        }
+    }
+}
 
 /// Tracks the bounding box of all content in the SVG.
 /// Used to calculate dynamic viewBox dimensions.
@@ -592,7 +621,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -601,6 +630,10 @@ impl SvgRenderer {
                 rank: n.rank,
             })
             .collect();
+
+        // Apply explicit positions from view properties (e.g., from drag-and-drop)
+        let explicit_positions = extract_explicit_positions(&view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
 
         self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
     }
@@ -734,7 +767,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -744,7 +777,13 @@ impl SvgRenderer {
             })
             .collect();
 
-        self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
+        // Apply explicit positions from view properties (e.g., from drag-and-drop)
+        let explicit_positions = extract_explicit_positions(&view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
+
+        // The active element for SystemContextView is the main software system
+        let active_element_id = main_system.map(|s| s.id());
+        self.render_svg_with_active_element(&nodes, &elements_info, &model.relationships, &model.groups, styles, active_element_id)
     }
 
     /// Render a container view to SVG.
@@ -854,8 +893,20 @@ impl SvgRenderer {
             }
         }
 
-        let edges: Vec<LayoutEdge> = model
+        // Build set of element IDs for filtering relationships (from elements_info which has proper ElementId)
+        let element_id_set: HashSet<ElementId> = elements_info.iter()
+            .map(|e| e.id)
+            .collect();
+
+        // Filter relationships to only include those where BOTH endpoints are in the view
+        let filtered_relationships: Vec<_> = model
             .relationships
+            .iter()
+            .filter(|r| element_id_set.contains(&r.source_id) && element_id_set.contains(&r.destination_id))
+            .cloned()
+            .collect();
+
+        let edges: Vec<LayoutEdge> = filtered_relationships
             .iter()
             .map(|r| LayoutEdge {
                 source: r.source_id.to_string(),
@@ -878,7 +929,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -888,7 +939,13 @@ impl SvgRenderer {
             })
             .collect();
 
-        self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
+        // Apply explicit positions from view properties (e.g., from drag-and-drop)
+        let explicit_positions = extract_explicit_positions(&view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
+
+        // The active element for ContainerView is the scoped software system
+        let active_element_id = Some(view.software_system_id);
+        self.render_svg_with_active_element(&nodes, &elements_info, &filtered_relationships, &model.groups, styles, active_element_id)
     }
 
     /// Render a component view to SVG.
@@ -925,30 +982,14 @@ impl SvgRenderer {
             }
         }
 
-        // Step 1: Collect candidate element IDs for this view (respecting allowed_ids)
-        let mut candidate_ids: HashSet<ElementId> = HashSet::new();
-
+        // For component views, include ALL components in the container
+        // (unlike container views, we don't filter by connectivity - all components are relevant)
         if let Some(container) = target_container {
             for component in &container.components {
+                // Only filter if view has explicit elements specified
                 if let Some(ref allowed) = allowed_ids {
                     if !allowed.contains(&component.id()) { continue; }
                 }
-                candidate_ids.insert(component.id());
-            }
-        }
-
-        // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
-        let connected_ids: HashSet<ElementId> = model.relationships
-            .iter()
-            .filter(|rel| candidate_ids.contains(&rel.source_id) && candidate_ids.contains(&rel.destination_id))
-            .flat_map(|rel| [rel.source_id, rel.destination_id])
-            .collect();
-
-        // Step 3: Add components that are both candidates AND connected within this view
-        if let Some(container) = target_container {
-            for component in &container.components {
-                if !candidate_ids.contains(&component.id()) { continue; }
-                if !connected_ids.contains(&component.id()) { continue; }
                 element_ids.push(component.id().to_string());
                 elements_info.push(ElementInfo {
                     id: component.id(),
@@ -961,8 +1002,20 @@ impl SvgRenderer {
             }
         }
 
-        let edges: Vec<LayoutEdge> = model
+        // Build set of element IDs for filtering relationships
+        let element_id_set: HashSet<ElementId> = elements_info.iter()
+            .map(|e| e.id)
+            .collect();
+
+        // Filter relationships to only include those where BOTH endpoints are in the view
+        let filtered_relationships: Vec<_> = model
             .relationships
+            .iter()
+            .filter(|r| element_id_set.contains(&r.source_id) && element_id_set.contains(&r.destination_id))
+            .cloned()
+            .collect();
+
+        let edges: Vec<LayoutEdge> = filtered_relationships
             .iter()
             .map(|r| LayoutEdge {
                 source: r.source_id.to_string(),
@@ -985,7 +1038,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -995,7 +1048,13 @@ impl SvgRenderer {
             })
             .collect();
 
-        self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
+        // Apply explicit positions from view properties (e.g., from drag-and-drop)
+        let explicit_positions = extract_explicit_positions(&view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
+
+        // The active element for ComponentView is the scoped container
+        let active_element_id = Some(view.container_id);
+        self.render_svg_with_active_element(&nodes, &elements_info, &filtered_relationships, &model.groups, styles, active_element_id)
     }
 
     /// Render a deployment view to SVG.
@@ -1083,7 +1142,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -1092,6 +1151,10 @@ impl SvgRenderer {
                 rank: n.rank,
             })
             .collect();
+
+        // Apply explicit positions from view properties (e.g., from drag-and-drop)
+        let explicit_positions = extract_explicit_positions(&view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
 
         self.render_svg(&nodes, &elements_info, &model.relationships, &model.groups, styles)
     }
@@ -1154,16 +1217,17 @@ impl SvgRenderer {
         ));
         svg.push('\n');
 
-        // Defs for markers
+        // Defs for markers - JointJS-compatible filled triangles
         let default_rel_style = style_resolver.resolve_relationship(&["Relationship".to_string()]);
+        let marker_id = color_to_marker_id(&default_rel_style.color);
         svg.push_str(&format!(
             r##"  <defs>
-    <marker id="arrowhead" markerWidth="16" markerHeight="12" refX="14" refY="6" orient="auto">
-      <polygon points="0 0, 16 6, 0 12" fill="{}" stroke="{}" stroke-width="1"/>
+    <marker id="{}" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="{}"/>
     </marker>
   </defs>
 "##,
-            default_rel_style.color, default_rel_style.color
+            marker_id, default_rel_style.color
         ));
 
         // Background - transparent to allow CSS theming
@@ -1221,10 +1285,10 @@ impl SvgRenderer {
                 let src_center = src_x + element_width / 2.0;
                 let dst_center = dst_x + element_width / 2.0;
 
-                // Arrow line
+                // Arrow line with color-matched marker
                 svg.push_str(&format!(
-                    r#"  <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="2" marker-end="url(#arrowhead)"/>"#,
-                    src_center, y, dst_center, y, default_rel_style.color
+                    r#"  <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="2" marker-end="url(#{})"/>"#,
+                    src_center, y, dst_center, y, default_rel_style.color, marker_id
                 ));
                 svg.push('\n');
 
@@ -1348,7 +1412,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -1357,6 +1421,10 @@ impl SvgRenderer {
                 rank: n.rank,
             })
             .collect();
+
+        // Apply explicit positions from base view properties (e.g., from drag-and-drop)
+        let explicit_positions = extract_explicit_positions(&base_view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
 
         self.render_svg(&nodes, &elements_info, &filtered_relationships, &model.groups, styles)
     }
@@ -1442,7 +1510,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -1451,6 +1519,10 @@ impl SvgRenderer {
                 rank: n.rank,
             })
             .collect();
+
+        // Apply explicit positions from base view properties (e.g., from drag-and-drop)
+        let explicit_positions = extract_explicit_positions(&base_view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
 
         self.render_svg(&nodes, &elements_info, &filtered_relationships, &model.groups, styles)
     }
@@ -1544,7 +1616,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -1553,6 +1625,10 @@ impl SvgRenderer {
                 rank: n.rank,
             })
             .collect();
+
+        // Apply explicit positions from base view properties (e.g., from drag-and-drop)
+        let explicit_positions = extract_explicit_positions(&base_view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
 
         self.render_svg(&nodes, &elements_info, &filtered_relationships, &model.groups, styles)
     }
@@ -1643,7 +1719,7 @@ impl SvgRenderer {
         let sugiyama_result = layout.layout_sugiyama(&element_ids, &node_sizes, &edges);
 
         // Convert sugiyama::LayoutNode to layout::LayoutNode
-        let nodes: Vec<LayoutNode> = sugiyama_result.nodes
+        let mut nodes: Vec<LayoutNode> = sugiyama_result.nodes
             .into_iter()
             .map(|n| LayoutNode {
                 id: n.id,
@@ -1652,6 +1728,10 @@ impl SvgRenderer {
                 rank: n.rank,
             })
             .collect();
+
+        // Apply any explicit positions from the view (from saved .positions.json)
+        let explicit_positions = extract_explicit_positions(&view.properties);
+        apply_explicit_positions(&mut nodes, &explicit_positions);
 
         self.render_svg(&nodes, &elements_info, &filtered_relationships, &model.groups, styles)
     }
@@ -1846,10 +1926,22 @@ impl SvgRenderer {
         groups: &[structurizr_core::model::Group],
         styles: Option<&Styles>,
     ) -> Result<String> {
-        self.render_svg_with_legend(nodes, elements, relationships, groups, styles, self.show_legend)
+        self.render_svg_with_options(nodes, elements, relationships, groups, styles, self.show_legend, None)
     }
 
-    fn render_svg_with_legend(
+    fn render_svg_with_active_element(
+        &self,
+        nodes: &[LayoutNode],
+        elements: &[ElementInfo],
+        relationships: &[structurizr_core::model::Relationship],
+        groups: &[structurizr_core::model::Group],
+        styles: Option<&Styles>,
+        active_element_id: Option<ElementId>,
+    ) -> Result<String> {
+        self.render_svg_with_options(nodes, elements, relationships, groups, styles, self.show_legend, active_element_id)
+    }
+
+    fn render_svg_with_options(
         &self,
         nodes: &[LayoutNode],
         elements: &[ElementInfo],
@@ -1857,6 +1949,7 @@ impl SvgRenderer {
         groups: &[structurizr_core::model::Group],
         styles: Option<&Styles>,
         show_legend: bool,
+        active_element_id: Option<ElementId>,
     ) -> Result<String> {
         let mut svg = String::new();
         let style_resolver = StyleResolver::new(styles);
@@ -1896,30 +1989,50 @@ impl SvgRenderer {
         let view_width = bounds.width().max(100.0);
         let view_height = bounds.height().max(100.0);
 
-        // SVG header with dynamic viewBox
+        // SVG header with dynamic viewBox and ARIA attributes for accessibility
+        // role="img" indicates this is an image, aria-label provides description for screen readers
         svg.push_str(&format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{}" width="{:.0}" height="{:.0}">"#,
+            r#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="{}" width="{:.0}" height="{:.0}" role="img" aria-label="Architecture diagram showing software elements and their relationships. Bold lines indicate outbound relationships from the primary element.">"#,
             bounds.to_viewbox(), view_width, view_height
         ));
         svg.push('\n');
 
-        // Resolve a default relationship style for the arrow marker color
+        // Collect all unique relationship colors for arrow markers
+        let mut marker_colors: std::collections::HashSet<String> = std::collections::HashSet::new();
         let default_rel_style = style_resolver.resolve_relationship(&["Relationship".to_string()]);
+        marker_colors.insert(default_rel_style.color.clone());
 
-        // Defs for markers (arrows) - use resolved color
-        svg.push_str(&format!(
-            r##"  <defs>
-    <marker id="arrowhead" markerWidth="16" markerHeight="12" refX="14" refY="6" orient="auto">
-      <polygon points="0 0, 16 6, 0 12" fill="{}" stroke="{}" stroke-width="1"/>
+        for rel in relationships {
+            let rel_style = style_resolver.resolve_relationship(&rel.tags);
+            marker_colors.insert(rel_style.color.clone());
+        }
+
+        // Defs for markers (arrows) - JointJS-compatible filled triangles
+        // Create a marker for each unique color used in relationships
+        svg.push_str("  <defs>\n");
+        for color in &marker_colors {
+            let marker_id = color_to_marker_id(color);
+            // JointJS-style arrow: filled triangle, cleaner design
+            // Dimensions: 10x10, refX=9 positions arrow tip at line end
+            svg.push_str(&format!(
+                r##"    <marker id="{}" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="{}"/>
     </marker>
-    <marker id="arrowhead-dashed" markerWidth="16" markerHeight="12" refX="14" refY="6" orient="auto">
-      <polygon points="0 0, 16 6, 0 12" fill="{}" stroke="{}" stroke-width="1"/>
-    </marker>
-  </defs>
 "##,
-            default_rel_style.color, default_rel_style.color,
-            default_rel_style.color, default_rel_style.color
-        ));
+                marker_id, color
+            ));
+
+            // Bold version of arrow marker for outbound relationships (1.5x size)
+            let bold_marker_id = format!("arrow-bold-{}", color.trim_start_matches('#'));
+            svg.push_str(&format!(
+                r##"    <marker id="{}" markerWidth="15" markerHeight="15" refX="13" refY="7.5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 15 7.5 L 0 15 z" fill="{}"/>
+    </marker>
+"##,
+                bold_marker_id, color
+            ));
+        }
+        svg.push_str("  </defs>\n");
 
         // Background - transparent to allow CSS theming (covers the full viewBox area)
         svg.push_str(&format!(
@@ -1942,7 +2055,13 @@ impl SvgRenderer {
             font_size: u32,
             color: String,
             is_orthogonal: bool,  // Track if path uses orthogonal routing (for horizontal labels)
+            is_outbound_from_active: bool,  // Track if relationship is outbound from the active/scope element
         }
+
+        // Bold styling constants for outbound relationships
+        const OUTBOUND_STROKE_MULTIPLIER: f64 = 2.0;  // 2x thickness for bold
+        const OUTBOUND_OPACITY: f64 = 1.0;  // Full opacity for outbound
+        const NORMAL_OPACITY: f64 = 0.6;  // Reduced opacity for other relationships
 
         let mut rel_lines: Vec<RelLineData> = Vec::new();
 
@@ -1978,6 +2097,32 @@ impl SvgRenderer {
                 // Resolve relationship style
                 let rel_style = style_resolver.resolve_relationship(&rel.tags);
 
+                // Check if this relationship is outbound from the active/scope element
+                let is_outbound_from_active = active_element_id
+                    .map(|active_id| rel.source_id == active_id)
+                    .unwrap_or(false);
+
+                // Calculate effective stroke width and opacity based on outbound status
+                let effective_thickness = if is_outbound_from_active {
+                    (rel_style.thickness as f64 * OUTBOUND_STROKE_MULTIPLIER) as u32
+                } else {
+                    rel_style.thickness
+                };
+                let effective_opacity = if is_outbound_from_active {
+                    OUTBOUND_OPACITY
+                } else if active_element_id.is_some() {
+                    NORMAL_OPACITY  // Dim non-outbound relationships when there's an active element
+                } else {
+                    rel_style.opacity as f64 / 100.0
+                };
+
+                // CSS class for dynamic highlighting (Phase 2)
+                let css_class = if is_outbound_from_active {
+                    "relationship relationship-outbound"
+                } else {
+                    "relationship"
+                };
+
                 // Check which routing style is requested
                 let use_orthogonal = matches!(rel_style.routing, Routing::Orthogonal);
                 let use_curved = matches!(rel_style.routing, Routing::Curved);
@@ -2007,10 +2152,17 @@ impl SvgRenderer {
                         // Build SVG path data
                         let path_data = path.to_svg_path();
 
-                        // Build path attributes
+                        // Build ARIA label for accessibility
+                        let aria_label = if is_outbound_from_active {
+                            format!("Outbound relationship: {}", rel.description.as_deref().unwrap_or("connected to"))
+                        } else {
+                            format!("Relationship: {}", rel.description.as_deref().unwrap_or("connected to"))
+                        };
+
+                        // Build path attributes with bold styling for outbound relationships
                         let mut path_attrs = format!(
-                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}""#,
-                            path_data, rel_style.color, rel_style.thickness
+                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" role="graphics-symbol" aria-label="{}""#,
+                            path_data, rel_style.color, effective_thickness, effective_opacity, css_class, source_id, target_id, escape_xml(&aria_label)
                         );
 
                         // Add dash pattern if needed
@@ -2018,15 +2170,16 @@ impl SvgRenderer {
                             path_attrs.push_str(&format!(r#" stroke-dasharray="{}""#, dasharray));
                         }
 
-                        // Add opacity if not 100%
-                        if rel_style.opacity < 100 {
-                            path_attrs.push_str(&format!(r#" opacity="{}""#, rel_style.opacity as f64 / 100.0));
-                        }
-
-                        // Draw path with arrow marker
+                        // Draw path with color-matched arrow marker
+                        // Use larger arrow marker for outbound relationships
+                        let marker_id = if is_outbound_from_active {
+                            format!("arrow-bold-{}", color_to_marker_id(&rel_style.color).trim_start_matches("arrow-"))
+                        } else {
+                            color_to_marker_id(&rel_style.color)
+                        };
                         svg.push_str(&format!(
-                            r##"  <path {} marker-end="url(#arrowhead)"/>"##,
-                            path_attrs
+                            r##"  <path {} marker-end="url(#{})"/>"##,
+                            path_attrs, marker_id
                         ));
                         svg.push('\n');
 
@@ -2064,10 +2217,17 @@ impl SvgRenderer {
                         // Build SVG path data
                         let path_data = path.to_svg_path();
 
-                        // Build path attributes
+                        // Build ARIA label for accessibility
+                        let aria_label = if is_outbound_from_active {
+                            format!("Outbound relationship: {}", rel.description.as_deref().unwrap_or("connected to"))
+                        } else {
+                            format!("Relationship: {}", rel.description.as_deref().unwrap_or("connected to"))
+                        };
+
+                        // Build path attributes with bold styling for outbound relationships
                         let mut path_attrs = format!(
-                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}""#,
-                            path_data, rel_style.color, rel_style.thickness
+                            r#"d="{}" fill="none" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" role="graphics-symbol" aria-label="{}""#,
+                            path_data, rel_style.color, effective_thickness, effective_opacity, css_class, source_id, target_id, escape_xml(&aria_label)
                         );
 
                         // Add dash pattern if needed
@@ -2075,15 +2235,16 @@ impl SvgRenderer {
                             path_attrs.push_str(&format!(r#" stroke-dasharray="{}""#, dasharray));
                         }
 
-                        // Add opacity if not 100%
-                        if rel_style.opacity < 100 {
-                            path_attrs.push_str(&format!(r#" opacity="{}""#, rel_style.opacity as f64 / 100.0));
-                        }
-
-                        // Draw path with arrow marker
+                        // Draw path with color-matched arrow marker
+                        // Use larger arrow marker for outbound relationships
+                        let marker_id = if is_outbound_from_active {
+                            format!("arrow-bold-{}", color_to_marker_id(&rel_style.color).trim_start_matches("arrow-"))
+                        } else {
+                            color_to_marker_id(&rel_style.color)
+                        };
                         svg.push_str(&format!(
-                            r##"  <path {} marker-end="url(#arrowhead)"/>"##,
-                            path_attrs
+                            r##"  <path {} marker-end="url(#{})"/>"##,
+                            path_attrs, marker_id
                         ));
                         svg.push('\n');
 
@@ -2128,10 +2289,17 @@ impl SvgRenderer {
                         edge_idx_at_target, total_target_edges,
                     );
 
-                    // Build line attributes
+                    // Build ARIA label for accessibility
+                    let aria_label = if is_outbound_from_active {
+                        format!("Outbound relationship: {}", rel.description.as_deref().unwrap_or("connected to"))
+                    } else {
+                        format!("Relationship: {}", rel.description.as_deref().unwrap_or("connected to"))
+                    };
+
+                    // Build line attributes with bold styling for outbound relationships
                     let mut line_attrs = format!(
-                        r#"x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="{}""#,
-                        x1, y1, x2, y2, rel_style.color, rel_style.thickness
+                        r#"x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="{}" opacity="{:.2}" class="{}" data-source="{}" data-target="{}" role="graphics-symbol" aria-label="{}""#,
+                        x1, y1, x2, y2, rel_style.color, effective_thickness, effective_opacity, css_class, source_id, target_id, escape_xml(&aria_label)
                     );
 
                     // Add dash pattern if needed
@@ -2139,15 +2307,16 @@ impl SvgRenderer {
                         line_attrs.push_str(&format!(r#" stroke-dasharray="{}""#, dasharray));
                     }
 
-                    // Add opacity if not 100%
-                    if rel_style.opacity < 100 {
-                        line_attrs.push_str(&format!(r#" opacity="{}""#, rel_style.opacity as f64 / 100.0));
-                    }
-
-                    // Draw line with arrow marker
+                    // Draw line with color-matched arrow marker
+                    // Use larger arrow marker for outbound relationships
+                    let marker_id = if is_outbound_from_active {
+                        format!("arrow-bold-{}", color_to_marker_id(&rel_style.color).trim_start_matches("arrow-"))
+                    } else {
+                        color_to_marker_id(&rel_style.color)
+                    };
                     svg.push_str(&format!(
-                        r##"  <line {} marker-end="url(#arrowhead)"/>"##,
-                        line_attrs
+                        r##"  <line {} marker-end="url(#{})"/>"##,
+                        line_attrs, marker_id
                     ));
                     svg.push('\n');
 
@@ -2166,6 +2335,7 @@ impl SvgRenderer {
                     font_size: rel_style.font_size,
                     color: rel_style.color.clone(),
                     is_orthogonal: use_orthogonal || use_curved,
+                    is_outbound_from_active,
                 });
             }
         }
@@ -2194,9 +2364,12 @@ impl SvgRenderer {
 
                 let (label_x, label_y) = find_non_overlapping_position(&label, &placed_labels);
 
+                // Use bold font weight for outbound relationship labels to match bold lines
+                let font_weight = if rel_data.is_outbound_from_active { "bold" } else { "normal" };
+
                 svg.push_str(&format!(
-                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" fill="{}" transform="rotate({:.1}, {:.0}, {:.0})">{}</text>"#,
-                    label_x, label_y, rel_data.font_size, rel_data.color, angle, label_x, label_y, escape_xml(desc)
+                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" font-weight="{}" fill="{}" transform="rotate({:.1}, {:.0}, {:.0})">{}</text>"#,
+                    label_x, label_y, rel_data.font_size, font_weight, rel_data.color, angle, label_x, label_y, escape_xml(desc)
                 ));
                 svg.push('\n');
 
@@ -2221,9 +2394,12 @@ impl SvgRenderer {
 
                 let (label_x, label_y) = find_non_overlapping_position(&label, &placed_labels);
 
+                // Use bold font weight for outbound relationship labels to match bold lines
+                let font_weight = if rel_data.is_outbound_from_active { "bold" } else { "normal" };
+
                 svg.push_str(&format!(
-                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" fill="{}" transform="rotate({:.1}, {:.0}, {:.0})">{}</text>"#,
-                    label_x, label_y, tech_font_size, rel_data.color, angle, label_x, label_y, escape_xml(&tech_text)
+                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" font-weight="{}" fill="{}" transform="rotate({:.1}, {:.0}, {:.0})">{}</text>"#,
+                    label_x, label_y, tech_font_size, font_weight, rel_data.color, angle, label_x, label_y, escape_xml(&tech_text)
                 ));
                 svg.push('\n');
 
@@ -2340,8 +2516,10 @@ impl SvgRenderer {
         let legend_icon_size = 20.0;
         let legend_text_offset = legend_icon_size + 10.0;
 
-        let num_items = unique_elements.len() + unique_relationships.len();
-        let legend_height = (num_items as f64 * legend_item_height) + (legend_padding * 2.0) + 30.0; // +30 for title
+        // +1 for the visual encoding section (bold outbound line explanation)
+        // +45 for extra spacing: title(30) + separator(15 gap + line)
+        let num_items = unique_elements.len() + unique_relationships.len() + 1;
+        let legend_height = (num_items as f64 * legend_item_height) + (legend_padding * 2.0) + 45.0;
         let legend_width = 250.0;
 
         let legend_x = bounds.min_x + 20.0;
@@ -2425,15 +2603,17 @@ impl SvgRenderer {
 
             if let Some(dasharray) = match entry.style {
                 structurizr_core::style::LineStyle::Solid => None,
-                structurizr_core::style::LineStyle::Dashed => Some("5,3"),
+                structurizr_core::style::LineStyle::Dashed => Some("5,5"),  // JointJS standard
                 structurizr_core::style::LineStyle::Dotted => Some("2,2"),
             } {
                 line_attrs.push_str(&format!(r##" stroke-dasharray="{}""##, dasharray));
             }
 
+            // Use color-matched marker for legend
+            let marker_id = color_to_marker_id(&entry.color);
             legend_svg.push_str(&format!(
-                r##"  <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" {} marker-end="url(#arrowhead)"/>"##,
-                line_x1, line_y, line_x2, line_y, line_attrs
+                r##"  <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" {} marker-end="url(#{})"/>"##,
+                line_x1, line_y, line_x2, line_y, line_attrs, marker_id
             ));
             legend_svg.push('\n');
 
@@ -2446,6 +2626,43 @@ impl SvgRenderer {
 
             current_y += legend_item_height;
         }
+
+        // Add visual encoding explanation for bold outbound relationships
+        // This helps users understand that bold lines = outbound from primary element
+        current_y += 5.0; // Add a small gap before the encoding section
+
+        // Separator line before encoding section
+        legend_svg.push_str(&format!(
+            r##"  <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="#cccccc" stroke-width="1"/>"##,
+            legend_x + legend_padding, current_y,
+            legend_x + legend_width - legend_padding, current_y
+        ));
+        legend_svg.push('\n');
+        current_y += 10.0;
+
+        // Bold line example (outbound relationships)
+        let line_x1 = legend_x + legend_padding;
+        let line_x2 = line_x1 + legend_icon_size;
+        let line_y = current_y + legend_icon_size / 2.0;
+
+        // Use first relationship color or default for the bold example
+        let example_color = unique_relationships.first()
+            .map(|r| r.color.as_str())
+            .unwrap_or("#707070");
+        let bold_marker_id = format!("arrow-bold-{}", example_color.trim_start_matches('#'));
+
+        legend_svg.push_str(&format!(
+            r##"  <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="4" marker-end="url(#{})" role="graphics-symbol" aria-label="Bold line indicating outbound relationship from primary element"/>"##,
+            line_x1, line_y, line_x2, line_y, example_color, bold_marker_id
+        ));
+        legend_svg.push('\n');
+
+        // Label for bold lines
+        legend_svg.push_str(&format!(
+            r##"  <text x="{:.0}" y="{:.0}" font-family="Arial, sans-serif" font-size="12" fill="#333333">Outbound (from focus)</text>"##,
+            line_x1 + legend_text_offset, current_y + 14.0
+        ));
+        legend_svg.push('\n');
 
         legend_svg
     }
@@ -2529,8 +2746,15 @@ impl SvgRenderer {
         // Create bounds for shape rendering
         let bounds = Bounds::new(x, y, width, height);
 
+        // Start a draggable group for this element
+        svg.push_str(&format!(
+            r##"  <g class="draggable-element" data-element-id="{}" transform="translate(0, 0)">
+"##,
+            element.id.to_string()
+        ));
+
         // Render the shape using the resolved style
-        svg.push_str("  ");
+        svg.push_str("    ");
         svg.push_str(&render_shape(resolved_style.shape, &bounds, &resolved_style));
         svg.push('\n');
 
@@ -2542,7 +2766,7 @@ impl SvgRenderer {
                 &bounds,
                 resolved_style.shape,
             );
-            svg.push_str("  ");
+            svg.push_str("    ");
             svg.push_str(&icon_svg);
             svg.push('\n');
             text_offset
@@ -2567,7 +2791,7 @@ impl SvgRenderer {
 
         // Name
         svg.push_str(&format!(
-            r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" font-weight="bold" fill="{}">{}</text>"#,
+            r#"    <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" font-weight="bold" fill="{}">{}</text>"#,
             x + width / 2.0, text_y, font_size + 2, text_color, escape_xml(&element.name)
         ));
         svg.push('\n');
@@ -2584,7 +2808,7 @@ impl SvgRenderer {
                 ElementType::InfrastructureNode => "[Infrastructure Node]",
             };
             svg.push_str(&format!(
-                r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" fill="{}">{}</text>"#,
+                r#"    <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" fill="{}">{}</text>"#,
                 x + width / 2.0, text_y + 18.0, font_size - 3, text_color, type_label
             ));
             svg.push('\n');
@@ -2592,7 +2816,7 @@ impl SvgRenderer {
             // Technology (if any)
             if let Some(ref tech) = element.technology {
                 svg.push_str(&format!(
-                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" fill="{}">[{}]</text>"#,
+                    r#"    <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" fill="{}">[{}]</text>"#,
                     x + width / 2.0, text_y + 34.0, font_size - 3, text_color, escape_xml(tech)
                 ));
                 svg.push('\n');
@@ -2615,13 +2839,16 @@ impl SvgRenderer {
                 let lines = wrap_text(desc, max_chars);
                 for (i, line) in lines.iter().take(3).enumerate() {
                     svg.push_str(&format!(
-                        r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" fill="{}">{}</text>"#,
+                        r#"    <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="{}" fill="{}">{}</text>"#,
                         x + width / 2.0, desc_y + (i as f64 * 16.0), font_size - 2, text_color, escape_xml(line)
                     ));
                     svg.push('\n');
                 }
             }
         }
+
+        // Close the draggable group
+        svg.push_str("  </g>\n");
     }
 }
 

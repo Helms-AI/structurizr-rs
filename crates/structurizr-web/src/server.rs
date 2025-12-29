@@ -114,6 +114,10 @@ impl Server {
             info!("File watcher started - workspaces will auto-reload on changes");
         }
 
+        // Start auto-save background task
+        let _auto_save_handle = editor::start_auto_save_task(state.clone());
+        info!("Auto-save task started - positions will be saved automatically");
+
         let app = Self::build_multi_router(state);
 
         let addr = self.config.address();

@@ -104,15 +104,25 @@ impl EdgePath {
                 if control_points.len() < 2 {
                     return String::new();
                 }
-                // Simple quadratic Bezier
                 let mut path = format!("M {:.1} {:.1}", control_points[0].x, control_points[0].y);
                 if control_points.len() == 3 {
+                    // Quadratic Bezier (Q command)
                     path.push_str(&format!(
                         " Q {:.1} {:.1} {:.1} {:.1}",
                         control_points[1].x, control_points[1].y,
                         control_points[2].x, control_points[2].y
                     ));
+                } else if control_points.len() == 4 {
+                    // Cubic Bezier (C command) - JointJS smooth connector style
+                    path.push_str(&format!(
+                        " C {:.1} {:.1} {:.1} {:.1} {:.1} {:.1}",
+                        control_points[1].x, control_points[1].y,
+                        control_points[2].x, control_points[2].y,
+                        control_points[3].x, control_points[3].y
+                    ));
                 } else {
+                    // Multiple points: use smooth cubic bezier chain
+                    // This creates a smooth curve through all points
                     for cp in &control_points[1..] {
                         path.push_str(&format!(" L {:.1} {:.1}", cp.x, cp.y));
                     }
@@ -140,9 +150,33 @@ impl EdgePath {
                 if control_points.len() < 2 {
                     return (0.0, 0.0, 0.0);
                 }
-                let mid_idx = control_points.len() / 2;
-                let point = &control_points[mid_idx];
-                (point.x, point.y, 0.0)
+                // For cubic bezier (4 points), calculate point at t=0.5
+                if control_points.len() == 4 {
+                    let t = 0.5;
+                    let t2 = t * t;
+                    let t3 = t2 * t;
+                    let mt = 1.0 - t;
+                    let mt2 = mt * mt;
+                    let mt3 = mt2 * mt;
+
+                    // Cubic bezier formula: B(t) = (1-t)³P0 + 3(1-t)²tP1 + 3(1-t)t²P2 + t³P3
+                    let x = mt3 * control_points[0].x
+                        + 3.0 * mt2 * t * control_points[1].x
+                        + 3.0 * mt * t2 * control_points[2].x
+                        + t3 * control_points[3].x;
+                    let y = mt3 * control_points[0].y
+                        + 3.0 * mt2 * t * control_points[1].y
+                        + 3.0 * mt * t2 * control_points[2].y
+                        + t3 * control_points[3].y;
+
+                    // Calculate angle at midpoint for text rotation
+                    let angle = calculate_angle(&control_points[0], &control_points[3]);
+                    (x, y - 10.0, angle) // Offset above the curve
+                } else {
+                    let mid_idx = control_points.len() / 2;
+                    let point = &control_points[mid_idx];
+                    (point.x, point.y - 10.0, 0.0)
+                }
             }
         }
     }

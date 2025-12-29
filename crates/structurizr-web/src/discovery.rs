@@ -115,6 +115,88 @@ impl WorkspaceRegistry {
         cache.clear();
     }
 
+    /// Update an element's position in the cached workspace.
+    /// This modifies the cached copy directly without reloading from disk.
+    pub async fn update_element_position(
+        &self,
+        workspace_id: &str,
+        view_key: &str,
+        element_id: &str,
+        x: i32,
+        y: i32,
+    ) {
+        let mut cache = self.loaded.write().await;
+        if let Some(workspace) = cache.get_mut(workspace_id) {
+            // Parse element ID
+            let id = if let Ok(uuid) = element_id.parse::<uuid::Uuid>() {
+                structurizr_core::ElementId::from(uuid)
+            } else {
+                return;
+            };
+
+            // Update in all view types
+            for view in &mut workspace.views_mut().system_landscape_views {
+                if view.properties.key == view_key {
+                    if let Some(elem) = view.properties.elements.iter_mut().find(|e| e.id == id) {
+                        elem.x = Some(x);
+                        elem.y = Some(y);
+                    }
+                    return;
+                }
+            }
+
+            for view in &mut workspace.views_mut().system_context_views {
+                if view.properties.key == view_key {
+                    if let Some(elem) = view.properties.elements.iter_mut().find(|e| e.id == id) {
+                        elem.x = Some(x);
+                        elem.y = Some(y);
+                    }
+                    return;
+                }
+            }
+
+            for view in &mut workspace.views_mut().container_views {
+                if view.properties.key == view_key {
+                    if let Some(elem) = view.properties.elements.iter_mut().find(|e| e.id == id) {
+                        elem.x = Some(x);
+                        elem.y = Some(y);
+                    }
+                    return;
+                }
+            }
+
+            for view in &mut workspace.views_mut().component_views {
+                if view.properties.key == view_key {
+                    if let Some(elem) = view.properties.elements.iter_mut().find(|e| e.id == id) {
+                        elem.x = Some(x);
+                        elem.y = Some(y);
+                    }
+                    return;
+                }
+            }
+
+            for view in &mut workspace.views_mut().dynamic_views {
+                if view.properties.key == view_key {
+                    if let Some(elem) = view.properties.elements.iter_mut().find(|e| e.id == id) {
+                        elem.x = Some(x);
+                        elem.y = Some(y);
+                    }
+                    return;
+                }
+            }
+
+            for view in &mut workspace.views_mut().deployment_views {
+                if view.properties.key == view_key {
+                    if let Some(elem) = view.properties.elements.iter_mut().find(|e| e.id == id) {
+                        elem.x = Some(x);
+                        elem.y = Some(y);
+                    }
+                    return;
+                }
+            }
+        }
+    }
+
     /// Get workspace ID from a file path.
     pub fn path_to_workspace_id(&self, path: &Path) -> Option<String> {
         // Find which workspace directory contains this path
@@ -289,6 +371,10 @@ async fn load_workspace(workspace_dir: &Path) -> Result<Workspace> {
 
     // Load documentation and ADRs
     crate::state::load_documentation(&mut workspace, workspace_dir).await?;
+
+    // Load saved element positions from sidecar file
+    let positions = crate::positions::PositionsFile::load(workspace_dir).await;
+    positions.apply_to_workspace(&mut workspace);
 
     Ok(workspace)
 }

@@ -223,10 +223,14 @@ impl ResolvedRelationshipStyle {
     }
 
     /// Get the SVG stroke-dasharray value for this style.
+    /// Uses JointJS-compatible dash patterns:
+    /// - Solid: no dasharray
+    /// - Dashed: "5,5" (matching JointJS default)
+    /// - Dotted: "2,2"
     pub fn stroke_dasharray(&self) -> Option<&'static str> {
         match self.style {
             LineStyle::Solid => None,
-            LineStyle::Dashed => Some("10,5"),
+            LineStyle::Dashed => Some("5,5"),  // JointJS standard dash pattern
             LineStyle::Dotted => Some("2,2"),
         }
     }
@@ -358,7 +362,7 @@ mod tests {
 
         style.style = LineStyle::Dashed;
         style.dashed = true;
-        assert_eq!(style.stroke_dasharray(), Some("10,5"));
+        assert_eq!(style.stroke_dasharray(), Some("5,5"));  // JointJS standard
 
         style.style = LineStyle::Dotted;
         assert_eq!(style.stroke_dasharray(), Some("2,2"));
