@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "views": {
+    "reservation-flow": {
+      "steps": {
+        "0": [
+          {
+            "id": "fa8c1a5a-5eb3-4f69-9702-43c6af9531a1",
+            "first_name": "Ryan",
+            "last_name": "Helms",
+            "timestamp": "2025-12-30T20:45:43.215225+00:00",
+            "content": "Test Note"
+          }
+        ]
+      }
+    }
+  }
+}
