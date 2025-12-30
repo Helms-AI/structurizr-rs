@@ -1244,7 +1244,7 @@ impl SvgRenderer {
             element_positions.insert(*id, (x, start_y));
         }
 
-        // Render elements as boxes at the top
+        // Render elements as boxes at the top (wrapped in groups for JS targeting)
         for id in &element_ids {
             if let Some(&(x, y)) = element_positions.get(id) {
                 // Find element info
@@ -1252,14 +1252,21 @@ impl SvgRenderer {
                 let kind = element_type.to_element_kind();
                 let resolved_style = style_resolver.resolve_element(&tags, kind);
 
+                // Start element group with data-element-id for JavaScript targeting
+                svg.push_str(&format!(
+                    r#"  <g class="element-group" data-element-id="{}">"#,
+                    id
+                ));
+                svg.push('\n');
+
                 let bounds = Bounds::new(x, y, element_width, element_height);
-                svg.push_str("  ");
+                svg.push_str("    ");
                 svg.push_str(&render_shape(resolved_style.shape, &bounds, &resolved_style));
                 svg.push('\n');
 
                 // Element name
                 svg.push_str(&format!(
-                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="{}">{}</text>"#,
+                    r#"    <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="{}">{}</text>"#,
                     x + element_width / 2.0, y + element_height / 2.0 + 5.0, resolved_style.color, escape_xml(&name)
                 ));
                 svg.push('\n');
@@ -1269,14 +1276,17 @@ impl SvgRenderer {
                 let lifeline_start = y + element_height;
                 let lifeline_end = view_height - padding;
                 svg.push_str(&format!(
-                    r##"  <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="#999999" stroke-width="1" stroke-dasharray="5,5"/>"##,
+                    r##"    <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="#999999" stroke-width="1" stroke-dasharray="5,5"/>"##,
                     lifeline_x, lifeline_start, lifeline_x, lifeline_end
                 ));
                 svg.push('\n');
+
+                // Close element group
+                svg.push_str("  </g>\n");
             }
         }
 
-        // Render interaction arrows (steps)
+        // Render interaction arrows (steps) with data attributes for JS targeting
         for (idx, step) in view.steps.iter().enumerate() {
             if let (Some(&(src_x, _)), Some(&(dst_x, _))) =
                 (element_positions.get(&step.source_id), element_positions.get(&step.destination_id))
@@ -1285,19 +1295,20 @@ impl SvgRenderer {
                 let src_center = src_x + element_width / 2.0;
                 let dst_center = dst_x + element_width / 2.0;
 
-                // Arrow line with color-matched marker
+                // Arrow line with data attributes for step index and element IDs
                 svg.push_str(&format!(
-                    r#"  <line x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="2" marker-end="url(#{})"/>"#,
+                    r#"  <line data-step-index="{}" data-source-id="{}" data-dest-id="{}" x1="{:.0}" y1="{:.0}" x2="{:.0}" y2="{:.0}" stroke="{}" stroke-width="2" marker-end="url(#{})"/>"#,
+                    idx, step.source_id, step.destination_id,
                     src_center, y, dst_center, y, default_rel_style.color, marker_id
                 ));
                 svg.push('\n');
 
-                // Step number and description
+                // Step number and description with data attribute
                 let label_x = (src_center + dst_center) / 2.0;
                 let label = format!("{}. {}", step.order, step.description.as_deref().unwrap_or(""));
                 svg.push_str(&format!(
-                    r#"  <text x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="{}">{}</text>"#,
-                    label_x, y - 8.0, default_rel_style.color, escape_xml(&label)
+                    r#"  <text data-step-index="{}" x="{:.0}" y="{:.0}" text-anchor="middle" font-family="Arial, sans-serif" font-size="12" fill="{}">{}</text>"#,
+                    idx, label_x, y - 8.0, default_rel_style.color, escape_xml(&label)
                 ));
                 svg.push('\n');
             }

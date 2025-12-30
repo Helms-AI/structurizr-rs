@@ -3420,10 +3420,15 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
         .diagram-container {{ height: calc(100vh - 50px); overflow: hidden; position: relative; background: #2a2a2a; }}
         #svg-wrapper {{ position: absolute; transform-origin: 0 0; background: white; box-shadow: 0 4px 20px rgba(0,0,0,0.4); }}
         #svg-wrapper svg {{ display: block; }}
-        .arrow-line {{ opacity: 0; transition: opacity 0.4s ease-in-out; }}
-        .arrow-line.visible {{ opacity: 1; }}
-        .arrow-text {{ opacity: 0; transition: opacity 0.4s ease-in-out; }}
-        .arrow-text.visible {{ opacity: 1; }}
+        /* Arrows - visible by default, dimmed when not current step (spotlight mode) */
+        .arrow-line {{ opacity: 1; transition: opacity 0.4s ease-in-out; cursor: pointer; }}
+        .arrow-line.dimmed {{ opacity: 0.35; }}
+        .arrow-line:hover {{ stroke-width: 3; filter: brightness(1.2); }}
+        .arrow-text {{ opacity: 1; transition: opacity 0.4s ease-in-out; }}
+        .arrow-text.dimmed {{ opacity: 0.35; }}
+        /* Element groups (shape + name + lifeline) - visible by default, dimmed when not in current step */
+        .element-group {{ opacity: 1; transition: opacity 0.4s ease-in-out; }}
+        .element-group.dimmed {{ opacity: 0.35; }}
         .step-overlay {{ position: absolute; bottom: 30px; left: 50%; transform: translateX(-50%); background: rgba(0, 0, 0, 0.9); color: white; padding: 16px 24px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3); max-width: 600px; opacity: 0; transition: opacity 0.3s ease-in-out; pointer-events: none; z-index: 100; }}
         .step-overlay.visible {{ opacity: 1; }}
         .step-overlay .step-number {{ font-size: 12px; color: #0066cc; font-weight: 600; margin-bottom: 6px; }}
@@ -3451,6 +3456,69 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
 
         .snackbar.open {{
             right: 0;
+        }}
+
+        /* Collapsed snackbar tab - desktop (right edge) */
+        .snackbar-tab {{
+            position: fixed;
+            top: 50%;
+            right: 0;
+            transform: translateY(-50%);
+            background: #2a2a2a;
+            border: 1px solid #444;
+            border-right: none;
+            border-radius: 8px 0 0 8px;
+            padding: 12px 8px;
+            cursor: pointer;
+            z-index: 199;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 8px;
+            transition: background 0.2s, transform 0.3s;
+        }}
+        .snackbar-tab:hover {{
+            background: #333;
+        }}
+        .snackbar-tab.hidden {{
+            transform: translateY(-50%) translateX(100%);
+            pointer-events: none;
+        }}
+        .tab-icon {{
+            color: #888;
+            font-size: 18px;
+        }}
+        .tab-text {{
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            color: #ccc;
+            font-size: 12px;
+            font-weight: 500;
+        }}
+
+        /* No selection state */
+        .no-selection {{
+            display: none;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            padding: 60px 20px;
+            text-align: center;
+            color: #888;
+        }}
+        .no-selection.visible {{
+            display: flex;
+        }}
+        .no-selection-title {{
+            font-size: 18px;
+            font-weight: 500;
+            color: #aaa;
+            margin: 0 0 12px 0;
+        }}
+        .no-selection-hint {{
+            font-size: 14px;
+            color: #666;
+            margin: 0;
         }}
 
         .snackbar-header {{
@@ -3915,6 +3983,25 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
                 right: 0;
             }}
 
+            /* Mobile snackbar tab - bottom edge */
+            .snackbar-tab {{
+                top: auto;
+                bottom: 0;
+                right: 50%;
+                transform: translateX(50%);
+                border-radius: 8px 8px 0 0;
+                border-right: 1px solid #444;
+                border-bottom: none;
+                flex-direction: row;
+                padding: 8px 16px;
+            }}
+            .snackbar-tab.hidden {{
+                transform: translateX(50%) translateY(100%);
+            }}
+            .tab-text {{
+                writing-mode: horizontal-tb;
+            }}
+
             .keyboard-help {{
                 display: none;
             }}
@@ -3967,11 +4054,23 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
     </div>
     <div class="keyboard-help">Space to play/pause • ← → to step • R to reset • 1-9 to jump to step • Scroll to zoom • Drag to pan • Click arrows for details</div>
 
+    <!-- Collapsed snackbar tab -->
+    <div id="snackbar-tab" class="snackbar-tab" onclick="expandSnackbar()">
+        <span class="tab-icon">&#9776;</span>
+        <span class="tab-text">Details</span>
+    </div>
+
     <!-- Step Metadata Snackbar -->
     <div id="step-snackbar" class="snackbar" role="complementary" aria-live="polite">
         <div class="snackbar-header">
             <h3 class="snackbar-title">Step <span id="step-number">1</span> Details</h3>
-            <button class="snackbar-close" aria-label="Close details" onclick="closeSnackbar()">×</button>
+            <button class="snackbar-close" aria-label="Close details" onclick="collapseSnackbar()">×</button>
+        </div>
+
+        <!-- No Selection State -->
+        <div id="no-selection" class="no-selection">
+            <p class="no-selection-title">No Step Selected</p>
+            <p class="no-selection-hint">Click on any relationship arrow to see details</p>
         </div>
 
         <!-- Tab Navigation -->
@@ -4074,6 +4173,7 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
         let playSpeed = 2000;
         let svgWidth = 0, svgHeight = 0, scale = 1, offsetX = 0, offsetY = 0;
         let arrowLines = [], arrowTexts = [];
+        let elementGroups = [];  // For element opacity control
         let isPanning = false, panStartX = 0, panStartY = 0, panStartOffsetX = 0, panStartOffsetY = 0;
         const container = document.getElementById('diagram-container');
         const wrapper = document.getElementById('svg-wrapper');
@@ -4100,6 +4200,8 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
                 arrowTexts = Array.from(svg.querySelectorAll('text')).filter(t => /^\d+\./.test(t.textContent || ''));
                 arrowLines.forEach((line, idx) => {{ line.classList.add('arrow-line'); line.dataset.stepIndex = idx; }});
                 arrowTexts.forEach((text, idx) => {{ text.classList.add('arrow-text'); text.dataset.stepIndex = idx; }});
+                // Collect element groups for opacity control
+                elementGroups = Array.from(svg.querySelectorAll('.element-group'));
                 fitToScreen();
                 updateDisplay();
                 // Initialize click handlers for step metadata
@@ -4130,14 +4232,49 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
             document.getElementById('step-counter').textContent = `Step ${{currentStep}} of ${{totalSteps}}`;
             document.getElementById('btn-prev').disabled = currentStep === 0;
             document.getElementById('btn-next').disabled = currentStep >= totalSteps;
-            arrowLines.forEach((line, idx) => line.classList.toggle('visible', idx < currentStep));
-            arrowTexts.forEach((text, idx) => text.classList.toggle('visible', idx < currentStep));
+
+            if (currentStep === 0) {{
+                // Initial state: everything visible, nothing dimmed
+                arrowLines.forEach(line => line.classList.remove('dimmed'));
+                arrowTexts.forEach(text => text.classList.remove('dimmed'));
+                elementGroups.forEach(group => group.classList.remove('dimmed'));
+            }} else {{
+                // Spotlight mode: only current step visible
+                const currentStepIdx = currentStep - 1;
+                const currentStepData = steps[currentStepIdx];
+
+                // Current step's involved element IDs
+                const activeElementIds = new Set([
+                    currentStepData.sourceId,
+                    currentStepData.destId
+                ]);
+
+                // Arrows: only current step's arrow is NOT dimmed
+                arrowLines.forEach((line, idx) => {{
+                    line.classList.toggle('dimmed', idx !== currentStepIdx);
+                }});
+                arrowTexts.forEach((text, idx) => {{
+                    text.classList.toggle('dimmed', idx !== currentStepIdx);
+                }});
+
+                // Elements: only current step's source/destination are NOT dimmed
+                elementGroups.forEach(group => {{
+                    const elementId = group.dataset.elementId;
+                    const isInCurrentStep = activeElementIds.has(elementId);
+                    group.classList.toggle('dimmed', !isInCurrentStep);
+                }});
+            }}
+
+            // Update step overlay
             const overlay = document.getElementById('step-overlay');
             if (currentStep > 0 && currentStep <= steps.length) {{
                 const step = steps[currentStep - 1];
                 document.getElementById('overlay-number').textContent = `Step ${{step.order}}`;
                 document.getElementById('overlay-desc').textContent = step.description || 'No description';
                 overlay.classList.add('visible');
+
+                // Always keep snackbar content in sync with current step
+                populateSnackbarContent(currentStep - 1);
             }} else {{
                 overlay.classList.remove('visible');
             }}
@@ -4183,13 +4320,16 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
 
         // Snackbar functionality
         let currentSnackbarStep = null;
-        let snackbarOpen = false;
+        let snackbarCollapsed = true;  // Start collapsed
+        let selectedStepIndex = null;  // Track selected step separately
 
-        function showStepMetadata(stepIndex) {{
+        // Populate snackbar content without expanding (used for navigation updates)
+        function populateSnackbarContent(stepIndex) {{
             if (stepIndex < 0 || stepIndex >= steps.length) return;
 
             const step = steps[stepIndex];
             currentSnackbarStep = stepIndex;
+            selectedStepIndex = stepIndex;
 
             // Update header
             document.getElementById('step-number').textContent = step.order;
@@ -4258,21 +4398,52 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
                 perspSection.style.display = 'none';
             }}
 
-            // Open snackbar
-            openSnackbar();
+            hideNoSelection();
         }}
 
-        function openSnackbar() {{
+        // Show step metadata AND expand snackbar (called from arrow click handlers)
+        function showStepMetadata(stepIndex) {{
+            populateSnackbarContent(stepIndex);
+            expandSnackbar();
+        }}
+
+        function expandSnackbar() {{
             const snackbar = document.getElementById('step-snackbar');
+            const tab = document.getElementById('snackbar-tab');
             snackbar.classList.add('open');
-            snackbarOpen = true;
+            tab.classList.add('hidden');
+            snackbarCollapsed = false;
+
+            // Show appropriate content based on selection
+            if (selectedStepIndex === null) {{
+                showNoSelection();
+            }}
         }}
 
-        function closeSnackbar() {{
+        function collapseSnackbar() {{
             const snackbar = document.getElementById('step-snackbar');
+            const tab = document.getElementById('snackbar-tab');
             snackbar.classList.remove('open');
-            snackbarOpen = false;
-            currentSnackbarStep = null;
+            tab.classList.remove('hidden');
+            snackbarCollapsed = true;
+            // Note: selectedStepIndex is NOT cleared - maintains selection state
+        }}
+
+        function showNoSelection() {{
+            document.getElementById('no-selection').classList.add('visible');
+            // Hide the tabs and all tab content
+            document.querySelector('.snackbar-tabs').style.display = 'none';
+            document.querySelectorAll('.snackbar .tab-content').forEach(c => c.style.display = 'none');
+        }}
+
+        function hideNoSelection() {{
+            document.getElementById('no-selection').classList.remove('visible');
+            // Show the tabs
+            document.querySelector('.snackbar-tabs').style.display = 'flex';
+            // Restore tab content visibility based on active state
+            document.querySelectorAll('.snackbar .tab-content').forEach(c => {{
+                c.style.display = c.classList.contains('active') ? 'block' : 'none';
+            }});
         }}
 
         // Tab switching
@@ -4453,8 +4624,8 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
 
         // Keyboard shortcuts for snackbar
         document.addEventListener('keydown', (e) => {{
-            if (e.key === 'Escape' && snackbarOpen) {{
-                closeSnackbar();
+            if (e.key === 'Escape' && !snackbarCollapsed) {{
+                collapseSnackbar();
             }}
         }});
 

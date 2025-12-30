@@ -76,35 +76,268 @@ workspace "Healthcare Patient Journey" "Hospital patient management with multi-a
         }
 
         // Patient interactions
-        patient -> patientPortal "Accesses health records via" "HTTPS"
+        patient -> patientPortal "Accesses health records via" "HTTPS" {
+            tags "Patient Access, Self-Service"
+            properties {
+                "authentication" "MyChart SSO"
+                "mobileApp" "Available"
+            }
+            perspectives {
+                "Patient Experience" "24/7 access to health records and appointments"
+                "Security" "HIPAA-compliant patient data access"
+                "Compliance" "Patient portal required for Meaningful Use"
+            }
+        }
+        patient -> receptionist "Arrives and checks in at front desk" {
+            tags "In-Person, Registration"
+            perspectives {
+                "Patient Experience" "Average wait time target: 5 minutes"
+                "Operations" "Photo ID and insurance card verification"
+            }
+        }
 
-        // Staff to system interactions (through hospital containers, not direct to external)
-        receptionist -> admissionService "Manages patient check-in with"
-        receptionist -> schedulingService "Books appointments via"
-        nurse -> clinicalWorkstation "Documents care in"
-        doctor -> clinicalWorkstation "Reviews charts and enters orders in"
-        labTechnician -> integrationHub "Views lab orders via"
-        pharmacist -> integrationHub "Views prescriptions via"
-        billingClerk -> integrationHub "Views billing data via"
+        // Staff to system interactions
+        receptionist -> admissionService "Manages patient check-in with" {
+            tags "Registration, ADT"
+            properties {
+                "scanners" "ID and insurance card"
+                "kiosk" "Self-service available"
+            }
+            perspectives {
+                "Workflow" "Average check-in time: 3 minutes"
+                "Compliance" "Identity verification required"
+            }
+        }
+        receptionist -> schedulingService "Books appointments via" {
+            tags "Scheduling, Admin"
+            properties {
+                "overbooking" "10% allowed"
+            }
+            perspectives {
+                "Operations" "Real-time availability view"
+            }
+        }
+        nurse -> clinicalWorkstation "Documents care in" {
+            tags "Clinical Documentation, Nursing"
+            properties {
+                "flowsheets" "Vitals, I/O, assessments"
+                "barcodeScanning" "Medication administration"
+            }
+            perspectives {
+                "Clinical" "Standardized nursing documentation"
+                "Safety" "5 rights of medication administration"
+                "Compliance" "Required for Joint Commission"
+            }
+        }
+        doctor -> clinicalWorkstation "Reviews charts and enters orders in" {
+            tags "Clinical Documentation, CPOE"
+            properties {
+                "orderSets" "Evidence-based templates"
+                "alerts" "Drug-drug interactions"
+            }
+            perspectives {
+                "Clinical" "Comprehensive patient chart view"
+                "Safety" "Clinical decision support alerts"
+                "Compliance" "CPOE required for quality metrics"
+            }
+        }
+        labTechnician -> integrationHub "Views lab orders via" "HL7" {
+            tags "Lab, Orders"
+            perspectives {
+                "Workflow" "Real-time order queue"
+            }
+        }
+        pharmacist -> integrationHub "Views prescriptions via" "HL7" {
+            tags "Pharmacy, Rx"
+            perspectives {
+                "Safety" "Drug utilization review"
+            }
+        }
+        billingClerk -> integrationHub "Views billing data via" {
+            tags "Billing, Revenue Cycle"
+            perspectives {
+                "Financial" "Real-time charge capture"
+            }
+        }
 
         // Portal to services
-        patientPortal -> schedulingService "Requests appointments from"
-        clinicalWorkstation -> clinicalService "Accesses clinical data via"
+        patientPortal -> schedulingService "Requests appointments from" "REST" {
+            tags "Patient Self-Service, Scheduling"
+            properties {
+                "realTimeAvailability" "true"
+                "confirmationMethod" "Email + SMS"
+            }
+            perspectives {
+                "Patient Experience" "Online booking reduces call volume 40%"
+                "Operations" "Automated appointment reminders"
+            }
+        }
+        clinicalWorkstation -> clinicalService "Accesses clinical data via" "gRPC" {
+            tags "Clinical, Real-time"
+            properties {
+                "caching" "Chart data cached 5 min"
+                "auditLogging" "All access logged"
+            }
+            perspectives {
+                "Performance" "Sub-second chart load time"
+                "Security" "Break-the-glass for restricted records"
+                "Compliance" "HIPAA access audit trail"
+            }
+        }
 
         // Service to service
-        admissionService -> ehrDatabase "Stores patient data in"
-        admissionService -> integrationHub "Checks insurance via"
-        schedulingService -> ehrDatabase "Stores appointments in"
-        clinicalService -> ehrDatabase "Reads/writes clinical records in"
-        clinicalService -> integrationHub "Sends orders via"
-        // Note: notificationService sends alerts to people (shown in dynamic views)
+        admissionService -> ehrDatabase "Stores patient data in" "SQL" {
+            tags "Data, Patient Demographics"
+            properties {
+                "encryption" "AES-256"
+                "backup" "Every 15 minutes"
+            }
+            perspectives {
+                "Data" "Master patient index source"
+                "Compliance" "HIPAA data protection"
+            }
+        }
+        admissionService -> integrationHub "Checks insurance via" "HL7" {
+            tags "Eligibility, Insurance"
+            properties {
+                "responseTime" "Real-time 270/271"
+                "caching" "24 hours"
+            }
+            perspectives {
+                "Financial" "Reduces claim denials 30%"
+                "Operations" "Real-time eligibility verification"
+            }
+        }
+        schedulingService -> ehrDatabase "Stores appointments in" "SQL" {
+            tags "Data, Scheduling"
+            properties {
+                "conflictDetection" "Automatic"
+            }
+            perspectives {
+                "Operations" "Resource optimization"
+            }
+        }
+        clinicalService -> ehrDatabase "Reads/writes clinical records in" "SQL" {
+            tags "Data, Clinical, PHI"
+            properties {
+                "versionControl" "All changes tracked"
+                "attestation" "Digital signatures"
+            }
+            perspectives {
+                "Clinical" "Single source of truth for patient care"
+                "Legal" "Legal medical record"
+                "Compliance" "21 CFR Part 11 compliant"
+            }
+        }
+        clinicalService -> integrationHub "Sends orders via" "HL7" {
+            tags "Orders, Integration"
+            properties {
+                "format" "HL7 v2.5.1 ORM/ORU"
+                "acknowledgment" "Required"
+            }
+            perspectives {
+                "Clinical" "CPOE to ancillary departments"
+                "Workflow" "Real-time order transmission"
+            }
+        }
+        notificationService -> doctor "Alerts doctor results ready" "Secure Message" {
+            tags "Notification, Clinical Alert"
+            properties {
+                "priority" "Critical/Routine"
+                "escalation" "15 min for critical"
+            }
+            perspectives {
+                "Clinical" "Time-sensitive result notification"
+                "Safety" "Critical value alerts"
+            }
+        }
+        notificationService -> patient "Sends visit summary and follow-up" "Email/SMS" {
+            tags "Notification, Patient Communication"
+            properties {
+                "methods" "Email, SMS, Patient Portal"
+                "language" "Patient preferred"
+            }
+            perspectives {
+                "Patient Experience" "Post-visit engagement"
+                "Compliance" "Discharge summary within 24 hours"
+            }
+        }
 
-        // Integration hub connections (unidirectional for clean layout)
-        integrationHub -> labSystem "Routes lab orders to" "HL7/FHIR"
-        integrationHub -> pharmacySystem "Sends prescriptions to" "HL7/FHIR"
-        integrationHub -> billingSystem "Sends charges to" "HL7"
-        integrationHub -> insurancePortal "Checks eligibility via" "REST"
-        // Note: Bidirectional HL7/FHIR message flow shown in dynamic views
+        // Integration hub connections
+        integrationHub -> labSystem "Routes lab orders to" "HL7/FHIR" {
+            tags "Integration, Lab, HL7"
+            properties {
+                "messageType" "ORM^O01, ORU^R01"
+                "resultsInterface" "Bidirectional"
+            }
+            perspectives {
+                "Clinical" "Electronic lab ordering and results"
+                "Workflow" "Eliminates paper requisitions"
+                "Quality" "Reduced transcription errors"
+            }
+        }
+        integrationHub -> pharmacySystem "Sends prescriptions to" "HL7/FHIR" {
+            tags "Integration, Pharmacy, eRx"
+            properties {
+                "messageType" "RDE^O11, RDS^O13"
+                "controlledSubstances" "EPCS compliant"
+            }
+            perspectives {
+                "Safety" "Electronic prescribing reduces errors"
+                "Compliance" "EPCS for controlled substances"
+                "Workflow" "Direct pharmacy transmission"
+            }
+        }
+        integrationHub -> billingSystem "Sends charges to" "HL7" {
+            tags "Integration, Billing, Revenue"
+            properties {
+                "messageType" "DFT^P03"
+                "realTime" "true"
+            }
+            perspectives {
+                "Financial" "Real-time charge capture"
+                "Compliance" "Accurate billing documentation"
+            }
+        }
+        integrationHub -> insurancePortal "Checks eligibility via" "REST" {
+            tags "Integration, Insurance, Eligibility"
+            properties {
+                "standard" "X12 270/271"
+                "caching" "24 hours"
+            }
+            perspectives {
+                "Financial" "Reduces claim denials"
+                "Patient Experience" "Accurate copay estimates"
+            }
+        }
+
+        // Additional relationships for dynamic views
+        labSystem -> integrationHub "Sends results via HL7" "HL7" {
+            tags "Integration, Lab Results"
+            properties {
+                "messageType" "ORU^R01"
+                "criticalValues" "Immediate notification"
+            }
+            perspectives {
+                "Clinical" "Electronic lab results"
+                "Safety" "Critical value alerting"
+            }
+        }
+        integrationHub -> clinicalService "Results arrive in EHR" "HL7" {
+            tags "Integration, Results"
+            perspectives {
+                "Clinical" "Automatic chart update"
+            }
+        }
+        billingSystem -> integrationHub "Submits claim to payer" "X12" {
+            tags "Integration, Claims"
+            properties {
+                "format" "X12 837"
+            }
+            perspectives {
+                "Financial" "Electronic claims submission"
+            }
+        }
     }
 
     views {

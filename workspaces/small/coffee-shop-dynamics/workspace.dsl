@@ -119,6 +119,35 @@ workspace "Coffee Shop Ordering" "Simple coffee shop demonstrating dynamic diagr
                 "Compliance" "FDA requirements for ingredient tracking. Allergen information mandatory."
             }
         }
+
+        // Additional relationships for dynamic view
+        inventoryService -> orderQueue "Confirms ingredients available" "gRPC" {
+            tags "api, async-response, inventory"
+            properties {
+                "responseType" "availability-check"
+                "timeout" "1s"
+            }
+            perspectives {
+                "Business" "Prevents accepting orders for out-of-stock items"
+                "Technical" "Callback pattern for async inventory verification"
+                "Operations" "Suggests alternatives when items unavailable"
+            }
+        }
+
+        orderQueue -> barista "Displays order on queue screen" "WebSocket" {
+            tags "notification, real-time, staff"
+            properties {
+                "protocol" "WebSocket"
+                "priority" "High for mobile orders"
+                "displayFormat" "Color-coded by complexity"
+            }
+            perspectives {
+                "Operations" "FIFO queue with priority override for mobile pickup"
+                "Business" "Efficient order routing reduces wait times"
+                "Technical" "Server-sent events with automatic reconnection"
+                "UX" "Audible notification for new orders"
+            }
+        }
     }
 
     views {
