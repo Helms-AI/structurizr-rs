@@ -7,6 +7,7 @@
 pub mod discovery;
 pub mod editor;
 pub mod error;
+pub mod explore;
 pub mod handlers;
 pub mod layout;
 pub mod markdown;

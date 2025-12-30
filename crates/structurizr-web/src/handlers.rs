@@ -581,1077 +581,13 @@ fn matches_search(text: &str, query: &str) -> bool {
     text.to_lowercase().contains(query)
 }
 
-/// Generate explore page HTML (shared between single and multi-workspace modes).
-fn generate_explore_page_html(workspace: &Workspace, base_path: &str, workspace_id: Option<&str>) -> String {
-    let model = workspace.model();
+// Use the explore module's function for generating explore page HTML
+use crate::explore::generate_explore_page_html;
 
-    // Build nodes JSON
-    let mut nodes_json = String::from("[");
-    let mut first = true;
+// The old explore page implementation has been moved to the explore module.
+// See crates/structurizr-web/src/explore/ for the modular implementation.
 
-    // Add people
-    for person in &model.people {
-        if !first {
-            nodes_json.push(',');
-        }
-        first = false;
-        nodes_json.push_str(&format!(
-            r#"{{"id":"{}","name":"{}","type":"Person","description":{}}}"#,
-            person.id(),
-            escape_json(&person.name()),
-            person.properties.description.as_ref()
-                .map(|d| format!("\"{}\"", escape_json(d)))
-                .unwrap_or_else(|| "null".to_string())
-        ));
-    }
-
-    // Add software systems
-    for system in &model.software_systems {
-        if !first {
-            nodes_json.push(',');
-        }
-        first = false;
-        nodes_json.push_str(&format!(
-            r#"{{"id":"{}","name":"{}","type":"Software System","description":{}}}"#,
-            system.id(),
-            escape_json(&system.name()),
-            system.properties.description.as_ref()
-                .map(|d| format!("\"{}\"", escape_json(d)))
-                .unwrap_or_else(|| "null".to_string())
-        ));
-
-        // Add containers
-        for container in &system.containers {
-            nodes_json.push(',');
-            nodes_json.push_str(&format!(
-                r#"{{"id":"{}","name":"{}","type":"Container","description":{},"technology":{}}}"#,
-                container.id(),
-                escape_json(&container.name()),
-                container.properties.description.as_ref()
-                    .map(|d| format!("\"{}\"", escape_json(d)))
-                    .unwrap_or_else(|| "null".to_string()),
-                container.technology.as_ref()
-                    .map(|t| format!("\"{}\"", escape_json(t)))
-                    .unwrap_or_else(|| "null".to_string())
-            ));
-
-            // Add components
-            for component in &container.components {
-                nodes_json.push(',');
-                nodes_json.push_str(&format!(
-                    r#"{{"id":"{}","name":"{}","type":"Component","description":{},"technology":{}}}"#,
-                    component.id(),
-                    escape_json(&component.name()),
-                    component.properties.description.as_ref()
-                        .map(|d| format!("\"{}\"", escape_json(d)))
-                        .unwrap_or_else(|| "null".to_string()),
-                    component.technology.as_ref()
-                        .map(|t| format!("\"{}\"", escape_json(t)))
-                        .unwrap_or_else(|| "null".to_string())
-                ));
-            }
-        }
-    }
-    nodes_json.push(']');
-
-    // Build links JSON
-    let mut links_json = String::from("[");
-    first = true;
-
-    for rel in &model.relationships {
-        if !first {
-            links_json.push(',');
-        }
-        first = false;
-        links_json.push_str(&format!(
-            r#"{{"source":"{}","target":"{}","label":{}}}"#,
-            rel.source_id,
-            rel.destination_id,
-            rel.description.as_ref()
-                .map(|d| format!("\"{}\"", escape_json(d)))
-                .unwrap_or_else(|| "null".to_string())
-        ));
-    }
-    links_json.push(']');
-
-    let title = format!("Explore - {}", workspace.name);
-
-    let extra_styles = r##"<style>
-        .explore-toolbar {
-            background: var(--toolbar-bg);
-            padding: 10px 20px;
-            display: flex;
-            align-items: center;
-            gap: 20px;
-            border-bottom: 1px solid var(--toolbar-border);
-        }
-        .explore-toolbar span { color: var(--toolbar-text); }
-        .explore-toolbar button {
-            background: var(--bg-tertiary);
-            color: var(--text-primary);
-            border: 1px solid var(--border-color);
-            padding: 8px 16px;
-            border-radius: 4px;
-            cursor: pointer;
-        }
-        .explore-toolbar button:hover { background: var(--card-hover); }
-        .explore-toolbar .separator { border-left: 1px solid var(--border-color); height: 20px; }
-        .canvas-container { flex: 1; position: relative; background: var(--canvas-bg); }
-        svg { width: 100%; height: 100%; cursor: grab; }
-        svg.dragging { cursor: grabbing; }
-        .node { cursor: pointer; }
-        .node circle { transition: r 0.2s, fill 0.2s; }
-        .node:hover circle { r: 35; }
-        .node text { pointer-events: none; user-select: none; fill: #fff; }
-        .link { stroke: var(--text-muted); stroke-width: 1.5; fill: none; }
-        .link-label { fill: var(--text-muted); font-size: 10px; pointer-events: none; user-select: none; }
-        .tooltip {
-            position: fixed;
-            background: var(--card-bg);
-            color: var(--text-primary);
-            padding: 12px 16px;
-            border-radius: 6px;
-            font-size: 13px;
-            max-width: 300px;
-            z-index: 1000;
-            pointer-events: none;
-            box-shadow: 0 4px 12px var(--shadow-medium);
-            border: 1px solid var(--border-color);
-            display: none;
-        }
-        .tooltip h4 { margin: 0 0 6px 0; font-size: 14px; }
-        .tooltip .type { color: var(--text-muted); font-size: 11px; margin-bottom: 8px; }
-        .tooltip .desc { line-height: 1.4; }
-        .tooltip .tech { color: var(--link-color); margin-top: 6px; font-size: 12px; }
-        .info {
-            position: fixed;
-            bottom: 20px;
-            left: 20px;
-            background: var(--card-bg);
-            padding: 12px 16px;
-            border-radius: 6px;
-            font-size: 12px;
-            color: var(--text-muted);
-            border: 1px solid var(--border-color);
-        }
-        .controls { display: flex; gap: 10px; align-items: center; }
-        .controls label {
-            font-size: 12px;
-            color: var(--text-secondary);
-            display: flex;
-            align-items: center;
-            gap: 5px;
-        }
-        .controls input[type="range"] { width: 100px; }
-    </style>"##;
-
-    let extra_scripts = format!(r##"<script>
-        const nodes = {{}};
-        const links = {{}};
-
-        // Create SVG and groups
-        const svg = document.getElementById('canvas');
-        const container = document.querySelector('.canvas-container');
-        const width = container.clientWidth;
-        const height = container.clientHeight;
-
-        svg.setAttribute('viewBox', `0 0 ${{width}} ${{height}}`);
-
-        const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        svg.appendChild(g);
-
-        const linkGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        linkGroup.setAttribute('class', 'links');
-        g.appendChild(linkGroup);
-
-        const nodeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-        nodeGroup.setAttribute('class', 'nodes');
-        g.appendChild(nodeGroup);
-
-        // Zoom and pan
-        let transform = {{ x: 0, y: 0, k: 1 }};
-        let isPanning = false;
-        let panStart = {{ x: 0, y: 0 }};
-
-        svg.addEventListener('wheel', (e) => {{
-            e.preventDefault();
-            const rect = svg.getBoundingClientRect();
-            const x = e.clientX - rect.left;
-            const y = e.clientY - rect.top;
-
-            const delta = e.deltaY > 0 ? 0.9 : 1.1;
-            const newK = Math.max(0.1, Math.min(5, transform.k * delta));
-
-            transform.x = x - (x - transform.x) * (newK / transform.k);
-            transform.y = y - (y - transform.y) * (newK / transform.k);
-            transform.k = newK;
-
-            updateTransform();
-        }});
-
-        svg.addEventListener('mousedown', (e) => {{
-            if (e.button === 0 && !e.target.closest('.node')) {{
-                isPanning = true;
-                panStart = {{ x: e.clientX - transform.x, y: e.clientY - transform.y }};
-                svg.classList.add('dragging');
-            }}
-        }});
-
-        document.addEventListener('mousemove', (e) => {{
-            if (isPanning) {{
-                transform.x = e.clientX - panStart.x;
-                transform.y = e.clientY - panStart.y;
-                updateTransform();
-            }}
-        }});
-
-        document.addEventListener('mouseup', () => {{
-            isPanning = false;
-            svg.classList.remove('dragging');
-        }});
-
-        function updateTransform() {{
-            g.setAttribute('transform', `translate(${{transform.x}},${{transform.y}}) scale(${{transform.k}})`);
-        }}
-
-        // Node colors by type
-        const colors = {{
-            'Person': '#08427b',
-            'Software System': '#1168bd',
-            'Container': '#438dd5',
-            'Component': '#85bbf0'
-        }};
-
-        // Initialize force simulation
-        let simulation = {{
-            nodes: [],
-            links: [],
-            alpha: 1,
-            alphaDecay: 0.02,
-            velocityDecay: 0.4,
-            chargeStrength: -300,
-            linkDistance: 100
-        }};
-
-        // Load data
-        const data = {{
-            nodes: {nodes_json},
-            links: {links_json}
-        }};
-
-        // Create node elements
-        data.nodes.forEach(node => {{
-            node.x = width / 2 + (Math.random() - 0.5) * 200;
-            node.y = height / 2 + (Math.random() - 0.5) * 200;
-            node.vx = 0;
-            node.vy = 0;
-
-            const nodeG = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            nodeG.setAttribute('class', 'node');
-            nodeG.setAttribute('data-id', node.id);
-
-            const circle = document.createElementNS('http://www.w3.org/2000/svg', 'circle');
-            circle.setAttribute('r', 30);
-            circle.setAttribute('fill', colors[node.type] || '#999');
-            circle.setAttribute('stroke', '#fff');
-            circle.setAttribute('stroke-width', 2);
-
-            const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            text.setAttribute('text-anchor', 'middle');
-            text.setAttribute('dy', '0.35em');
-            text.setAttribute('font-size', '12');
-            text.textContent = node.name.length > 15 ? node.name.substring(0, 13) + '...' : node.name;
-
-            nodeG.appendChild(circle);
-            nodeG.appendChild(text);
-            nodeGroup.appendChild(nodeG);
-
-            node.element = nodeG;
-            nodes[node.id] = node;
-
-            // Drag handlers
-            let isDragging = false;
-            let dragStart = {{ x: 0, y: 0 }};
-
-            nodeG.addEventListener('mousedown', (e) => {{
-                e.stopPropagation();
-                isDragging = true;
-                dragStart = {{ x: e.clientX / transform.k - node.x, y: e.clientY / transform.k - node.y }};
-                node.fx = node.x;
-                node.fy = node.y;
-            }});
-
-            document.addEventListener('mousemove', (e) => {{
-                if (isDragging && node.fx !== undefined) {{
-                    node.fx = e.clientX / transform.k - dragStart.x;
-                    node.fy = e.clientY / transform.k - dragStart.y;
-                }}
-            }});
-
-            document.addEventListener('mouseup', () => {{
-                if (isDragging) {{
-                    isDragging = false;
-                    node.fx = undefined;
-                    node.fy = undefined;
-                }}
-            }});
-
-            // Tooltip
-            nodeG.addEventListener('mouseenter', (e) => {{
-                const tooltip = document.getElementById('tooltip');
-                let html = `<h4>${{escapeHtml(node.name)}}</h4><div class="type">${{node.type}}</div>`;
-                if (node.description) {{
-                    html += `<div class="desc">${{escapeHtml(node.description)}}</div>`;
-                }}
-                if (node.technology) {{
-                    html += `<div class="tech">Technology: ${{escapeHtml(node.technology)}}</div>`;
-                }}
-                tooltip.innerHTML = html;
-                tooltip.style.display = 'block';
-            }});
-
-            nodeG.addEventListener('mousemove', (e) => {{
-                const tooltip = document.getElementById('tooltip');
-                tooltip.style.left = (e.clientX + 15) + 'px';
-                tooltip.style.top = (e.clientY + 15) + 'px';
-            }});
-
-            nodeG.addEventListener('mouseleave', () => {{
-                document.getElementById('tooltip').style.display = 'none';
-            }});
-        }});
-
-        // Create link elements
-        data.links.forEach(link => {{
-            const source = nodes[link.source];
-            const target = nodes[link.target];
-
-            if (!source || !target) return;
-
-            link.source = source;
-            link.target = target;
-
-            const path = document.createElementNS('http://www.w3.org/2000/svg', 'path');
-            path.setAttribute('class', 'link');
-            linkGroup.appendChild(path);
-
-            link.element = path;
-
-            if (link.label) {{
-                const text = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                text.setAttribute('class', 'link-label');
-                text.setAttribute('text-anchor', 'middle');
-                text.textContent = link.label.length > 20 ? link.label.substring(0, 18) + '...' : link.label;
-                linkGroup.appendChild(text);
-                link.labelElement = text;
-            }}
-
-            links[`${{link.source.id}}-${{link.target.id}}`] = link;
-        }});
-
-        simulation.nodes = data.nodes;
-        simulation.links = data.links;
-
-        // Update counts
-        document.getElementById('node-count').textContent = data.nodes.length;
-        document.getElementById('link-count').textContent = data.links.length;
-
-        // Force simulation
-        function tick() {{
-            if (simulation.alpha < 0.001) return;
-
-            simulation.alpha *= (1 - simulation.alphaDecay);
-
-            // Apply forces
-            simulation.nodes.forEach(node => {{
-                if (node.fx !== undefined) {{
-                    node.x = node.fx;
-                    node.y = node.fy;
-                    node.vx = 0;
-                    node.vy = 0;
-                    return;
-                }}
-
-                // Center force
-                const cx = width / 2;
-                const cy = height / 2;
-                node.vx += (cx - node.x) * 0.01;
-                node.vy += (cy - node.y) * 0.01;
-
-                // Many-body repulsion
-                simulation.nodes.forEach(other => {{
-                    if (node === other) return;
-                    const dx = node.x - other.x;
-                    const dy = node.y - other.y;
-                    const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                    const force = simulation.chargeStrength / (dist * dist);
-                    node.vx += (dx / dist) * force;
-                    node.vy += (dy / dist) * force;
-                }});
-            }});
-
-            // Link force
-            simulation.links.forEach(link => {{
-                const dx = link.target.x - link.source.x;
-                const dy = link.target.y - link.source.y;
-                const dist = Math.sqrt(dx * dx + dy * dy) || 1;
-                const force = (dist - simulation.linkDistance) * 0.1;
-                const fx = (dx / dist) * force;
-                const fy = (dy / dist) * force;
-
-                if (link.source.fx === undefined) {{
-                    link.source.vx += fx;
-                    link.source.vy += fy;
-                }}
-                if (link.target.fx === undefined) {{
-                    link.target.vx -= fx;
-                    link.target.vy -= fy;
-                }}
-            }});
-
-            // Apply velocity
-            simulation.nodes.forEach(node => {{
-                if (node.fx !== undefined) return;
-                node.vx *= simulation.velocityDecay;
-                node.vy *= simulation.velocityDecay;
-                node.x += node.vx;
-                node.y += node.vy;
-            }});
-
-            render();
-            requestAnimationFrame(tick);
-        }}
-
-        function render() {{
-            // Update node positions
-            simulation.nodes.forEach(node => {{
-                node.element.setAttribute('transform', `translate(${{node.x}},${{node.y}})`);
-            }});
-
-            // Update link positions
-            simulation.links.forEach(link => {{
-                const sx = link.source.x;
-                const sy = link.source.y;
-                const tx = link.target.x;
-                const ty = link.target.y;
-
-                // Draw curved line
-                const dx = tx - sx;
-                const dy = ty - sy;
-                const dr = Math.sqrt(dx * dx + dy * dy) * 1.5;
-                link.element.setAttribute('d', `M${{sx}},${{sy}}A${{dr}},${{dr}} 0 0,1 ${{tx}},${{ty}}`);
-
-                if (link.labelElement) {{
-                    link.labelElement.setAttribute('x', (sx + tx) / 2);
-                    link.labelElement.setAttribute('y', (sy + ty) / 2);
-                }}
-            }});
-        }}
-
-        function resetSimulation() {{
-            simulation.alpha = 1;
-            simulation.nodes.forEach(node => {{
-                node.x = width / 2 + (Math.random() - 0.5) * 200;
-                node.y = height / 2 + (Math.random() - 0.5) * 200;
-                node.vx = 0;
-                node.vy = 0;
-            }});
-            tick();
-        }}
-
-        function centerGraph() {{
-            transform = {{ x: 0, y: 0, k: 1 }};
-            updateTransform();
-        }}
-
-        function escapeHtml(text) {{
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }}
-
-        // Controls
-        document.getElementById('charge-slider').addEventListener('input', (e) => {{
-            simulation.chargeStrength = -parseInt(e.target.value);
-            document.getElementById('charge-value').textContent = simulation.chargeStrength;
-            simulation.alpha = 0.3;
-        }});
-
-        document.getElementById('link-slider').addEventListener('input', (e) => {{
-            simulation.linkDistance = parseInt(e.target.value);
-            document.getElementById('link-value').textContent = simulation.linkDistance;
-            simulation.alpha = 0.3;
-        }});
-
-        // Handle window resize
-        window.addEventListener('resize', () => {{
-            const newWidth = container.clientWidth;
-            const newHeight = container.clientHeight;
-            svg.setAttribute('viewBox', `0 0 ${{newWidth}} ${{newHeight}}`);
-        }});
-
-        // Start simulation
-        tick();
-    </script>"##, nodes_json = nodes_json, links_json = links_json);
-
-    let content = r#"
-        <div class="explore-toolbar">
-            <span>Explore Graph</span>
-            <div class="separator"></div>
-            <div class="controls">
-                <button onclick="resetSimulation()">Reset</button>
-                <button onclick="centerGraph()">Center</button>
-                <label>
-                    Charge: <input type="range" id="charge-slider" min="50" max="500" value="300" step="10">
-                    <span id="charge-value">-300</span>
-                </label>
-                <label>
-                    Link Distance: <input type="range" id="link-slider" min="30" max="200" value="100" step="10">
-                    <span id="link-value">100</span>
-                </label>
-            </div>
-        </div>
-        <div class="canvas-container">
-            <svg id="canvas"></svg>
-        </div>
-        <div class="tooltip" id="tooltip"></div>
-        <div class="info">
-            <div>Nodes: <span id="node-count">0</span> | Links: <span id="link-count">0</span></div>
-            <div style="margin-top: 4px; font-size: 11px;">Drag nodes • Scroll to zoom • Drag canvas to pan</div>
-        </div>
-    "#;
-
-    let config = LayoutConfig {
-        title: &title,
-        workspace_name: Some(&workspace.name),
-        workspace_id,
-        base_path,
-        active_nav: NavItem::Explore,
-        content_type: ContentType::ToolbarViewport,
-        extra_head: extra_styles,
-        extra_body_end: &extra_scripts,
-    };
-
-    generate_page_layout(&config, content)
-}
-
-/// Generate tree view HTML content (shared between single and multi-workspace modes).
-fn generate_tree_page_html(workspace: &Workspace, base_path: &str, workspace_id: Option<&str>) -> String {
-    let model = workspace.model();
-
-    // Build tree structure HTML
-    let mut tree_html = String::new();
-
-    // People branch
-    if !model.people.is_empty() {
-        tree_html.push_str(r#"<li class="expandable expanded">"#);
-        tree_html.push_str(r#"<div class="tree-node" data-type="group">"#);
-        tree_html.push_str(r#"<span class="toggle">▼</span>"#);
-        tree_html.push_str(r#"<span class="icon">👤</span>"#);
-        tree_html.push_str(r#"<span class="name">People</span>"#);
-        tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, model.people.len()));
-        tree_html.push_str(r#"</div>"#);
-        tree_html.push_str(r#"<ul class="children">"#);
-
-        for person in &model.people {
-            tree_html.push_str(r#"<li class="leaf">"#);
-            tree_html.push_str(&format!(
-                r#"<div class="tree-node" data-id="{}" data-type="Person" data-name="{}" data-description="{}">"#,
-                person.id(),
-                escape_html(&person.name()),
-                person.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default()
-            ));
-            tree_html.push_str(r#"<span class="icon">👤</span>"#);
-            tree_html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&person.name())));
-            if let Some(desc) = &person.properties.description {
-                let truncated = if desc.len() > 50 {
-                    format!("{}...", &desc[..50])
-                } else {
-                    desc.clone()
-                };
-                tree_html.push_str(&format!(r#"<span class="desc">{}</span>"#, escape_html(&truncated)));
-            }
-            tree_html.push_str(r#"</div>"#);
-            tree_html.push_str(r#"</li>"#);
-        }
-
-        tree_html.push_str(r#"</ul></li>"#);
-    }
-
-    // Software Systems branch
-    if !model.software_systems.is_empty() {
-        tree_html.push_str(r#"<li class="expandable expanded">"#);
-        tree_html.push_str(r#"<div class="tree-node" data-type="group">"#);
-        tree_html.push_str(r#"<span class="toggle">▼</span>"#);
-        tree_html.push_str(r#"<span class="icon">📦</span>"#);
-        tree_html.push_str(r#"<span class="name">Software Systems</span>"#);
-        tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, model.software_systems.len()));
-        tree_html.push_str(r#"</div>"#);
-        tree_html.push_str(r#"<ul class="children">"#);
-
-        for system in &model.software_systems {
-            let has_containers = !system.containers.is_empty();
-
-            if has_containers {
-                tree_html.push_str(r#"<li class="expandable">"#);
-            } else {
-                tree_html.push_str(r#"<li class="leaf">"#);
-            }
-
-            tree_html.push_str(&format!(
-                r#"<div class="tree-node" data-id="{}" data-type="Software System" data-name="{}" data-description="{}">"#,
-                system.id(),
-                escape_html(&system.name()),
-                system.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default()
-            ));
-
-            if has_containers {
-                tree_html.push_str(r#"<span class="toggle">▶</span>"#);
-            }
-            tree_html.push_str(r#"<span class="icon">📦</span>"#);
-            tree_html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&system.name())));
-            if has_containers {
-                tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, system.containers.len()));
-            }
-            if let Some(desc) = &system.properties.description {
-                let truncated = if desc.len() > 50 {
-                    format!("{}...", &desc[..50])
-                } else {
-                    desc.clone()
-                };
-                tree_html.push_str(&format!(r#"<span class="desc">{}</span>"#, escape_html(&truncated)));
-            }
-            tree_html.push_str(r#"</div>"#);
-
-            // Add containers if any
-            if has_containers {
-                tree_html.push_str(r#"<ul class="children">"#);
-
-                for container in &system.containers {
-                    let has_components = !container.components.is_empty();
-
-                    if has_components {
-                        tree_html.push_str(r#"<li class="expandable">"#);
-                    } else {
-                        tree_html.push_str(r#"<li class="leaf">"#);
-                    }
-
-                    tree_html.push_str(&format!(
-                        r#"<div class="tree-node" data-id="{}" data-type="Container" data-name="{}" data-description="{}" data-technology="{}">"#,
-                        container.id(),
-                        escape_html(&container.name()),
-                        container.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default(),
-                        container.technology.as_ref().map(|t| escape_html(t)).unwrap_or_default()
-                    ));
-
-                    if has_components {
-                        tree_html.push_str(r#"<span class="toggle">▶</span>"#);
-                    }
-                    tree_html.push_str(r#"<span class="icon">🗄️</span>"#);
-                    tree_html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&container.name())));
-                    if has_components {
-                        tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, container.components.len()));
-                    }
-                    if let Some(tech) = &container.technology {
-                        tree_html.push_str(&format!(r#"<span class="tech">[{}]</span>"#, escape_html(tech)));
-                    }
-                    tree_html.push_str(r#"</div>"#);
-
-                    // Add components if any
-                    if has_components {
-                        tree_html.push_str(r#"<ul class="children">"#);
-
-                        for component in &container.components {
-                            tree_html.push_str(r#"<li class="leaf">"#);
-                            tree_html.push_str(&format!(
-                                r#"<div class="tree-node" data-id="{}" data-type="Component" data-name="{}" data-description="{}" data-technology="{}">"#,
-                                component.id(),
-                                escape_html(&component.name()),
-                                component.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default(),
-                                component.technology.as_ref().map(|t| escape_html(t)).unwrap_or_default()
-                            ));
-                            tree_html.push_str(r#"<span class="icon">⚙️</span>"#);
-                            tree_html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&component.name())));
-                            if let Some(tech) = &component.technology {
-                                tree_html.push_str(&format!(r#"<span class="tech">[{}]</span>"#, escape_html(tech)));
-                            }
-                            tree_html.push_str(r#"</div>"#);
-                            tree_html.push_str(r#"</li>"#);
-                        }
-
-                        tree_html.push_str(r#"</ul>"#);
-                    }
-
-                    tree_html.push_str(r#"</li>"#);
-                }
-
-                tree_html.push_str(r#"</ul>"#);
-            }
-
-            tree_html.push_str(r#"</li>"#);
-        }
-
-        tree_html.push_str(r#"</ul></li>"#);
-    }
-
-    // Deployment Nodes branch
-    if !model.deployment_nodes.is_empty() {
-        tree_html.push_str(r#"<li class="expandable">"#);
-        tree_html.push_str(r#"<div class="tree-node" data-type="group">"#);
-        tree_html.push_str(r#"<span class="toggle">▶</span>"#);
-        tree_html.push_str(r#"<span class="icon">🖥️</span>"#);
-        tree_html.push_str(r#"<span class="name">Deployment Nodes</span>"#);
-        tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, model.deployment_nodes.len()));
-        tree_html.push_str(r#"</div>"#);
-        tree_html.push_str(r#"<ul class="children">"#);
-
-        for node in &model.deployment_nodes {
-            render_deployment_node(&mut tree_html, node);
-        }
-
-        tree_html.push_str(r#"</ul></li>"#);
-    }
-
-    // Page-specific styles for tree view
-    let extra_styles = r##"<style>
-        .tree-panel { width: 500px; background: var(--card-bg); border-right: 1px solid var(--border-color); display: flex; flex-direction: column; }
-        .search-box { padding: 15px; border-bottom: 1px solid var(--border-color); }
-        .search-box input { width: 100%; padding: 10px; font-size: 14px; border: 2px solid var(--border-color); border-radius: 6px; background: var(--bg-secondary); color: var(--text-primary); }
-        .search-box input:focus { outline: none; border-color: var(--link-color); }
-        .tree-container { flex: 1; overflow-y: auto; padding: 10px; }
-
-        ul.tree { list-style: none; padding: 0; margin: 0; }
-        ul.tree ul { padding-left: 20px; }
-
-        .tree li { margin: 2px 0; }
-        .tree-node { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 4px; cursor: pointer; user-select: none; }
-        .tree-node:hover { background: var(--bg-tertiary); }
-        .tree-node.selected { background: var(--link-color); color: var(--bg-primary); border-left: 3px solid var(--link-color); }
-        [data-theme="light"] .tree-node.selected { background: #e3f2fd; color: #333; }
-
-        .toggle { width: 16px; text-align: center; font-size: 12px; color: var(--text-muted); }
-        .icon { font-size: 16px; }
-        .name { font-weight: 500; font-size: 14px; color: var(--text-primary); }
-        .count { font-size: 11px; color: var(--text-muted); }
-        .desc { font-size: 12px; color: var(--text-secondary); margin-left: auto; max-width: 200px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-        .tech { font-size: 11px; color: var(--link-color); font-family: monospace; }
-
-        .children { display: none; }
-        .expandable.expanded > .children { display: block; }
-
-        .detail-panel { flex: 1; padding: 30px; overflow-y: auto; background: var(--bg-primary); }
-        .detail-content { max-width: 800px; background: var(--card-bg); padding: 30px; border-radius: 8px; box-shadow: 0 1px 3px var(--shadow); }
-        .detail-content h2 { margin-top: 0; display: flex; align-items: center; gap: 10px; }
-        .detail-content .type-badge { background: var(--bg-tertiary); padding: 4px 12px; border-radius: 4px; font-size: 11px; text-transform: uppercase; font-weight: 600; }
-        .detail-content .property { margin: 15px 0; }
-        .detail-content .property-label { font-weight: 600; color: var(--text-secondary); font-size: 12px; text-transform: uppercase; margin-bottom: 5px; }
-        .detail-content .property-value { font-size: 14px; color: var(--text-primary); line-height: 1.6; }
-        .empty-state { color: var(--text-muted); font-style: italic; text-align: center; padding: 100px 20px; }
-        .no-results { color: var(--text-muted); font-style: italic; padding: 20px; text-align: center; }
-        .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0; }
-        .stat-card { background: var(--bg-tertiary); padding: 15px; border-radius: 6px; text-align: center; }
-        .stat-card .value { font-size: 24px; font-weight: bold; color: var(--link-color); }
-        .stat-card .label { font-size: 12px; color: var(--text-secondary); margin-top: 5px; }
-    </style>"##;
-
-    // Tree page JavaScript
-    let extra_scripts = r##"<script>
-        // Tree expand/collapse functionality
-        document.addEventListener('click', (e) => {
-            const toggle = e.target.closest('.toggle');
-            if (toggle) {
-                e.stopPropagation();
-                const li = toggle.closest('li');
-                li.classList.toggle('expanded');
-                toggle.textContent = li.classList.contains('expanded') ? '▼' : '▶';
-            }
-        });
-
-        // Node selection and detail display
-        document.addEventListener('click', (e) => {
-            const node = e.target.closest('.tree-node');
-            if (node && node.dataset.id) {
-                // Remove previous selection
-                document.querySelectorAll('.tree-node.selected').forEach(n => n.classList.remove('selected'));
-
-                // Add new selection
-                node.classList.add('selected');
-
-                // Show details
-                showDetails(node);
-            }
-        });
-
-        function showDetails(node) {
-            const emptyState = document.getElementById('empty-state');
-            const detailContent = document.getElementById('detail-content');
-
-            emptyState.style.display = 'none';
-            detailContent.style.display = 'block';
-
-            const type = node.dataset.type;
-            const name = node.dataset.name;
-            const description = node.dataset.description || 'No description provided';
-            const technology = node.dataset.technology || '';
-            const id = node.dataset.id;
-
-            let html = `
-                <h2>
-                    <span class="icon">${getIcon(type)}</span>
-                    ${escapeHtml(name)}
-                    <span class="type-badge">${type}</span>
-                </h2>
-                <div class="property">
-                    <div class="property-label">ID</div>
-                    <div class="property-value"><code>${id}</code></div>
-                </div>
-                <div class="property">
-                    <div class="property-label">Description</div>
-                    <div class="property-value">${escapeHtml(description)}</div>
-                </div>
-            `;
-
-            if (technology) {
-                html += `
-                    <div class="property">
-                        <div class="property-label">Technology</div>
-                        <div class="property-value">${escapeHtml(technology)}</div>
-                    </div>
-                `;
-            }
-
-            detailContent.innerHTML = html;
-        }
-
-        function getIcon(type) {
-            const icons = {
-                'Person': '👤',
-                'Software System': '📦',
-                'Container': '🗄️',
-                'Component': '⚙️',
-                'Deployment Node': '🖥️'
-            };
-            return icons[type] || '📄';
-        }
-
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        // Search functionality
-        const searchInput = document.getElementById('search-input');
-        const tree = document.getElementById('tree');
-        const noResults = document.getElementById('no-results');
-
-        searchInput.addEventListener('input', (e) => {
-            const query = e.target.value.toLowerCase().trim();
-
-            if (!query) {
-                // Show all nodes
-                document.querySelectorAll('.tree li, .tree-node').forEach(el => {
-                    el.style.display = '';
-                });
-                noResults.style.display = 'none';
-                tree.style.display = '';
-                return;
-            }
-
-            let hasResults = false;
-
-            // Filter nodes
-            document.querySelectorAll('.tree-node').forEach(node => {
-                const name = (node.dataset.name || '').toLowerCase();
-                const description = (node.dataset.description || '').toLowerCase();
-                const technology = (node.dataset.technology || '').toLowerCase();
-                const type = (node.dataset.type || '').toLowerCase();
-
-                const matches = name.includes(query) ||
-                               description.includes(query) ||
-                               technology.includes(query) ||
-                               type.includes(query);
-
-                const li = node.closest('li');
-
-                if (matches) {
-                    hasResults = true;
-                    li.style.display = '';
-                    node.style.display = '';
-
-                    // Expand parent nodes
-                    let parent = li.parentElement?.closest('li');
-                    while (parent) {
-                        parent.style.display = '';
-                        parent.classList.add('expanded');
-                        const toggle = parent.querySelector(':scope > .tree-node > .toggle');
-                        if (toggle) toggle.textContent = '▼';
-                        parent = parent.parentElement?.closest('li');
-                    }
-                } else if (node.dataset.type !== 'group') {
-                    li.style.display = 'none';
-                }
-            });
-
-            // Handle group nodes visibility
-            document.querySelectorAll('[data-type="group"]').forEach(groupNode => {
-                const li = groupNode.closest('li');
-                const visibleChildren = li.querySelectorAll('.children > li[style=""], .children > li:not([style])');
-                if (visibleChildren.length === 0) {
-                    li.style.display = 'none';
-                } else {
-                    li.style.display = '';
-                    li.classList.add('expanded');
-                    const toggle = groupNode.querySelector('.toggle');
-                    if (toggle) toggle.textContent = '▼';
-                }
-            });
-
-            if (hasResults) {
-                noResults.style.display = 'none';
-                tree.style.display = '';
-            } else {
-                noResults.style.display = 'block';
-                tree.style.display = 'none';
-            }
-        });
-    </script>"##;
-
-    // Build content HTML
-    let content = format!(
-        r#"<div class="tree-panel">
-            <div class="search-box">
-                <input type="text" id="search-input" placeholder="Search elements...">
-            </div>
-            <div class="tree-container">
-                <ul class="tree" id="tree">
-                    {}
-                </ul>
-                <div class="no-results" id="no-results" style="display: none;">No matching elements found</div>
-            </div>
-        </div>
-        <div class="detail-panel">
-            <div class="empty-state" id="empty-state">
-                <h2>Select an element to view details</h2>
-                <p>Click on any element in the tree to see its details here.</p>
-                <div class="stats">
-                    <div class="stat-card">
-                        <div class="value">{}</div>
-                        <div class="label">People</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="value">{}</div>
-                        <div class="label">Systems</div>
-                    </div>
-                    <div class="stat-card">
-                        <div class="value">{}</div>
-                        <div class="label">Relationships</div>
-                    </div>
-                </div>
-            </div>
-            <div class="detail-content" id="detail-content" style="display: none;"></div>
-        </div>"#,
-        tree_html,
-        model.people.len(),
-        model.software_systems.len(),
-        model.relationships.len()
-    );
-
-    let title = format!("Tree View - {}", workspace.name);
-    let config = LayoutConfig {
-        title: &title,
-        workspace_name: Some(&workspace.name),
-        workspace_id,
-        base_path,
-        active_nav: NavItem::Tree,
-        content_type: ContentType::Sidebar,
-        extra_head: extra_styles,
-        extra_body_end: extra_scripts,
-    };
-
-    generate_page_layout(&config, &content)
-}
-
-/// Helper function to render deployment nodes recursively.
-fn render_deployment_node(html: &mut String, node: &structurizr_core::model::DeploymentNode) {
-    let has_children = !node.children.is_empty() || !node.infrastructure_nodes.is_empty() || !node.container_instances.is_empty();
-
-    if has_children {
-        html.push_str(r#"<li class="expandable">"#);
-    } else {
-        html.push_str(r#"<li class="leaf">"#);
-    }
-
-    html.push_str(&format!(
-        r#"<div class="tree-node" data-id="{}" data-type="Deployment Node" data-name="{}" data-description="{}" data-technology="{}">"#,
-        node.id(),
-        escape_html(&node.name()),
-        node.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default(),
-        node.technology.as_ref().map(|t| escape_html(t)).unwrap_or_default()
-    ));
-
-    if has_children {
-        html.push_str(r#"<span class="toggle">▶</span>"#);
-    }
-    html.push_str(r#"<span class="icon">🖥️</span>"#);
-    html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&node.name())));
-    if let Some(tech) = &node.technology {
-        html.push_str(&format!(r#"<span class="tech">[{}]</span>"#, escape_html(tech)));
-    }
-    html.push_str(r#"</div>"#);
-
-    if has_children {
-        html.push_str(r#"<ul class="children">"#);
-
-        // Render child deployment nodes
-        for child in &node.children {
-            render_deployment_node(html, child);
-        }
-
-        // Render infrastructure nodes
-        for infra in &node.infrastructure_nodes {
-            html.push_str(r#"<li class="leaf">"#);
-            html.push_str(&format!(
-                r#"<div class="tree-node" data-id="{}" data-type="Infrastructure Node" data-name="{}" data-description="{}" data-technology="{}">"#,
-                infra.properties.id,
-                escape_html(&infra.properties.name),
-                infra.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default(),
-                infra.technology.as_ref().map(|t| escape_html(t)).unwrap_or_default()
-            ));
-            html.push_str(r#"<span class="icon">🔧</span>"#);
-            html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&infra.properties.name)));
-            if let Some(tech) = &infra.technology {
-                html.push_str(&format!(r#"<span class="tech">[{}]</span>"#, escape_html(tech)));
-            }
-            html.push_str(r#"</div>"#);
-            html.push_str(r#"</li>"#);
-        }
-
-        // Render container instances
-        for instance in &node.container_instances {
-            html.push_str(r#"<li class="leaf">"#);
-            html.push_str(&format!(
-                r#"<div class="tree-node" data-id="{}" data-type="Container Instance" data-name="Instance: {}" data-description="">"#,
-                instance.id,
-                escape_html(&instance.container_id.to_string())
-            ));
-            html.push_str(r#"<span class="icon">📦</span>"#);
-            html.push_str(&format!(r#"<span class="name">Instance: {}</span>"#, escape_html(&instance.container_id.to_string())));
-            html.push_str(r#"</div>"#);
-            html.push_str(r#"</li>"#);
-        }
-
-        html.push_str(r#"</ul>"#);
-    }
-
-    html.push_str(r#"</li>"#);
-}
-
-// ============================================================================
-// Multi-Workspace Mode Handlers
-// ============================================================================
-
-/// Helper function to extract workspace_id from wildcard path.
+/// Helper to extract workspace ID from a path string.
 fn extract_workspace_id(path: &str) -> String {
     // Remove leading slash if present
     path.trim_start_matches('/').to_string()
@@ -1686,7 +622,6 @@ async fn parse_workspace_path(state: &AppState, path: &str) -> Option<(String, V
     None
 }
 
-/// Multi-workspace index page - shows grid of available workspaces grouped by top-level folder.
 pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<String>> {
     let workspaces = state.list_workspaces().await;
 
@@ -2059,191 +994,383 @@ pub async fn workspace_validate(
     Ok(Json(validation_result))
 }
 
-/// Workspace-scoped search API handler.
-pub async fn workspace_search_api(
-    State(state): State<AppState>,
-    Path(workspace_id): Path<String>,
-    axum::extract::Query(query): axum::extract::Query<SearchQuery>,
-) -> Result<Json<Vec<SearchResult>>> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+/// Generate tree view HTML content (shared between single and multi-workspace modes).
+fn generate_tree_page_html(workspace: &Workspace, base_path: &str, workspace_id: Option<&str>) -> String {
+    let model = workspace.model();
 
-    let query_str = query.q.as_deref().unwrap_or("");
-    search_workspace(&workspace, query_str, "")
-}
+    // Build tree structure HTML
+    let mut tree_html = String::new();
 
-/// Workspace-scoped export JSON handler.
-pub async fn workspace_export_json(
-    State(state): State<AppState>,
-    Path(workspace_id): Path<String>,
-) -> Result<impl IntoResponse> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+    // People branch
+    if !model.people.is_empty() {
+        tree_html.push_str(r#"<li class="expandable expanded">"#);
+        tree_html.push_str(r#"<div class="tree-node" data-type="group">"#);
+        tree_html.push_str(r#"<span class="toggle">▼</span>"#);
+        tree_html.push_str(r#"<span class="icon">👤</span>"#);
+        tree_html.push_str(r#"<span class="name">People</span>"#);
+        tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, model.people.len()));
+        tree_html.push_str(r#"</div>"#);
+        tree_html.push_str(r#"<ul class="children">"#);
 
-    let json = JsonExporter::export(&workspace)?;
-    Ok(([(header::CONTENT_TYPE, "application/json")], json))
-}
+        for person in &model.people {
+            tree_html.push_str(r#"<li class="leaf">"#);
+            tree_html.push_str(&format!(
+                r#"<div class="tree-node" data-id="{}" data-type="Person" data-name="{}" data-description="{}">"#,
+                person.id(),
+                escape_html(&person.name()),
+                person.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default()
+            ));
+            tree_html.push_str(r#"<span class="icon">👤</span>"#);
+            tree_html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&person.name())));
+            if let Some(desc) = &person.properties.description {
+                let truncated = if desc.len() > 50 {
+                    format!("{}...", &desc[..50])
+                } else {
+                    desc.clone()
+                };
+                tree_html.push_str(&format!(r#"<span class="desc">{}</span>"#, escape_html(&truncated)));
+            }
+            tree_html.push_str(r#"</div>"#);
+            tree_html.push_str(r#"</li>"#);
+        }
 
-/// Workspace-scoped get notes handler.
-pub async fn workspace_get_notes(
-    State(state): State<AppState>,
-    Path((workspace_id, view_key)): Path<(String, String)>,
-) -> Result<Json<ViewNotes>> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let info = state.get_workspace_info(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
-
-    let notes_file = NotesFile::load(&info.path).await;
-    let view_notes = notes_file
-        .get_view_notes(&view_key)
-        .cloned()
-        .unwrap_or_default();
-
-    Ok(Json(view_notes))
-}
-
-/// Workspace-scoped add note handler.
-pub async fn workspace_add_note(
-    State(state): State<AppState>,
-    Path((workspace_id, view_key)): Path<(String, String)>,
-    Json(req): Json<AddNoteRequest>,
-) -> Result<Json<ViewNotes>> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let info = state.get_workspace_info(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
-
-    let mut notes_file = NotesFile::load(&info.path).await;
-    notes_file.add_note(
-        &view_key,
-        req.step_index,
-        req.first_name,
-        req.last_name,
-        req.content,
-    );
-    notes_file.save(&info.path).await
-        .map_err(|e| Error::Server(format!("Failed to save notes: {}", e)))?;
-
-    let view_notes = notes_file
-        .get_view_notes(&view_key)
-        .cloned()
-        .unwrap_or_default();
-
-    Ok(Json(view_notes))
-}
-
-/// Workspace-scoped render SVG handler.
-pub async fn workspace_render_svg(
-    State(state): State<AppState>,
-    Path((workspace_id, view_key)): Path<(String, String)>,
-) -> Result<impl IntoResponse> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
-
-    render_view_svg(&workspace, &view_key)
-}
-
-/// Workspace-scoped PlantUML export handler.
-pub async fn workspace_export_plantuml(
-    State(state): State<AppState>,
-    Path((workspace_id, view_key)): Path<(String, String)>,
-    Query(query): Query<ExportQuery>,
-) -> Result<axum::response::Response> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
-
-    let code = get_export_code(&workspace, &view_key, "plantuml")?;
-
-    if query.raw.unwrap_or(false) {
-        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
-    } else {
-        let base_path = format!("/w/{}", workspace_id);
-        let html = generate_plantuml_viewer_html(&workspace, &view_key, &base_path, &code);
-        Ok(Html(html).into_response())
+        tree_html.push_str(r#"</ul></li>"#);
     }
-}
 
-/// Workspace-scoped Mermaid export handler.
-pub async fn workspace_export_mermaid(
-    State(state): State<AppState>,
-    Path((workspace_id, view_key)): Path<(String, String)>,
-    Query(query): Query<ExportQuery>,
-) -> Result<axum::response::Response> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+    // Software Systems branch
+    if !model.software_systems.is_empty() {
+        tree_html.push_str(r#"<li class="expandable expanded">"#);
+        tree_html.push_str(r#"<div class="tree-node" data-type="group">"#);
+        tree_html.push_str(r#"<span class="toggle">▼</span>"#);
+        tree_html.push_str(r#"<span class="icon">📦</span>"#);
+        tree_html.push_str(r#"<span class="name">Software Systems</span>"#);
+        tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, model.software_systems.len()));
+        tree_html.push_str(r#"</div>"#);
+        tree_html.push_str(r#"<ul class="children">"#);
 
-    let code = get_export_code(&workspace, &view_key, "mermaid")?;
+        for system in &model.software_systems {
+            let has_containers = !system.containers.is_empty();
 
-    if query.raw.unwrap_or(false) {
-        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
-    } else {
-        let base_path = format!("/w/{}", workspace_id);
-        let html = generate_mermaid_viewer_html(&workspace, &view_key, &base_path, &code);
-        Ok(Html(html).into_response())
+            if has_containers {
+                tree_html.push_str(r#"<li class="expandable">"#);
+            } else {
+                tree_html.push_str(r#"<li class="leaf">"#);
+            }
+
+            tree_html.push_str(&format!(
+                r#"<div class="tree-node" data-id="{}" data-type="Software System" data-name="{}" data-description="{}">"#,
+                system.id(),
+                escape_html(&system.name()),
+                system.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default()
+            ));
+
+            if has_containers {
+                tree_html.push_str(r#"<span class="toggle">▶</span>"#);
+            }
+            tree_html.push_str(r#"<span class="icon">📦</span>"#);
+            tree_html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&system.name())));
+            if has_containers {
+                tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, system.containers.len()));
+            }
+            if let Some(desc) = &system.properties.description {
+                let truncated = if desc.len() > 50 {
+                    format!("{}...", &desc[..50])
+                } else {
+                    desc.clone()
+                };
+                tree_html.push_str(&format!(r#"<span class="desc">{}</span>"#, escape_html(&truncated)));
+            }
+            tree_html.push_str(r#"</div>"#);
+
+            // Containers branch
+            if has_containers {
+                tree_html.push_str(r#"<ul class="children" style="display: none;">"#);
+
+                for container in &system.containers {
+                    let has_components = !container.components.is_empty();
+
+                    if has_components {
+                        tree_html.push_str(r#"<li class="expandable">"#);
+                    } else {
+                        tree_html.push_str(r#"<li class="leaf">"#);
+                    }
+
+                    tree_html.push_str(&format!(
+                        r#"<div class="tree-node" data-id="{}" data-type="Container" data-name="{}" data-description="{}" data-technology="{}">"#,
+                        container.id(),
+                        escape_html(&container.name()),
+                        container.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default(),
+                        container.technology.as_ref().map(|t| escape_html(t)).unwrap_or_default()
+                    ));
+
+                    if has_components {
+                        tree_html.push_str(r#"<span class="toggle">▶</span>"#);
+                    }
+                    tree_html.push_str(r#"<span class="icon">📁</span>"#);
+                    tree_html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&container.name())));
+                    if has_components {
+                        tree_html.push_str(&format!(r#"<span class="count">({})</span>"#, container.components.len()));
+                    }
+                    if let Some(tech) = &container.technology {
+                        tree_html.push_str(&format!(r#"<span class="tech">{}</span>"#, escape_html(tech)));
+                    }
+                    tree_html.push_str(r#"</div>"#);
+
+                    // Components branch
+                    if has_components {
+                        tree_html.push_str(r#"<ul class="children" style="display: none;">"#);
+
+                        for component in &container.components {
+                            tree_html.push_str(r#"<li class="leaf">"#);
+                            tree_html.push_str(&format!(
+                                r#"<div class="tree-node" data-id="{}" data-type="Component" data-name="{}" data-description="{}" data-technology="{}">"#,
+                                component.id(),
+                                escape_html(&component.name()),
+                                component.properties.description.as_ref().map(|d| escape_html(d)).unwrap_or_default(),
+                                component.technology.as_ref().map(|t| escape_html(t)).unwrap_or_default()
+                            ));
+                            tree_html.push_str(r#"<span class="icon">⚙️</span>"#);
+                            tree_html.push_str(&format!(r#"<span class="name">{}</span>"#, escape_html(&component.name())));
+                            if let Some(tech) = &component.technology {
+                                tree_html.push_str(&format!(r#"<span class="tech">{}</span>"#, escape_html(tech)));
+                            }
+                            tree_html.push_str(r#"</div>"#);
+                            tree_html.push_str(r#"</li>"#);
+                        }
+
+                        tree_html.push_str(r#"</ul>"#);
+                    }
+
+                    tree_html.push_str(r#"</li>"#);
+                }
+
+                tree_html.push_str(r#"</ul>"#);
+            }
+
+            tree_html.push_str(r#"</li>"#);
+        }
+
+        tree_html.push_str(r#"</ul></li>"#);
     }
-}
 
-/// Workspace-scoped DOT export handler.
-pub async fn workspace_export_dot(
-    State(state): State<AppState>,
-    Path((workspace_id, view_key)): Path<(String, String)>,
-    Query(query): Query<ExportQuery>,
-) -> Result<axum::response::Response> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+    // Generate the complete HTML page
+    let extra_styles = r##"<style>
+        .tree-container {
+            padding: 20px;
+            background: var(--bg-secondary);
+            min-height: calc(100vh - 60px);
+        }
+        .tree {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        }
+        .tree ul {
+            list-style: none;
+            padding-left: 20px;
+            margin: 0;
+        }
+        .tree-node {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .tree-node:hover {
+            background: var(--bg-tertiary);
+        }
+        .tree-node[data-selected="true"] {
+            background: var(--link-color);
+            color: white;
+        }
+        .toggle {
+            width: 16px;
+            font-size: 12px;
+            user-select: none;
+            transition: transform 0.2s;
+        }
+        .icon {
+            font-size: 18px;
+        }
+        .name {
+            font-weight: 500;
+            color: var(--text-primary);
+        }
+        .count {
+            color: var(--text-muted);
+            font-size: 12px;
+        }
+        .tech {
+            color: var(--text-secondary);
+            font-size: 12px;
+            background: var(--bg-tertiary);
+            padding: 2px 6px;
+            border-radius: 3px;
+        }
+        .desc {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-left: auto;
+            max-width: 300px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .search-box {
+            margin-bottom: 20px;
+            position: sticky;
+            top: 0;
+            background: var(--bg-secondary);
+            padding: 10px 0;
+            z-index: 10;
+        }
+        .search-box input {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            font-size: 14px;
+        }
+        .search-box input:focus {
+            outline: none;
+            border-color: var(--link-color);
+        }
+        .highlight {
+            background: yellow;
+            color: black;
+        }
+    </style>"##;
 
-    let code = get_export_code(&workspace, &view_key, "dot")?;
+    let extra_scripts = r##"<script>
+        // Tree expand/collapse functionality
+        document.addEventListener('DOMContentLoaded', function() {
+            const toggles = document.querySelectorAll('.toggle');
+            toggles.forEach(toggle => {
+                toggle.addEventListener('click', function(e) {
+                    e.stopPropagation();
+                    const li = this.closest('li');
+                    const children = li.querySelector('.children');
+                    if (children) {
+                        const isExpanded = children.style.display !== 'none';
+                        children.style.display = isExpanded ? 'none' : 'block';
+                        this.textContent = isExpanded ? '▶' : '▼';
+                        this.style.transform = isExpanded ? 'rotate(0deg)' : 'rotate(0deg)';
+                    }
+                });
+            });
 
-    if query.raw.unwrap_or(false) {
-        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
-    } else {
-        let base_path = format!("/w/{}", workspace_id);
-        let html = generate_dot_viewer_html(&workspace, &view_key, &base_path, &code);
-        Ok(Html(html).into_response())
-    }
-}
+            // Node selection
+            const nodes = document.querySelectorAll('.tree-node');
+            nodes.forEach(node => {
+                node.addEventListener('click', function(e) {
+                    // Remove previous selection
+                    document.querySelectorAll('.tree-node[data-selected="true"]').forEach(n => {
+                        n.setAttribute('data-selected', 'false');
+                    });
+                    // Select this node
+                    this.setAttribute('data-selected', 'true');
 
-/// Workspace-scoped D2 export handler.
-pub async fn workspace_export_d2(
-    State(state): State<AppState>,
-    Path((workspace_id, view_key)): Path<(String, String)>,
-    Query(query): Query<ExportQuery>,
-) -> Result<axum::response::Response> {
-    let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+                    // Show details in console
+                    const id = this.getAttribute('data-id');
+                    const type = this.getAttribute('data-type');
+                    const name = this.getAttribute('data-name');
+                    const desc = this.getAttribute('data-description');
+                    console.log('Selected:', { id, type, name, desc });
+                });
+            });
 
-    let code = get_export_code(&workspace, &view_key, "d2")?;
+            // Search functionality
+            const searchInput = document.getElementById('tree-search');
+            if (searchInput) {
+                searchInput.addEventListener('input', function() {
+                    const query = this.value.toLowerCase();
+                    const allNodes = document.querySelectorAll('.tree-node');
 
-    if query.raw.unwrap_or(false) {
-        Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
-    } else {
-        let base_path = format!("/w/{}", workspace_id);
-        let html = generate_d2_viewer_html(&workspace, &view_key, &base_path, &code);
-        Ok(Html(html).into_response())
-    }
-}
+                    if (query === '') {
+                        // Reset all nodes
+                        allNodes.forEach(node => {
+                            node.style.display = 'flex';
+                            const li = node.closest('li');
+                            if (li) {
+                                li.style.display = 'list-item';
+                            }
+                        });
+                        return;
+                    }
 
-// ============================================================================
-// Helper functions for rendering (used by both single and multi-workspace modes)
-// ============================================================================
+                    // Hide all nodes first
+                    allNodes.forEach(node => {
+                        const name = node.getAttribute('data-name');
+                        const desc = node.getAttribute('data-description');
+                        const tech = node.getAttribute('data-technology');
 
-/// Generate view diagram HTML with full interactivity (shared implementation).
-///
-/// This function generates the complete HTML for diagram viewing with:
-/// - Canvas-based rendering with pan and zoom
-/// - Minimap navigation
-/// - Breadcrumb navigation
-/// - Element tooltips and drill-down
-/// - Keyboard shortcuts
-///
-/// # Parameters
-/// - `workspace`: The workspace containing the diagram
+                        const matches =
+                            (name && name.toLowerCase().includes(query)) ||
+                            (desc && desc.toLowerCase().includes(query)) ||
+                            (tech && tech.toLowerCase().includes(query));
+
+                        const li = node.closest('li');
+                        if (matches) {
+                            node.style.display = 'flex';
+                            if (li) {
+                                li.style.display = 'list-item';
+                                // Expand parents
+                                let parent = li.parentElement;
+                                while (parent && parent.classList.contains('children')) {
+                                    parent.style.display = 'block';
+                                    const parentLi = parent.closest('li');
+                                    if (parentLi) {
+                                        const toggle = parentLi.querySelector('.toggle');
+                                        if (toggle) {
+                                            toggle.textContent = '▼';
+                                        }
+                                    }
+                                    parent = parent.parentElement?.parentElement;
+                                }
+                            }
+                        } else {
+                            node.style.display = 'none';
+                            if (li && !li.querySelector('.tree-node[style*="flex"]')) {
+                                li.style.display = 'none';
+                            }
+                        }
+                    });
+                });
+            }
+        });
+    </script>"##;
+
+    let content = format!(r##"
+        <div class="tree-container">
+            <div class="search-box">
+                <input type="text" id="tree-search" placeholder="Search elements..." autocomplete="off">
+            </div>
+            <ul class="tree">
+                {}
+            </ul>
+        </div>
+    "##, tree_html);
+
+    let title = format!("Model Tree - {}", workspace.name);
+    let config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(&workspace.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Tree,
+        content_type: ContentType::Standard,
+        extra_head: extra_styles,
+        extra_body_end: extra_scripts,
+    };
+
+    generate_page_layout(&config, &content)
+}/// - `workspace`: The workspace containing the diagram
 /// - `view_key`: The key of the view to render
 /// - `base_path`: Base path for URLs (empty for single-workspace, "/w/workspace_id" for multi)
 fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: &str) -> String {
