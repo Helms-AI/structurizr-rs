@@ -922,27 +922,27 @@ impl Parser {
             background: None,
         };
 
-        let mut steps = Vec::new();
+        let mut content = Vec::new();
 
         // Parse the block if present
         self.skip_newlines_and_comments();
         if self.check(&TokenKind::OpenBrace) {
             self.advance();
-            self.parse_dynamic_view_body(&mut props, &mut steps)?;
+            self.parse_dynamic_view_body(&mut props, &mut content)?;
         }
 
         Ok(DynamicViewNode {
             scope,
             properties: props,
-            steps,
+            content,
         })
     }
 
-    /// Parse the body of a dynamic view, handling both view properties and steps.
+    /// Parse the body of a dynamic view, handling view properties, steps, and parallel sequences.
     fn parse_dynamic_view_body(
         &mut self,
         props: &mut ViewPropertiesNode,
-        steps: &mut Vec<DynamicStepNode>,
+        content: &mut Vec<DynamicContent>,
     ) -> Result<()> {
         loop {
             self.skip_newlines_and_comments();
@@ -951,6 +951,12 @@ impl Parser {
                 Some(TokenKind::CloseBrace) => {
                     self.advance();
                     break;
+                }
+                Some(TokenKind::OpenBrace) => {
+                    // Start of a parallel sequence block
+                    self.advance();
+                    let parallel = self.parse_parallel_sequence()?;
+                    content.push(DynamicContent::ParallelSequence(parallel));
                 }
                 Some(TokenKind::Include) => {
                     self.advance();
@@ -993,7 +999,7 @@ impl Parser {
                         // This is a dynamic step: source -> destination "description"
                         self.advance();
                         let step = self.parse_dynamic_step(source)?;
-                        steps.push(step);
+                        content.push(DynamicContent::Step(step));
                     } else {
                         // Handle other identifier-based properties like "background"
                         match source.to_lowercase().as_str() {
@@ -1012,6 +1018,45 @@ impl Parser {
         }
 
         Ok(())
+    }
+
+    /// Parse a parallel sequence block: { content... }
+    /// Called after the opening brace has been consumed.
+    fn parse_parallel_sequence(&mut self) -> Result<ParallelSequenceNode> {
+        let mut content = Vec::new();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind().cloned() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::OpenBrace) => {
+                    // Nested parallel sequence
+                    self.advance();
+                    let nested = self.parse_parallel_sequence()?;
+                    content.push(DynamicContent::ParallelSequence(nested));
+                }
+                Some(TokenKind::Identifier(source)) => {
+                    self.advance();
+                    self.skip_newlines_and_comments();
+
+                    if self.check(&TokenKind::Arrow) {
+                        self.advance();
+                        let step = self.parse_dynamic_step(source)?;
+                        content.push(DynamicContent::Step(step));
+                    } else {
+                        // Unknown identifier in parallel block
+                        break;
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        Ok(ParallelSequenceNode { content })
     }
 
     /// Parse a single dynamic step: destination "description"
@@ -1880,21 +1925,8 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 v.properties = v.properties.with_background(background);
             }
 
-            // Convert steps from AST nodes to core types
-            for (order, step) in view.steps.iter().enumerate() {
-                let source_id = identifiers.get(&step.source);
-                let dest_id = identifiers.get(&step.destination);
-
-                if let (Some(&src), Some(&dst)) = (source_id, dest_id) {
-                    v.steps.push(DynamicViewStep {
-                        source_id: src,
-                        destination_id: dst,
-                        description: step.description.clone(),
-                        order: order as u32 + 1, // 1-indexed order
-                    });
-                }
-                // Note: If elements not found, the step is silently skipped.
-            }
+            // Convert content from AST nodes to core types with proper ordering
+            v.steps = flatten_dynamic_content(&view.content, &identifiers);
 
             workspace.views_mut().add_dynamic_view(v);
         }
@@ -2141,6 +2173,167 @@ fn build_element_relationships(
     }
 
     Ok(())
+}
+
+/// Tracks the current sequence number for dynamic view ordering.
+/// Supports hierarchical numbering like "1", "2", "2.1", "2.2", "3" for parallel sequences.
+struct SequenceCounter {
+    /// Stack of sequence levels. Each level tracks the current index.
+    /// e.g., [2, 1] represents "2.1"
+    levels: Vec<u32>,
+    /// Counter for parallel branches at the current level
+    parallel_counter: u32,
+    /// Whether we're currently processing parallel blocks
+    in_parallel: bool,
+}
+
+impl SequenceCounter {
+    fn new() -> Self {
+        Self {
+            levels: vec![0],
+            parallel_counter: 0,
+            in_parallel: false,
+        }
+    }
+
+    /// Advance to the next sequential step and return its order string.
+    fn next(&mut self) -> String {
+        self.levels[0] += 1;
+        self.parallel_counter = 0; // Reset parallel counter for new sequence
+        self.current()
+    }
+
+    /// Start processing a parallel branch. Returns the order string for this branch.
+    fn start_parallel_branch(&mut self) {
+        if !self.in_parallel {
+            // First parallel block at this level - increment main sequence
+            self.levels[0] += 1;
+            self.in_parallel = true;
+        }
+        self.parallel_counter += 1;
+        self.levels.push(self.parallel_counter);
+    }
+
+    /// End a parallel branch, returning to the parent level.
+    fn end_parallel_branch(&mut self) {
+        if self.levels.len() > 1 {
+            self.levels.pop();
+        }
+    }
+
+    /// Signal that all parallel blocks at this level are done.
+    fn finish_parallel_group(&mut self) {
+        self.in_parallel = false;
+    }
+
+    /// Get current order as a string (e.g., "2" or "2.1")
+    fn current(&self) -> String {
+        self.levels
+            .iter()
+            .map(|n| n.to_string())
+            .collect::<Vec<_>>()
+            .join(".")
+    }
+}
+
+/// Flatten DynamicContent tree into a flat list of DynamicViewStep with order strings.
+fn flatten_dynamic_content(
+    content: &[DynamicContent],
+    identifiers: &HashMap<String, ElementId>,
+) -> Vec<DynamicViewStep> {
+    let mut steps = Vec::new();
+    let mut counter = SequenceCounter::new();
+
+    flatten_content_recursive(content, identifiers, &mut steps, &mut counter);
+
+    steps
+}
+
+fn flatten_content_recursive(
+    content: &[DynamicContent],
+    identifiers: &HashMap<String, ElementId>,
+    steps: &mut Vec<DynamicViewStep>,
+    counter: &mut SequenceCounter,
+) {
+    // Group consecutive parallel blocks together
+    let mut i = 0;
+    while i < content.len() {
+        match &content[i] {
+            DynamicContent::Step(step) => {
+                // If we were in a parallel group, finish it
+                counter.finish_parallel_group();
+
+                // Regular sequential step
+                if let (Some(&src), Some(&dst)) = (
+                    identifiers.get(&step.source),
+                    identifiers.get(&step.destination),
+                ) {
+                    let order = counter.next();
+                    steps.push(DynamicViewStep {
+                        source_id: src,
+                        destination_id: dst,
+                        description: step.description.clone(),
+                        order,
+                    });
+                }
+                i += 1;
+            }
+            DynamicContent::ParallelSequence(_) => {
+                // Collect all consecutive parallel blocks
+                let parallel_start = i;
+                while i < content.len() {
+                    if matches!(&content[i], DynamicContent::ParallelSequence(_)) {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                // Process each parallel block
+                for j in parallel_start..i {
+                    if let DynamicContent::ParallelSequence(parallel) = &content[j] {
+                        counter.start_parallel_branch();
+                        // Recursively process content within the parallel block
+                        flatten_parallel_content(&parallel.content, identifiers, steps, counter);
+                        counter.end_parallel_branch();
+                    }
+                }
+
+                counter.finish_parallel_group();
+            }
+        }
+    }
+}
+
+/// Flatten content within a parallel sequence block.
+fn flatten_parallel_content(
+    content: &[DynamicContent],
+    identifiers: &HashMap<String, ElementId>,
+    steps: &mut Vec<DynamicViewStep>,
+    counter: &mut SequenceCounter,
+) {
+    for item in content {
+        match item {
+            DynamicContent::Step(step) => {
+                if let (Some(&src), Some(&dst)) = (
+                    identifiers.get(&step.source),
+                    identifiers.get(&step.destination),
+                ) {
+                    let order = counter.current();
+                    steps.push(DynamicViewStep {
+                        source_id: src,
+                        destination_id: dst,
+                        description: step.description.clone(),
+                        order,
+                    });
+                }
+            }
+            DynamicContent::ParallelSequence(nested) => {
+                // Nested parallel - recurse
+                flatten_parallel_content(&nested.content, identifiers, steps, counter);
+            }
+        }
+    }
 }
 
 fn convert_auto_layout(node: AutoLayoutNode) -> AutoLayout {

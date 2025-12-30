@@ -39,9 +39,9 @@ impl WebSequenceDiagramsExporter {
             output.push_str(&format!("title {}\n\n", title));
         }
 
-        // Sort steps by order
+        // Sort steps by order (handles "1", "2", "2.1", "2.2" notation)
         let mut sorted_steps: Vec<_> = view.steps.iter().collect();
-        sorted_steps.sort_by_key(|s| s.order);
+        sorted_steps.sort_by(|a, b| compare_order_strings(&a.order, &b.order));
 
         // Generate sequence messages for each step
         for step in sorted_steps {
@@ -140,6 +140,14 @@ fn find_element_name(model: &structurizr_core::model::Model, id: &str) -> String
     id.to_string()
 }
 
+/// Compare order strings like "1", "2", "2.1", "2.2", "3" for proper sorting.
+/// Handles hierarchical numbering for parallel sequences.
+fn compare_order_strings(a: &str, b: &str) -> std::cmp::Ordering {
+    let a_parts: Vec<u32> = a.split('.').filter_map(|s| s.parse().ok()).collect();
+    let b_parts: Vec<u32> = b.split('.').filter_map(|s| s.parse().ok()).collect();
+    a_parts.cmp(&b_parts)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -170,13 +178,13 @@ mod tests {
             source_id: user,
             destination_id: webapp,
             description: Some("Submit Order".to_string()),
-            order: 1,
+            order: "1".to_string(),
         });
         view.steps.push(DynamicViewStep {
             source_id: webapp,
             destination_id: database,
             description: Some("Save Order".to_string()),
-            order: 2,
+            order: "2".to_string(),
         });
 
         let output = WebSequenceDiagramsExporter::export_dynamic(&workspace, &view).unwrap();
@@ -201,7 +209,7 @@ mod tests {
             source_id: user,
             destination_id: system,
             description: Some("Uses".to_string()),
-            order: 1,
+            order: "1".to_string(),
         });
 
         let output = WebSequenceDiagramsExporter::export_dynamic(&workspace, &view).unwrap();
@@ -226,7 +234,7 @@ mod tests {
             source_id: user,
             destination_id: system,
             description: Some("Sends message".to_string()),
-            order: 1,
+            order: "1".to_string(),
         });
 
         let output = WebSequenceDiagramsExporter::export_dynamic(&workspace, &view).unwrap();
@@ -264,13 +272,13 @@ mod tests {
             source_id: b,
             destination_id: c,
             description: Some("Second".to_string()),
-            order: 2,
+            order: "2".to_string(),
         });
         view.steps.push(DynamicViewStep {
             source_id: a,
             destination_id: b,
             description: Some("First".to_string()),
-            order: 1,
+            order: "1".to_string(),
         });
 
         let output = WebSequenceDiagramsExporter::export_dynamic(&workspace, &view).unwrap();

@@ -385,7 +385,67 @@ workspace "Healthcare Patient Journey" "Hospital patient management with multi-a
             autoLayout lr
         }
 
-        // Dynamic view 3: Discharge and Billing Flow
+        // Dynamic view 3: Concurrent Order Processing - Lab and Pharmacy in Parallel
+        dynamic hospitalSystem "ConcurrentOrders" "Parallel lab and pharmacy processing" {
+            doctor -> clinicalWorkstation "Opens patient chart"
+            doctor -> clinicalService "Places lab and medication orders"
+            clinicalService -> integrationHub "Sends orders to integration hub"
+            {
+                integrationHub -> labSystem "Routes lab order"
+                labTechnician -> labSystem "Processes specimen"
+                labSystem -> integrationHub "Returns lab results"
+            }
+            {
+                integrationHub -> pharmacySystem "Routes prescription"
+                pharmacist -> pharmacySystem "Prepares medication"
+            }
+            integrationHub -> clinicalService "All results ready"
+            notificationService -> doctor "Alerts doctor"
+            autoLayout lr
+        }
+
+        // Dynamic view 4: Parallel Discharge Processing
+        dynamic hospitalSystem "ParallelDischarge" "Concurrent discharge activities" {
+            doctor -> clinicalService "Signs discharge orders"
+            clinicalService -> integrationHub "Initiates discharge workflow"
+            {
+                integrationHub -> pharmacySystem "Sends prescriptions"
+                pharmacist -> pharmacySystem "Prepares take-home meds"
+            }
+            {
+                integrationHub -> billingSystem "Sends charges"
+                billingClerk -> billingSystem "Prepares final bill"
+            }
+            {
+                nurse -> clinicalWorkstation "Prepares discharge instructions"
+                clinicalService -> ehrDatabase "Saves discharge summary"
+            }
+            notificationService -> patient "Sends visit summary"
+            receptionist -> admissionService "Completes checkout"
+            autoLayout lr
+        }
+
+        // Dynamic view 5: Nested Parallel Processing
+        dynamic hospitalSystem "NestedParallel" "Complex parallel workflows with nesting" {
+            patient -> patientPortal "Requests appointment"
+            schedulingService -> ehrDatabase "Checks availability"
+            {
+                admissionService -> integrationHub "Verifies insurance"
+                {
+                    integrationHub -> insurancePortal "Checks eligibility"
+                }
+                {
+                    integrationHub -> billingSystem "Gets copay estimate"
+                }
+            }
+            {
+                schedulingService -> notificationService "Prepares confirmation"
+            }
+            notificationService -> patient "Sends appointment details"
+            autoLayout lr
+        }
+
+        // Dynamic view 6: Discharge and Billing Flow (original, renamed)
         dynamic hospitalSystem "DischargeProcess" "Patient discharge and billing" {
             doctor -> clinicalService "Signs discharge orders"
             clinicalService -> integrationHub "Sends prescriptions electronically"

@@ -416,7 +416,8 @@ pub struct DynamicViewStep {
     pub destination_id: ElementId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
-    pub order: u32,
+    /// Order string supporting hierarchical notation (e.g., "1", "2", "2.1", "2.2" for parallel sequences)
+    pub order: String,
 }
 
 /// Dynamic view showing interactions over time.

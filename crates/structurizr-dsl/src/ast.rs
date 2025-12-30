@@ -198,7 +198,24 @@ pub struct ComponentViewNode {
 pub struct DynamicViewNode {
     pub scope: Option<String>,
     pub properties: ViewPropertiesNode,
-    pub steps: Vec<DynamicStepNode>,
+    pub content: Vec<DynamicContent>,
+}
+
+/// Content that can appear in a dynamic view body.
+/// Supports both sequential steps and parallel sequence blocks.
+#[derive(Debug, Clone)]
+pub enum DynamicContent {
+    /// A single step: source -> destination "description"
+    Step(DynamicStepNode),
+    /// A parallel sequence block: { steps... }
+    ParallelSequence(ParallelSequenceNode),
+}
+
+/// A parallel sequence block containing steps that execute concurrently.
+#[derive(Debug, Clone)]
+pub struct ParallelSequenceNode {
+    /// Content within this parallel branch (can include nested parallel blocks)
+    pub content: Vec<DynamicContent>,
 }
 
 /// A step in a dynamic view.

@@ -625,9 +625,9 @@ impl MermaidExporter {
 
         output.push('\n');
 
-        // Add sequence steps in order
+        // Add sequence steps in order (handles "1", "2", "2.1", "2.2" notation)
         let mut sorted_steps: Vec<_> = view.steps.iter().collect();
-        sorted_steps.sort_by_key(|s| s.order);
+        sorted_steps.sort_by(|a, b| compare_order_strings(&a.order, &b.order));
 
         for step in sorted_steps {
             let label = step.description.as_deref().unwrap_or("uses");
@@ -734,6 +734,14 @@ fn sanitize_id(id: &str) -> String {
     id.chars()
         .map(|c| if c.is_alphanumeric() || c == '_' { c } else { '_' })
         .collect()
+}
+
+/// Compare order strings like "1", "2", "2.1", "2.2", "3" for proper sorting.
+/// Handles hierarchical numbering for parallel sequences.
+fn compare_order_strings(a: &str, b: &str) -> std::cmp::Ordering {
+    let a_parts: Vec<u32> = a.split('.').filter_map(|s| s.parse().ok()).collect();
+    let b_parts: Vec<u32> = b.split('.').filter_map(|s| s.parse().ok()).collect();
+    a_parts.cmp(&b_parts)
 }
 
 /// Render a deployment node for Mermaid.
