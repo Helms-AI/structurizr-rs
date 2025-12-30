@@ -229,28 +229,32 @@ fn generate_theme_js() -> &'static str {
 fn generate_breadcrumb(config: &LayoutConfig) -> String {
     match (config.workspace_id, config.workspace_name) {
         (Some(id), Some(_name)) => {
-            // Multi-workspace mode: "All Workspaces / {workspace-id}"
+            // Multi-workspace mode: "All Workspaces > {workspace-id}"
             // The workspace name links back to the workspace index page
+            // Replace "/" in workspace ID with " > " for display
+            let display_id = id.replace("/", " > ");
             format!(
                 r#"<div class="breadcrumb">
                     <a href="/">All Workspaces</a>
-                    <span class="separator">/</span>
+                    <span class="separator">&gt;</span>
                     <a href="/w/{}" class="workspace-link">{}</a>
                 </div>"#,
                 escape_html(id),
-                escape_html(id),
+                escape_html(&display_id),
             )
         }
         (Some(id), None) => {
             // Multi-workspace mode without name
+            // Replace "/" in workspace ID with " > " for display
+            let display_id = id.replace("/", " > ");
             format!(
                 r#"<div class="breadcrumb">
                     <a href="/">All Workspaces</a>
-                    <span class="separator">/</span>
+                    <span class="separator">&gt;</span>
                     <a href="/w/{}" class="workspace-link">{}</a>
                 </div>"#,
                 escape_html(id),
-                escape_html(id),
+                escape_html(&display_id),
             )
         }
         (None, Some(name)) => {
