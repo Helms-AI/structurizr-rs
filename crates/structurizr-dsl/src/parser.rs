@@ -180,6 +180,22 @@ impl Parser {
         }
     }
 
+    /// Parse an optional string or number (used for instances which can be "1", "2-10", or just 5)
+    fn maybe_string_or_number(&mut self) -> Option<String> {
+        self.skip_newlines_and_comments();
+        match self.current_kind().cloned() {
+            Some(TokenKind::String(s)) => {
+                self.advance();
+                Some(s)
+            }
+            Some(TokenKind::Number(n)) => {
+                self.advance();
+                Some(n.to_string())
+            }
+            _ => None,
+        }
+    }
+
     fn check(&self, expected: &TokenKind) -> bool {
         match self.current_kind() {
             Some(kind) => std::mem::discriminant(kind) == std::mem::discriminant(expected),
@@ -398,12 +414,30 @@ impl Parser {
     fn parse_element(&mut self, kind: ElementKind, identifier: Option<String>) -> Result<ElementNode> {
         self.skip_newlines_and_comments();
 
-        let name = self.expect_string()?;
+        // ContainerInstance and SoftwareSystemInstance use an identifier reference, not a string
+        let name = if matches!(kind, ElementKind::ContainerInstance | ElementKind::SoftwareSystemInstance) {
+            self.expect_identifier()?
+        } else {
+            self.expect_string()?
+        };
         let description = self.maybe_string();
-        let technology = if matches!(kind, ElementKind::Container | ElementKind::Component) {
+
+        // Technology is the 3rd string for Container/Component
+        // For DeploymentNode, it's also the 3rd string (followed by tags and instances)
+        let technology = if matches!(kind, ElementKind::Container | ElementKind::Component | ElementKind::DeploymentNode) {
             self.maybe_string()
         } else {
             None
+        };
+
+        // For DeploymentNode: parse inline tags (4th) and instances (5th)
+        // Syntax: deploymentNode <name> [description] [technology] [tags] [instances] { ... }
+        let (inline_tags, instances) = if kind == ElementKind::DeploymentNode {
+            let tags_str = self.maybe_string();
+            let instances_str = self.maybe_string_or_number();
+            (tags_str, instances_str)
+        } else {
+            (None, None)
         };
 
         let mut element = ElementNode {
@@ -412,10 +446,13 @@ impl Parser {
             name,
             description,
             technology,
-            tags: Vec::new(),
+            tags: inline_tags
+                .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
+                .unwrap_or_default(),
             properties: HashMap::new(),
             children: Vec::new(),
             relationships: Vec::new(),
+            instances,
         };
 
         // Check for optional block
@@ -454,6 +491,17 @@ impl Parser {
                     self.advance();
                     let url = self.expect_string()?;
                     element.properties.insert("url".to_string(), url);
+                }
+                Some(TokenKind::Instances) if element.kind == ElementKind::DeploymentNode => {
+                    self.advance();
+                    // instances can be a number or string (e.g., "2-10")
+                    let instances = self.maybe_string_or_number().ok_or_else(|| {
+                        Error::Parse(ParseError {
+                            message: "Expected number or string after 'instances'".to_string(),
+                            location: self.current().map(|t| t.location),
+                        })
+                    })?;
+                    element.instances = Some(instances);
                 }
                 Some(TokenKind::Properties) => {
                     self.advance();
@@ -2029,7 +2077,7 @@ fn build_element(
             id
         }
         ElementKind::DeploymentNode => {
-            let node = DeploymentNode::new(&element.name);
+            let node = build_deployment_node(element, identifiers)?;
             let id = node.id();
             workspace.model_mut().deployment_nodes.push(node);
             id
@@ -2112,6 +2160,108 @@ fn build_container(
     let id = container.id();
     system.add_container(container);
     Ok(id)
+}
+
+fn build_deployment_node(
+    element: &ElementNode,
+    identifiers: &mut HashMap<String, ElementId>,
+) -> Result<DeploymentNode> {
+    let mut node = DeploymentNode::new(&element.name);
+
+    if let Some(ref desc) = element.description {
+        node.properties.description = Some(desc.clone());
+    }
+    if let Some(ref tech) = element.technology {
+        node.technology = Some(tech.clone());
+    }
+    if let Some(ref instances) = element.instances {
+        node.instances = instances.clone();
+    }
+
+    // Add tags
+    for tag in &element.tags {
+        if !node.properties.tags.contains(tag) {
+            node.properties.tags.push(tag.clone());
+        }
+    }
+
+    // Add properties
+    for (key, value) in &element.properties {
+        node.properties.properties.insert(key.clone(), value.clone());
+    }
+
+    // Register this node's identifier
+    if let Some(ref id) = element.identifier {
+        identifiers.insert(id.clone(), node.id());
+    }
+
+    // Process children
+    for child in &element.children {
+        match child.kind {
+            ElementKind::DeploymentNode => {
+                let child_node = build_deployment_node(child, identifiers)?;
+                node.children.push(child_node);
+            }
+            ElementKind::InfrastructureNode => {
+                let mut infra = InfrastructureNode::new(&child.name);
+                if let Some(ref desc) = child.description {
+                    infra.properties.description = Some(desc.clone());
+                }
+                if let Some(ref tech) = child.technology {
+                    infra.technology = Some(tech.clone());
+                }
+                for tag in &child.tags {
+                    if !infra.properties.tags.contains(tag) {
+                        infra.properties.tags.push(tag.clone());
+                    }
+                }
+                if let Some(ref id) = child.identifier {
+                    identifiers.insert(id.clone(), infra.id());
+                }
+                node.infrastructure_nodes.push(infra);
+            }
+            ElementKind::ContainerInstance => {
+                // The "name" here is actually the identifier of the container being instantiated
+                // We need to look it up in identifiers, but it might not be resolved yet
+                // For now, create a placeholder using a dummy ID
+                let container_id = identifiers.get(&child.name).copied().unwrap_or_else(|| {
+                    // Create a placeholder ID based on the name
+                    ElementId::from_name(&child.name)
+                });
+                let instance = ContainerInstance {
+                    id: ElementId::from_name(&format!("{}Instance", child.name)),
+                    container_id,
+                    instance_id: 1,
+                    tags: child.tags.clone(),
+                    properties: child.properties.clone(),
+                };
+                if let Some(ref id) = child.identifier {
+                    identifiers.insert(id.clone(), instance.id);
+                }
+                node.container_instances.push(instance);
+            }
+            ElementKind::SoftwareSystemInstance => {
+                // The "name" here is the identifier of the software system being instantiated
+                let system_id = identifiers.get(&child.name).copied().unwrap_or_else(|| {
+                    ElementId::from_name(&child.name)
+                });
+                let instance = SoftwareSystemInstance {
+                    id: ElementId::from_name(&format!("{}Instance", child.name)),
+                    software_system_id: system_id,
+                    instance_id: 1,
+                    tags: child.tags.clone(),
+                    properties: child.properties.clone(),
+                };
+                if let Some(ref id) = child.identifier {
+                    identifiers.insert(id.clone(), instance.id);
+                }
+                node.software_system_instances.push(instance);
+            }
+            _ => {}
+        }
+    }
+
+    Ok(node)
 }
 
 fn build_relationship(

@@ -1,0 +1,235 @@
+{
+  "name": "FreshMart Corporate Theme",
+  "description": "Standard styling for FreshMart enterprise architecture diagrams",
+  "elements": [
+    {
+      "tag": "Person",
+      "shape": "Person",
+      "background": "#00539C",
+      "color": "#FFFFFF",
+      "icon": "https://structurizr.com/img/person.png"
+    },
+    {
+      "tag": "Customer",
+      "shape": "Person",
+      "background": "#2ECC71",
+      "color": "#FFFFFF",
+      "icon": "https://structurizr.com/img/customer.png"
+    },
+    {
+      "tag": "Associate",
+      "shape": "Person",
+      "background": "#3498DB",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "External",
+      "background": "#999999",
+      "color": "#FFFFFF",
+      "shape": "RoundedBox"
+    },
+    {
+      "tag": "Software System",
+      "background": "#1168BD",
+      "color": "#FFFFFF",
+      "shape": "RoundedBox"
+    },
+    {
+      "tag": "Core",
+      "background": "#00539C",
+      "color": "#FFFFFF",
+      "shape": "RoundedBox",
+      "icon": "https://structurizr.com/img/gears.png"
+    },
+    {
+      "tag": "Container",
+      "background": "#438DD5",
+      "color": "#FFFFFF",
+      "shape": "RoundedBox"
+    },
+    {
+      "tag": "Component",
+      "background": "#85BBF0",
+      "color": "#000000",
+      "shape": "Component"
+    },
+    {
+      "tag": "Database",
+      "shape": "Cylinder",
+      "background": "#FF6B6B",
+      "color": "#FFFFFF",
+      "icon": "https://structurizr.com/img/database.png"
+    },
+    {
+      "tag": "Queue",
+      "shape": "Pipe",
+      "background": "#9B59B6",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "Cache",
+      "shape": "Hexagon",
+      "background": "#F39C12",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "Security",
+      "background": "#DC143C",
+      "color": "#FFFFFF",
+      "shape": "Hexagon",
+      "icon": "https://structurizr.com/img/lock.png"
+    },
+    {
+      "tag": "PCI",
+      "background": "#8B0000",
+      "color": "#FFFFFF",
+      "shape": "Hexagon",
+      "border": "Solid",
+      "strokeWidth": 3
+    },
+    {
+      "tag": "ML",
+      "shape": "Robot",
+      "background": "#9370DB",
+      "color": "#FFFFFF",
+      "icon": "https://structurizr.com/img/brain.png"
+    },
+    {
+      "tag": "Data",
+      "shape": "Cylinder",
+      "background": "#008080",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "API",
+      "shape": "Ellipse",
+      "background": "#FF8C00",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "Mobile",
+      "shape": "MobileDevicePortrait",
+      "background": "#27AE60",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "Web",
+      "shape": "WebBrowser",
+      "background": "#3498DB",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "IoT",
+      "shape": "Ellipse",
+      "background": "#E74C3C",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "Infrastructure",
+      "shape": "Box",
+      "background": "#34495E",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "Cloud",
+      "shape": "RoundedBox",
+      "background": "#FF9900",
+      "color": "#000000",
+      "icon": "https://structurizr.com/img/cloud.png"
+    },
+    {
+      "tag": "Edge",
+      "shape": "Box",
+      "background": "#2C3E50",
+      "color": "#FFFFFF",
+      "border": "Dashed"
+    },
+    {
+      "tag": "Integration",
+      "shape": "Hexagon",
+      "background": "#16A085",
+      "color": "#FFFFFF"
+    },
+    {
+      "tag": "Partner",
+      "background": "#95A5A6",
+      "color": "#FFFFFF",
+      "shape": "RoundedBox",
+      "border": "Dotted"
+    },
+    {
+      "tag": "Legacy",
+      "background": "#7F8C8D",
+      "color": "#FFFFFF",
+      "shape": "Box",
+      "border": "Dashed",
+      "opacity": 75
+    }
+  ],
+  "relationships": [
+    {
+      "tag": "Relationship",
+      "thickness": 2,
+      "color": "#707070",
+      "style": "Solid",
+      "routing": "Orthogonal",
+      "fontSize": 12,
+      "position": 50
+    },
+    {
+      "tag": "Async",
+      "style": "Dashed",
+      "color": "#9B59B6",
+      "thickness": 2
+    },
+    {
+      "tag": "Sync",
+      "style": "Solid",
+      "color": "#3498DB",
+      "thickness": 2
+    },
+    {
+      "tag": "Critical",
+      "color": "#DC143C",
+      "thickness": 3,
+      "style": "Solid"
+    },
+    {
+      "tag": "Batch",
+      "style": "Dotted",
+      "color": "#95A5A6",
+      "thickness": 2
+    },
+    {
+      "tag": "Realtime",
+      "color": "#2ECC71",
+      "thickness": 3,
+      "style": "Solid"
+    },
+    {
+      "tag": "Encrypted",
+      "color": "#8B0000",
+      "thickness": 3,
+      "style": "Solid"
+    },
+    {
+      "tag": "External",
+      "color": "#999999",
+      "style": "Dashed",
+      "thickness": 1
+    },
+    {
+      "tag": "Internal",
+      "color": "#00539C",
+      "style": "Solid",
+      "thickness": 2
+    }
+  ],
+  "branding": {
+    "logo": "https://freshmart.com/logo.png",
+    "font": {
+      "name": "Arial",
+      "url": "https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;700&display=swap"
+    }
+  }
+}

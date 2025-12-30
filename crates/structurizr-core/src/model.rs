@@ -20,6 +20,12 @@ impl ElementId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Create an ElementId from a name using deterministic UUID v5.
+    pub fn from_name(name: &str) -> Self {
+        let namespace = Uuid::NAMESPACE_OID;
+        Self(Uuid::new_v5(&namespace, name.as_bytes()))
+    }
 }
 
 impl Default for ElementId {
@@ -297,8 +303,9 @@ pub struct DeploymentNode {
     pub technology: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub environment: Option<String>,
-    #[serde(default)]
-    pub instances: u32,
+    /// Number of instances. Can be a number or range like "2-10".
+    #[serde(default = "default_instances")]
+    pub instances: String,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<DeploymentNode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -307,6 +314,10 @@ pub struct DeploymentNode {
     pub container_instances: Vec<ContainerInstance>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub software_system_instances: Vec<SoftwareSystemInstance>,
+}
+
+fn default_instances() -> String {
+    "1".to_string()
 }
 
 impl DeploymentNode {
@@ -318,12 +329,17 @@ impl DeploymentNode {
             properties: props,
             technology: None,
             environment: None,
-            instances: 1,
+            instances: "1".to_string(),
             children: Vec::new(),
             infrastructure_nodes: Vec::new(),
             container_instances: Vec::new(),
             software_system_instances: Vec::new(),
         }
+    }
+
+    pub fn with_instances(mut self, instances: impl Into<String>) -> Self {
+        self.instances = instances.into();
+        self
     }
 
     pub fn id(&self) -> ElementId {

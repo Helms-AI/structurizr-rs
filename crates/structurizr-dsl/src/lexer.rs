@@ -42,6 +42,7 @@ pub enum TokenKind {
     Description,
     Url,
     Extends,
+    Instances,
 
     // Directives (start with !)
     DirectiveIdentifiers,
@@ -299,6 +300,7 @@ impl<'a> Lexer<'a> {
             "description" => TokenKind::Description,
             "url" => TokenKind::Url,
             "extends" => TokenKind::Extends,
+            "instances" => TokenKind::Instances,
             _ => TokenKind::Identifier(s.to_string()),
         }
     }

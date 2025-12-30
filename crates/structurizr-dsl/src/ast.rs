@@ -76,6 +76,8 @@ pub struct ElementNode {
     pub properties: HashMap<String, String>,
     pub children: Vec<ElementNode>,
     pub relationships: Vec<RelationshipNode>,
+    /// Number of instances (for DeploymentNode). Can be a number or range like "2-10".
+    pub instances: Option<String>,
 }
 
 /// Type of element.
