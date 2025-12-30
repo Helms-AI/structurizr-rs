@@ -14,7 +14,6 @@ structurizr-rs is a Rust implementation of Structurizr Lite, a tool for creating
 
 **ALL features that interact with DSL files MUST be 100% backwards compatible with the official Structurizr Java implementation:**
 - https://github.com/structurizr/java
-- https://github.com/structurizr/dsl
 
 ### Rules
 
@@ -38,7 +37,7 @@ Users must be able to:
 - Migrate to/from the official tooling without any file modifications
 - Trust that their architecture documentation remains portable
 
-**When in doubt, check the official DSL documentation:** https://docs.structurizr.com/dsl/language
+**When in doubt, check the official Structurizr Java repository for clarification on how functionality works.**
 
 ---
 
