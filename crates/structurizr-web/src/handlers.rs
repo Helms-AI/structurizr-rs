@@ -29,60 +29,113 @@ use crate::notes::{AddNoteRequest, NotesFile, ViewNotes};
 use crate::state::AppState;
 
 
-/// Generate a single view card HTML.
-fn generate_view_card(key: &str, base_path: &str, is_dynamic: bool) -> String {
-    let animate_link = if is_dynamic {
-        format!(r#" | <a href="{}/view/{}/animate">Animate</a>"#, base_path, key)
+/// View information for table row generation.
+struct ViewInfo<'a> {
+    key: &'a str,
+    view_type: &'static str,
+    description: Option<&'a str>,
+    is_dynamic: bool,
+}
+
+/// Generate a single table row for a view with icon buttons and export dropdown.
+fn generate_view_row(view: &ViewInfo, base_path: &str) -> String {
+    let animate_btn = if view.is_dynamic {
+        format!(
+            r#"<a href="{}/view/{}/animate" class="icon-btn" data-tooltip="Animate" aria-label="Animate steps">
+                    <i data-lucide="film"></i>
+                </a>"#,
+            base_path, view.key
+        )
     } else {
         String::new()
     };
+
+    let description = view.description.map(escape_html).unwrap_or_default();
+
     format!(
-        r#"<div class="view-card">
-            <h3><a href="{}/view/{}">{}</a></h3>
-            <p>
-                <a href="{}/edit/{}">Edit</a> |
-                <a href="{}/presentation?views={}">Present</a>{}
-                | <a href="{}/view/{}/svg">SVG</a>
-                | <a href="{}/view/{}/plantuml">PlantUML</a>
-                | <a href="{}/view/{}/mermaid">Mermaid</a>
-                | <a href="{}/view/{}/dot">DOT</a>
-                | <a href="{}/view/{}/d2">D2</a>
-            </p>
-        </div>"#,
-        base_path, key, escape_html(key),
-        base_path, key,
-        base_path, key, animate_link,
-        base_path, key,
-        base_path, key,
-        base_path, key,
-        base_path, key,
-        base_path, key
+        r##"<tr>
+            <td class="view-type">{view_type}</td>
+            <td class="view-name"><a href="{base_path}/view/{key}">{key_escaped}</a></td>
+            <td class="view-description">{description}</td>
+            <td class="view-actions">
+                <div class="action-buttons">
+                    <a href="{base_path}/edit/{key}" class="icon-btn" data-tooltip="Edit" aria-label="Edit diagram">
+                        <i data-lucide="pencil"></i>
+                    </a>
+                    <a href="{base_path}/presentation?views={key}" class="icon-btn" data-tooltip="Present" aria-label="Present diagram">
+                        <i data-lucide="play"></i>
+                    </a>
+                    {animate_btn}
+                    <span class="btn-separator"></span>
+                    <div class="export-dropdown">
+                        <button class="icon-btn" data-tooltip="Export" aria-label="Export options" aria-haspopup="true">
+                            <i data-lucide="download"></i>
+                        </button>
+                        <div class="export-dropdown-menu" role="menu">
+                            <a href="{base_path}/view/{key}/svg" role="menuitem">
+                                <i data-lucide="file-image"></i> SVG
+                            </a>
+                            <a href="{base_path}/view/{key}/plantuml" role="menuitem">
+                                <i data-lucide="file-code"></i> PlantUML
+                            </a>
+                            <a href="{base_path}/view/{key}/mermaid" role="menuitem">
+                                <i data-lucide="file-code-2"></i> Mermaid
+                            </a>
+                            <a href="{base_path}/view/{key}/dot" role="menuitem">
+                                <i data-lucide="file-text"></i> DOT
+                            </a>
+                            <a href="{base_path}/view/{key}/d2" role="menuitem">
+                                <i data-lucide="file-type"></i> D2
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </td>
+        </tr>"##,
+        base_path = base_path,
+        key = view.key,
+        key_escaped = escape_html(view.key),
+        view_type = escape_html(view.view_type),
+        description = description,
+        animate_btn = animate_btn
     )
 }
 
-/// Generate a collapsible section for a category of views.
+/// Generate a collapsible section with a table grid for a category of views.
 /// Returns empty string if views is empty.
-fn generate_view_section(title: &str, views: &[(&str, bool)], base_path: &str) -> String {
+fn generate_view_section(title: &str, views: &[ViewInfo], base_path: &str) -> String {
     if views.is_empty() {
         return String::new();
     }
 
-    let cards: String = views
+    let rows: String = views
         .iter()
-        .map(|(key, is_dynamic)| generate_view_card(key, base_path, *is_dynamic))
+        .map(|view| generate_view_row(view, base_path))
         .collect::<Vec<_>>()
         .join("\n");
 
     format!(
         r#"<details class="view-section" open>
             <summary>{} ({})</summary>
-            <div class="views">
-                {}
+            <div class="view-table-wrapper">
+                <table class="view-table">
+                    <thead>
+                        <tr>
+                            <th>Type</th>
+                            <th>Name</th>
+                            <th>Description</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {}
+                    </tbody>
+                </table>
             </div>
         </details>"#,
         escape_html(title),
         views.len(),
-        cards
+        rows
     )
 }
 
@@ -90,63 +143,83 @@ fn generate_view_section(title: &str, views: &[(&str, bool)], base_path: &str) -
 fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option<&str>) -> String {
     let views = ws.views();
 
-    // Group views by category
+    // Group views by category with full ViewInfo
     // C4 Model Views: System Landscape, System Context, Container, Component
-    let c4_views: Vec<(&str, bool)> = views
+    let c4_views: Vec<ViewInfo> = views
         .system_landscape_views
         .iter()
-        .map(|v| (v.properties.key.as_str(), false))
-        .chain(
-            views
-                .system_context_views
-                .iter()
-                .map(|v| (v.properties.key.as_str(), false)),
-        )
-        .chain(
-            views
-                .container_views
-                .iter()
-                .map(|v| (v.properties.key.as_str(), false)),
-        )
-        .chain(
-            views
-                .component_views
-                .iter()
-                .map(|v| (v.properties.key.as_str(), false)),
-        )
+        .map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "System Landscape",
+            description: v.properties.description.as_deref(),
+            is_dynamic: false,
+        })
+        .chain(views.system_context_views.iter().map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "System Context",
+            description: v.properties.description.as_deref(),
+            is_dynamic: false,
+        }))
+        .chain(views.container_views.iter().map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "Container",
+            description: v.properties.description.as_deref(),
+            is_dynamic: false,
+        }))
+        .chain(views.component_views.iter().map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "Component",
+            description: v.properties.description.as_deref(),
+            is_dynamic: false,
+        }))
         .collect();
 
     // Behavioral Views: Dynamic
-    let behavioral_views: Vec<(&str, bool)> = views
+    let behavioral_views: Vec<ViewInfo> = views
         .dynamic_views
         .iter()
-        .map(|v| (v.properties.key.as_str(), true))
+        .map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "Dynamic",
+            description: v.properties.description.as_deref(),
+            is_dynamic: true,
+        })
         .collect();
 
     // Infrastructure Views: Deployment
-    let infrastructure_views: Vec<(&str, bool)> = views
+    let infrastructure_views: Vec<ViewInfo> = views
         .deployment_views
         .iter()
-        .map(|v| (v.properties.key.as_str(), false))
+        .map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "Deployment",
+            description: v.properties.description.as_deref(),
+            is_dynamic: false,
+        })
         .collect();
 
     // Extended Views: Filtered, Custom, Image
-    let extended_views: Vec<(&str, bool)> = views
+    let extended_views: Vec<ViewInfo> = views
         .filtered_views
         .iter()
-        .map(|v| (v.properties.key.as_str(), false))
-        .chain(
-            views
-                .custom_views
-                .iter()
-                .map(|v| (v.properties.key.as_str(), false)),
-        )
-        .chain(
-            views
-                .image_views
-                .iter()
-                .map(|v| (v.properties.key.as_str(), false)),
-        )
+        .map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "Filtered",
+            description: v.properties.description.as_deref(),
+            is_dynamic: false,
+        })
+        .chain(views.custom_views.iter().map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "Custom",
+            description: v.properties.description.as_deref(),
+            is_dynamic: false,
+        }))
+        .chain(views.image_views.iter().map(|v| ViewInfo {
+            key: v.properties.key.as_str(),
+            view_type: "Image",
+            description: v.properties.description.as_deref(),
+            is_dynamic: false,
+        }))
         .collect();
 
     // Generate sections
@@ -168,8 +241,9 @@ fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option
         sections
     };
 
-    // Page-specific styles
-    let extra_styles = r##"<style>
+    // Page-specific styles including Lucide icons CDN
+    let extra_styles = r##"<script src="https://unpkg.com/lucide@latest"></script>
+    <style>
         h1 { margin-top: 0; }
         .workspace-info {
             background: var(--card-bg);
@@ -204,32 +278,290 @@ fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option
         .view-section summary:hover {
             color: var(--link-color);
         }
-        .view-section .views {
+
+        /* Table grid for views */
+        .view-table-wrapper {
             margin-top: 12px;
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-            gap: 20px;
-        }
-        .view-card {
-            background: var(--card-bg);
-            padding: 20px;
             border-radius: 8px;
             box-shadow: 0 2px 4px var(--shadow);
-            transition: box-shadow 0.2s ease;
+            overflow: hidden;
         }
-        .view-card:hover {
-            box-shadow: 0 4px 8px var(--shadow-medium);
+
+        .view-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--card-bg);
+            font-size: 14px;
+            table-layout: auto;
         }
-        .view-card h3 { margin-top: 0; }
-        .view-card p {
+
+        .view-table thead {
+            background: var(--bg-tertiary);
+        }
+
+        .view-table th {
+            padding: 12px 16px;
+            text-align: left;
+            font-weight: 600;
+            color: var(--text-primary);
+            border-bottom: 2px solid var(--border-color);
+            white-space: nowrap;
+        }
+
+        .view-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border-color);
+            vertical-align: middle;
+        }
+
+        .view-table tbody tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Zebra striping */
+        .view-table tbody tr:nth-child(even) {
+            background: var(--card-hover);
+        }
+
+        /* Column styling */
+        .view-type {
+            width: 140px;
+            color: var(--text-muted);
             font-size: 13px;
-            color: var(--text-secondary);
         }
+
+        .view-name {
+            font-weight: 500;
+        }
+
+        .view-name a {
+            color: var(--link-color);
+            text-decoration: none;
+        }
+
+        .view-name a:hover {
+            text-decoration: underline;
+        }
+
+        .view-description {
+            color: var(--text-secondary);
+            font-size: 13px;
+            max-width: 300px;
+        }
+
+        .view-actions {
+            width: 180px;
+            white-space: nowrap;
+        }
+
+        /* Icon button bar */
+        .action-buttons {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .icon-btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            position: relative;
+            text-decoration: none;
+            font-size: 0;
+        }
+
+        .icon-btn:hover {
+            background: var(--card-hover);
+            color: var(--link-color);
+            border-color: var(--link-color);
+            text-decoration: none;
+        }
+
+        .icon-btn:focus {
+            outline: 2px solid var(--link-color);
+            outline-offset: 2px;
+        }
+
+        .icon-btn svg {
+            width: 16px;
+            height: 16px;
+        }
+
+        /* CSS Tooltips */
+        .icon-btn[data-tooltip]::after {
+            content: attr(data-tooltip);
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 6px 10px;
+            background: var(--header-bg);
+            color: var(--header-text);
+            font-size: 12px;
+            white-space: nowrap;
+            border-radius: 4px;
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            pointer-events: none;
+            margin-bottom: 6px;
+            z-index: 100;
+        }
+
+        .icon-btn[data-tooltip]::before {
+            content: '';
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: var(--header-bg);
+            opacity: 0;
+            visibility: hidden;
+            transition: opacity 0.2s, visibility 0.2s;
+            margin-bottom: -4px;
+            z-index: 100;
+        }
+
+        .icon-btn:hover[data-tooltip]::after,
+        .icon-btn:hover[data-tooltip]::before,
+        .icon-btn:focus[data-tooltip]::after,
+        .icon-btn:focus[data-tooltip]::before {
+            opacity: 1;
+            visibility: visible;
+        }
+
+        /* Separator between action buttons */
+        .btn-separator {
+            width: 1px;
+            height: 20px;
+            background: var(--border-color);
+            margin: 0 2px;
+        }
+
+        /* Export dropdown */
+        .export-dropdown {
+            position: relative;
+        }
+
+        .export-dropdown-menu {
+            position: absolute;
+            top: 100%;
+            right: 0;
+            margin-top: 4px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 6px;
+            box-shadow: 0 4px 12px var(--shadow-medium);
+            min-width: 140px;
+            opacity: 0;
+            visibility: hidden;
+            transform: translateY(-8px);
+            transition: opacity 0.15s, visibility 0.15s, transform 0.15s;
+            z-index: 200;
+        }
+
+        .export-dropdown:hover .export-dropdown-menu,
+        .export-dropdown:focus-within .export-dropdown-menu,
+        .export-dropdown-menu.open {
+            opacity: 1;
+            visibility: visible;
+            transform: translateY(0);
+        }
+
+        .export-dropdown-menu a {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 14px;
+            color: var(--text-primary);
+            text-decoration: none;
+            font-size: 13px;
+            transition: background 0.1s;
+        }
+
+        .export-dropdown-menu a:hover {
+            background: var(--card-hover);
+            text-decoration: none;
+        }
+
+        .export-dropdown-menu a:first-child {
+            border-radius: 6px 6px 0 0;
+        }
+
+        .export-dropdown-menu a:last-child {
+            border-radius: 0 0 6px 6px;
+        }
+
+        .export-dropdown-menu svg {
+            width: 14px;
+            height: 14px;
+            color: var(--text-muted);
+        }
+
         .no-views {
             color: var(--text-secondary);
             font-style: italic;
         }
     </style>"##;
+
+    // JavaScript for Lucide icons and keyboard navigation
+    let extra_scripts = r##"<script>
+    // Initialize Lucide icons
+    lucide.createIcons();
+
+    // Keyboard navigation for export dropdowns
+    document.querySelectorAll('.export-dropdown').forEach(dropdown => {
+        const btn = dropdown.querySelector('button');
+        const menu = dropdown.querySelector('.export-dropdown-menu');
+        const items = menu.querySelectorAll('a');
+        let focusIndex = -1;
+
+        btn.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                menu.classList.add('open');
+                focusIndex = 0;
+                items[0].focus();
+            }
+        });
+
+        items.forEach((item, index) => {
+            item.addEventListener('keydown', (e) => {
+                if (e.key === 'ArrowDown') {
+                    e.preventDefault();
+                    focusIndex = (focusIndex + 1) % items.length;
+                    items[focusIndex].focus();
+                } else if (e.key === 'ArrowUp') {
+                    e.preventDefault();
+                    focusIndex = (focusIndex - 1 + items.length) % items.length;
+                    items[focusIndex].focus();
+                } else if (e.key === 'Escape') {
+                    e.preventDefault();
+                    menu.classList.remove('open');
+                    btn.focus();
+                }
+            });
+        });
+
+        // Close on blur outside
+        dropdown.addEventListener('focusout', (e) => {
+            setTimeout(() => {
+                if (!dropdown.contains(document.activeElement)) {
+                    menu.classList.remove('open');
+                }
+            }, 0);
+        });
+    });
+    </script>"##;
 
     // Build content
     let content = format!(
@@ -258,7 +590,7 @@ fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option
         active_nav: NavItem::Home,
         content_type: ContentType::Standard,
         extra_head: extra_styles,
-        extra_body_end: "",
+        extra_body_end: extra_scripts,
     };
 
     generate_page_layout(&config, &content)
