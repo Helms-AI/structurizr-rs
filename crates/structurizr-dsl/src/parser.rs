@@ -1979,6 +1979,46 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
             workspace.views_mut().add_dynamic_view(v);
         }
 
+        // Process deployment views
+        for view in views_node.deployment {
+            let mut v = if let Some(ref scope_id) = view.scope {
+                if let Some(&system_id) = identifiers.get(scope_id) {
+                    DeploymentView::for_system(
+                        view.properties.key.unwrap_or_else(|| format!("Deployment-{}-{}", scope_id, view.environment)),
+                        system_id,
+                        &view.environment,
+                    )
+                } else {
+                    // Scope system not found - create unscoped view
+                    DeploymentView::new(
+                        view.properties.key.unwrap_or_else(|| format!("Deployment-{}", view.environment)),
+                        &view.environment,
+                    )
+                }
+            } else {
+                DeploymentView::new(
+                    view.properties.key.unwrap_or_else(|| format!("Deployment-{}", view.environment)),
+                    &view.environment,
+                )
+            };
+
+            // Apply view properties
+            if let Some(title) = view.properties.title {
+                v.properties = v.properties.with_title(title);
+            }
+            if let Some(description) = view.properties.description {
+                v.properties = v.properties.with_description(description);
+            }
+            if let Some(auto_layout) = view.properties.auto_layout {
+                v.properties = v.properties.with_auto_layout(convert_auto_layout(auto_layout));
+            }
+            if let Some(background) = view.properties.background {
+                v.properties = v.properties.with_background(background);
+            }
+
+            workspace.views_mut().add_deployment_view(v);
+        }
+
         // Process styles
         if let Some(styles_node) = views_node.styles {
             for elem_style in styles_node.elements {
