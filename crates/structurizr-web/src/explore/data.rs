@@ -22,6 +22,9 @@ pub struct GraphNode {
     /// Optional technology (for containers and components)
     #[serde(skip_serializing_if = "Option::is_none")]
     pub technology: Option<String>,
+    /// Parent element ID (for hierarchy - containers have system parent, components have container parent)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub parent_id: Option<String>,
 }
 
 /// Represents a link/relationship in the explore graph.
@@ -45,7 +48,7 @@ pub fn extract_graph_data(workspace: &Workspace) -> (Vec<GraphNode>, Vec<GraphLi
     let mut nodes = Vec::new();
     let mut links = Vec::new();
 
-    // Extract people as nodes
+    // Extract people as nodes (no parent)
     for person in &model.people {
         nodes.push(GraphNode {
             id: person.id().to_string(),
@@ -53,31 +56,38 @@ pub fn extract_graph_data(workspace: &Workspace) -> (Vec<GraphNode>, Vec<GraphLi
             node_type: "Person".to_string(),
             description: person.properties.description.clone(),
             technology: None,
+            parent_id: None,
         });
     }
 
     // Extract software systems and their containers/components
     for system in &model.software_systems {
-        // Add system node
+        let system_id = system.id().to_string();
+
+        // Add system node (no parent)
         nodes.push(GraphNode {
-            id: system.id().to_string(),
+            id: system_id.clone(),
             name: system.name().to_string(),
             node_type: "Software System".to_string(),
             description: system.properties.description.clone(),
             technology: None,
+            parent_id: None,
         });
 
-        // Add container nodes
+        // Add container nodes (parent is the system)
         for container in &system.containers {
+            let container_id = container.id().to_string();
+
             nodes.push(GraphNode {
-                id: container.id().to_string(),
+                id: container_id.clone(),
                 name: container.name().to_string(),
                 node_type: "Container".to_string(),
                 description: container.properties.description.clone(),
                 technology: container.technology.clone(),
+                parent_id: Some(system_id.clone()),
             });
 
-            // Add component nodes
+            // Add component nodes (parent is the container)
             for component in &container.components {
                 nodes.push(GraphNode {
                     id: component.id().to_string(),
@@ -85,6 +95,7 @@ pub fn extract_graph_data(workspace: &Workspace) -> (Vec<GraphNode>, Vec<GraphLi
                     node_type: "Component".to_string(),
                     description: component.properties.description.clone(),
                     technology: component.technology.clone(),
+                    parent_id: Some(container_id.clone()),
                 });
             }
         }
