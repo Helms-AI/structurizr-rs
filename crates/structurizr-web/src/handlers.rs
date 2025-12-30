@@ -29,15 +29,144 @@ use crate::notes::{AddNoteRequest, NotesFile, ViewNotes};
 use crate::state::AppState;
 
 
+/// Generate a single view card HTML.
+fn generate_view_card(key: &str, base_path: &str, is_dynamic: bool) -> String {
+    let animate_link = if is_dynamic {
+        format!(r#" | <a href="{}/view/{}/animate">Animate</a>"#, base_path, key)
+    } else {
+        String::new()
+    };
+    format!(
+        r#"<div class="view-card">
+            <h3><a href="{}/view/{}">{}</a></h3>
+            <p>
+                <a href="{}/edit/{}">Edit</a> |
+                <a href="{}/presentation?views={}">Present</a>{}
+                | <a href="{}/view/{}/svg">SVG</a>
+                | <a href="{}/view/{}/plantuml">PlantUML</a>
+                | <a href="{}/view/{}/mermaid">Mermaid</a>
+                | <a href="{}/view/{}/dot">DOT</a>
+                | <a href="{}/view/{}/d2">D2</a>
+            </p>
+        </div>"#,
+        base_path, key, escape_html(key),
+        base_path, key,
+        base_path, key, animate_link,
+        base_path, key,
+        base_path, key,
+        base_path, key,
+        base_path, key,
+        base_path, key
+    )
+}
+
+/// Generate a collapsible section for a category of views.
+/// Returns empty string if views is empty.
+fn generate_view_section(title: &str, views: &[(&str, bool)], base_path: &str) -> String {
+    if views.is_empty() {
+        return String::new();
+    }
+
+    let cards: String = views
+        .iter()
+        .map(|(key, is_dynamic)| generate_view_card(key, base_path, *is_dynamic))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        r#"<details class="view-section" open>
+            <summary>{} ({})</summary>
+            <div class="views">
+                {}
+            </div>
+        </details>"#,
+        escape_html(title),
+        views.len(),
+        cards
+    )
+}
+
 /// Generate home page HTML content (shared between single and multi-workspace modes).
 fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option<&str>) -> String {
     let views = ws.views();
-    let view_list: Vec<String> = views.all_keys().iter().map(|k| k.to_string()).collect();
 
-    // Check which views are dynamic views
-    let dynamic_view_keys: std::collections::HashSet<String> = views.dynamic_views.iter()
-        .map(|v| v.properties.key.clone())
+    // Group views by category
+    // C4 Model Views: System Landscape, System Context, Container, Component
+    let c4_views: Vec<(&str, bool)> = views
+        .system_landscape_views
+        .iter()
+        .map(|v| (v.properties.key.as_str(), false))
+        .chain(
+            views
+                .system_context_views
+                .iter()
+                .map(|v| (v.properties.key.as_str(), false)),
+        )
+        .chain(
+            views
+                .container_views
+                .iter()
+                .map(|v| (v.properties.key.as_str(), false)),
+        )
+        .chain(
+            views
+                .component_views
+                .iter()
+                .map(|v| (v.properties.key.as_str(), false)),
+        )
         .collect();
+
+    // Behavioral Views: Dynamic
+    let behavioral_views: Vec<(&str, bool)> = views
+        .dynamic_views
+        .iter()
+        .map(|v| (v.properties.key.as_str(), true))
+        .collect();
+
+    // Infrastructure Views: Deployment
+    let infrastructure_views: Vec<(&str, bool)> = views
+        .deployment_views
+        .iter()
+        .map(|v| (v.properties.key.as_str(), false))
+        .collect();
+
+    // Extended Views: Filtered, Custom, Image
+    let extended_views: Vec<(&str, bool)> = views
+        .filtered_views
+        .iter()
+        .map(|v| (v.properties.key.as_str(), false))
+        .chain(
+            views
+                .custom_views
+                .iter()
+                .map(|v| (v.properties.key.as_str(), false)),
+        )
+        .chain(
+            views
+                .image_views
+                .iter()
+                .map(|v| (v.properties.key.as_str(), false)),
+        )
+        .collect();
+
+    // Generate sections
+    let sections = [
+        generate_view_section("C4 Model Views", &c4_views, base_path),
+        generate_view_section("Behavioral Views", &behavioral_views, base_path),
+        generate_view_section("Infrastructure Views", &infrastructure_views, base_path),
+        generate_view_section("Extended Views", &extended_views, base_path),
+    ]
+    .into_iter()
+    .filter(|s| !s.is_empty())
+    .collect::<Vec<_>>()
+    .join("\n");
+
+    // Handle case where no views exist
+    let views_content = if sections.is_empty() {
+        r#"<p class="no-views">No views defined in this workspace.</p>"#.to_string()
+    } else {
+        sections
+    };
 
     // Page-specific styles
     let extra_styles = r##"<style>
@@ -50,7 +179,33 @@ fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option
             box-shadow: 0 2px 4px var(--shadow);
         }
         .workspace-info p { margin: 8px 0; }
-        .views {
+        .view-section {
+            margin-bottom: 24px;
+        }
+        .view-section summary {
+            cursor: pointer;
+            font-size: 1.2em;
+            font-weight: 600;
+            padding: 12px 0;
+            user-select: none;
+            list-style: none;
+        }
+        .view-section summary::-webkit-details-marker {
+            display: none;
+        }
+        .view-section summary::before {
+            content: "▼ ";
+            font-size: 0.8em;
+            margin-right: 4px;
+        }
+        .view-section:not([open]) summary::before {
+            content: "▶ ";
+        }
+        .view-section summary:hover {
+            color: var(--link-color);
+        }
+        .view-section .views {
+            margin-top: 12px;
             display: grid;
             grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
             gap: 20px;
@@ -70,39 +225,11 @@ fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option
             font-size: 13px;
             color: var(--text-secondary);
         }
+        .no-views {
+            color: var(--text-secondary);
+            font-style: italic;
+        }
     </style>"##;
-
-    // Build view cards
-    let view_cards: String = view_list.iter().map(|v| {
-        let bp = base_path;
-        let animate_link = if dynamic_view_keys.contains(v) {
-            format!(r#" | <a href="{}/view/{}/animate">Animate</a>"#, bp, v)
-        } else {
-            String::new()
-        };
-        format!(
-            r#"<div class="view-card">
-                <h3><a href="{}/view/{}">{}</a></h3>
-                <p>
-                    <a href="{}/edit/{}">Edit</a> |
-                    <a href="{}/presentation?views={}">Present</a>{}
-                    | <a href="{}/view/{}/svg">SVG</a>
-                    | <a href="{}/view/{}/plantuml">PlantUML</a>
-                    | <a href="{}/view/{}/mermaid">Mermaid</a>
-                    | <a href="{}/view/{}/dot">DOT</a>
-                    | <a href="{}/view/{}/d2">D2</a>
-                </p>
-            </div>"#,
-            bp, v, escape_html(v),
-            bp, v,
-            bp, v, animate_link,
-            bp, v,
-            bp, v,
-            bp, v,
-            bp, v,
-            bp, v
-        )
-    }).collect::<Vec<_>>().join("\n");
 
     // Build content
     let content = format!(
@@ -114,15 +241,13 @@ fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option
             <p><strong>Relationships:</strong> {}</p>
         </div>
         <h2>Views</h2>
-        <div class="views">
-            {}
-        </div>"#,
+        {}"#,
         escape_html(&ws.name),
         ws.description.as_deref().map(escape_html).unwrap_or_default(),
         ws.model().people.len(),
         ws.model().software_systems.len(),
         ws.model().relationships.len(),
-        view_cards
+        views_content
     );
 
     let config = LayoutConfig {
@@ -6456,15 +6581,15 @@ fn render_presentation_html(workspace: &Workspace, base_path: &str, views_param:
         .toolbar a {{ color: white; text-decoration: none; }}
         .toolbar .spacer {{ flex: 1; }}
         .slide-info {{ font-size: 14px; }}
-        .slide-container {{ height: 100vh; display: flex; align-items: center; justify-content: center; }}
-        .slide {{ max-width: 95vw; max-height: 95vh; background: white; border-radius: 8px; box-shadow: 0 10px 50px rgba(0,0,0,0.5); overflow: hidden; }}
-        .slide img {{ max-width: 100%; max-height: 90vh; display: block; }}
-        .controls {{ position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }}
+        .slide-container {{ position: relative; z-index: 1; height: calc(100vh - 130px); display: flex; align-items: center; justify-content: center; }}
+        .slide {{ max-width: 95vw; max-height: calc(100vh - 150px); background: white; border-radius: 8px; box-shadow: 0 10px 50px rgba(0,0,0,0.5); overflow: hidden; }}
+        .slide img {{ max-width: 100%; max-height: calc(100vh - 180px); display: block; }}
+        .controls {{ position: fixed; bottom: 30px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; z-index: 100; }}
         .controls button {{ background: rgba(255,255,255,0.2); color: white; border: none; padding: 12px 24px; border-radius: 6px; cursor: pointer; font-size: 16px; transition: background 0.2s; }}
         .controls button:hover {{ background: rgba(255,255,255,0.3); }}
         .controls button:disabled {{ opacity: 0.3; cursor: not-allowed; }}
-        .keyboard-hint {{ position: fixed; bottom: 20px; right: 20px; font-size: 11px; color: #666; }}
-        .slide-title {{ position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); font-size: 18px; color: white; background: rgba(0,0,0,0.7); padding: 8px 20px; border-radius: 20px; }}
+        .keyboard-hint {{ position: fixed; bottom: 20px; right: 20px; font-size: 11px; color: #666; z-index: 100; }}
+        .slide-title {{ position: fixed; bottom: 80px; left: 50%; transform: translateX(-50%); font-size: 18px; color: white; background: rgba(0,0,0,0.7); padding: 8px 20px; border-radius: 20px; z-index: 100; }}
     </style>
 </head>
 <body>
