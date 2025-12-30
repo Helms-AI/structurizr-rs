@@ -6,6 +6,42 @@ This file provides guidance for Claude Code when working on the structurizr-rs p
 
 structurizr-rs is a Rust implementation of Structurizr Lite, a tool for creating software architecture diagrams using the C4 model. The original Structurizr Lite is written in Java; this is a native Rust port.
 
+---
+
+## ⚠️ CRITICAL: DSL Backwards Compatibility Requirement
+
+> **This is essential for the project's survival.**
+
+**ALL features that interact with DSL files MUST be 100% backwards compatible with the official Structurizr Java implementation:**
+- https://github.com/structurizr/java
+- https://github.com/structurizr/dsl
+
+### Rules
+
+1. **DO NOT invent new DSL syntax** - Any `.dsl` file created with structurizr-rs MUST be parseable by the official Structurizr Java tooling.
+
+2. **DO NOT modify existing DSL keywords or behavior** - The semantics of all DSL constructs must match the Java implementation exactly.
+
+3. **Extensions ONLY via plugins** - If you need to extend functionality beyond what the official DSL supports, implement it using the plugin system in the same way Structurizr Java does it.
+
+4. **Test compatibility** - Before adding any DSL-related feature, verify that:
+   - The syntax exists in the official Structurizr DSL grammar
+   - The behavior matches the Java implementation
+   - Workspace files remain interoperable
+
+5. **Web UI enhancements are OK** - You MAY add features to the web interface, rendering, or export formats that don't affect DSL parsing/writing.
+
+### Why This Matters
+
+Users must be able to:
+- Use `.dsl` files interchangeably between structurizr-rs and Structurizr Java/Lite
+- Migrate to/from the official tooling without any file modifications
+- Trust that their architecture documentation remains portable
+
+**When in doubt, check the official DSL documentation:** https://docs.structurizr.com/dsl/language
+
+---
+
 ## Architecture
 
 ### Workspace Structure
