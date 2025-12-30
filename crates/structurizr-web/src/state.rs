@@ -158,6 +158,12 @@ impl AppState {
         Ok(())
     }
 
+    /// Check if a workspace exists by ID.
+    pub async fn workspace_exists(&self, id: &str) -> bool {
+        let registry = self.registry.read().await;
+        registry.as_ref().map_or(false, |r| r.contains(id))
+    }
+
     /// Start the file watcher for auto-reload.
     pub async fn start_multi_watcher(&self) -> crate::Result<()> {
         let mut watcher = self.watcher.write().await;

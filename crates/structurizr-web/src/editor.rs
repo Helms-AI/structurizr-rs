@@ -823,6 +823,62 @@ pub async fn workspace_editor_ws_nested(
     ws.on_upgrade(move |socket| handle_workspace_editor_socket(socket, state, full_id, view_key))
 }
 
+/// Unified WebSocket handler that supports arbitrary workspace path depth.
+///
+/// Path format: /w/{workspace_path}/ws/edit/{view_key}
+/// Examples:
+/// - /w/my-workspace/ws/edit/Context -> workspace_id="my-workspace", view_key="Context"
+/// - /w/small/startup-saas/ws/edit/Context -> workspace_id="small/startup-saas", view_key="Context"
+/// - /w/team/project/app/ws/edit/Context -> workspace_id="team/project/app", view_key="Context"
+pub async fn workspace_editor_ws_dispatch(
+    ws: WebSocketUpgrade,
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+) -> impl IntoResponse {
+    // Parse path to extract workspace_id and view_key
+    // Format: {workspace_path}/ws/edit/{view_key}
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+
+    // Find "ws" followed by "edit" to split workspace path from view key
+    let ws_pos = segments.iter().position(|&s| s == "ws");
+
+    if let Some(pos) = ws_pos {
+        if pos + 2 < segments.len() && segments[pos + 1] == "edit" {
+            let workspace_id = segments[..pos].join("/");
+            let view_key = segments[pos + 2].to_string();
+
+            // Verify workspace exists before upgrading
+            if state.workspace_exists(&workspace_id).await {
+                return ws.on_upgrade(move |socket| {
+                    handle_workspace_editor_socket(socket, state, workspace_id, view_key)
+                });
+            }
+        }
+    }
+
+    // Invalid path - return an error response
+    // We can't easily return an error from WebSocketUpgrade, so we upgrade but immediately close
+    ws.on_upgrade(|mut socket| async move {
+        let _ = socket.send(axum::extract::ws::Message::Close(Some(
+            axum::extract::ws::CloseFrame {
+                code: 4004,
+                reason: "Invalid WebSocket path or workspace not found".into(),
+            }
+        ))).await;
+    })
+}
+
+/// Public wrapper for handle_workspace_editor_socket.
+/// Used by the unified wildcard dispatcher in handlers.rs.
+pub async fn handle_workspace_editor_socket_public(
+    socket: WebSocket,
+    state: AppState,
+    workspace_id: String,
+    view_key: String,
+) {
+    handle_workspace_editor_socket(socket, state, workspace_id, view_key).await
+}
+
 /// Handle WebSocket connection for multi-workspace mode.
 async fn handle_workspace_editor_socket(
     mut socket: WebSocket,

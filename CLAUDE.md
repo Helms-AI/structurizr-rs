@@ -231,12 +231,33 @@ All project documentation MUST be placed in the `/docs` directory:
 
 ### Workspace Structure
 
-> **CRITICAL**: All workspaces MUST follow this structure.
-
-Workspaces are stored in `/workspaces/{size}/{workspace-name}/`:
+Workspaces can be organized in any folder structure within `/workspaces/`. The system **recursively discovers** all directories containing a `workspace.dsl` file at any depth.
 
 ```
-workspaces/{size}/{workspace-name}/
+workspaces/
+├── my-workspace/               # Top-level workspace
+│   └── workspace.dsl
+├── team-a/                     # Grouped by team
+│   ├── project-x/
+│   │   └── workspace.dsl
+│   └── project-y/
+│       └── workspace.dsl
+├── small/                      # Traditional size-based grouping
+│   └── startup-saas/
+│       └── workspace.dsl
+└── demos/deep/nested/          # Arbitrary nesting depth
+    └── example/
+        └── workspace.dsl
+```
+
+**Workspace ID** = relative path from workspaces root:
+- `my-workspace` → URL: `/w/my-workspace`
+- `team-a/project-x` → URL: `/w/team-a/project-x`
+- `demos/deep/nested/example` → URL: `/w/demos/deep/nested/example`
+
+**Recommended workspace contents:**
+```
+workspace-name/
 ├── workspace.dsl     # The DSL workspace file (with !docs "docs" directive)
 ├── README.md         # Brief overview for GitHub browsing
 ├── docs/             # Comprehensive documentation (referenced by !docs)
@@ -246,23 +267,13 @@ workspaces/{size}/{workspace-name}/
     └── *.md          # ADR files (001-*.md, 002-*.md, etc.)
 ```
 
-**Size categories:**
-- `small/` - Simple workspaces (1-3 containers)
-- `medium/` - Moderate complexity (4-8 containers)
-- `large/` - Complex workspaces (9+ containers, deployment views)
+**Recommended conventions** (not enforced):
+- Group by team, project, or purpose
+- Keep nesting reasonable (2-3 levels max for readability)
+- Use descriptive folder names
+- Size categories (`small/`, `medium/`, `large/`) can still be used if helpful
 
-**Documentation Requirements:**
-
-1. **README.md** - Brief overview for GitHub browsing
-2. **docs/index.md** - Comprehensive documentation (rendered in web UI via !docs directive):
-   - Overview and purpose of the workspace
-   - DSL features demonstrated
-   - Business context and use cases
-   - Architecture overview
-   - How to run and explore the workspace
-3. **adrs/*.md** - Architecture Decision Records (rendered in web UI via !adrs directive)
-
-**workspace.dsl MUST include:**
+**workspace.dsl SHOULD include:**
 ```dsl
 !docs "docs"
 !adrs "adrs"
@@ -270,17 +281,13 @@ workspaces/{size}/{workspace-name}/
 
 **Running workspaces:**
 ```bash
-# Multi-workspace mode (serves all workspaces with an index page)
+# Multi-workspace mode (serves all workspaces with a grouped index page)
 cargo run -- serve --workspaces-dir workspaces
-
-# Single workspace mode (legacy)
-cargo run -- serve --data-dir workspaces/small/startup-saas
 ```
 
 **Do NOT:**
-- Put loose `.dsl` files directly in `/workspaces/`
-- Create workspaces without `README.md` and `docs/` folder
-- Create workspace.dsl without `!docs "docs"` directive
+- Put loose `.dsl` files directly in `/workspaces/` without a folder
+- Create `workspace.dsl` files without at least a parent directory
 
 ### Temporary/Throwaway Files
 
