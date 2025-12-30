@@ -289,6 +289,12 @@ cargo run -- serve --workspaces-dir workspaces
 - Put loose `.dsl` files directly in `/workspaces/` without a folder
 - Create `workspace.dsl` files without at least a parent directory
 
+**Workspace dotfiles (ALWAYS commit these):**
+- `.notes.json` - User notes/comments on dynamic view steps
+- `.positions.json` - Custom element positions for diagram layouts
+
+These files store user-generated data and customizations. Always commit them when they appear in workspace directories.
+
 ### Temporary/Throwaway Files
 
 Only throwaway files from Claude Code processes go in `/tmp/`:
