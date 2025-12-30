@@ -1532,19 +1532,55 @@ fn extract_workspace_id(path: &str) -> String {
     path.trim_start_matches('/').to_string()
 }
 
-/// Multi-workspace index page - shows grid of available workspaces.
+/// Parse workspace path from wildcard capture to extract workspace ID and remaining segments.
+///
+/// Tries progressively shorter prefixes until a valid workspace is found.
+/// For example, given path "small/startup-saas/view/Context":
+/// - First tries "small/startup-saas/view/Context" as workspace ID
+/// - Then tries "small/startup-saas/view" with remaining ["Context"]
+/// - Then tries "small/startup-saas" with remaining ["view", "Context"] <- matches!
+///
+/// Returns (workspace_id, remaining_segments) or None if no valid workspace found.
+async fn parse_workspace_path(state: &AppState, path: &str) -> Option<(String, Vec<String>)> {
+    let clean_path = path.trim_start_matches('/');
+    let segments: Vec<&str> = clean_path.split('/').filter(|s| !s.is_empty()).collect();
+
+    if segments.is_empty() {
+        return None;
+    }
+
+    // Try progressively shorter prefixes until we find a valid workspace
+    for i in (1..=segments.len()).rev() {
+        let candidate_id = segments[..i].join("/");
+        if state.workspace_exists(&candidate_id).await {
+            let remaining: Vec<String> = segments[i..].iter().map(|s| s.to_string()).collect();
+            return Some((candidate_id, remaining));
+        }
+    }
+
+    None
+}
+
+/// Multi-workspace index page - shows grid of available workspaces grouped by top-level folder.
 pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<String>> {
     let workspaces = state.list_workspaces().await;
 
-    let workspace_cards: String = if workspaces.is_empty() {
+    let workspace_content: String = if workspaces.is_empty() {
         r#"<div class="empty-state">
             <h2>No Workspaces Found</h2>
             <p>Create a workspace by adding a directory containing a <code>workspace.dsl</code> file.</p>
         </div>"#.to_string()
     } else {
-        workspaces.iter().map(|ws| {
-            let description = ws.description.as_deref().unwrap_or("No description");
-            let last_modified = ws.last_modified
+        // Group workspaces by top-level folder
+        let mut groups: std::collections::BTreeMap<String, Vec<_>> = std::collections::BTreeMap::new();
+        for ws in &workspaces {
+            let top_level = ws.id.split('/').next().unwrap_or(&ws.id).to_string();
+            groups.entry(top_level).or_default().push(ws);
+        }
+
+        // Helper to format last modified time
+        let format_last_modified = |ws: &crate::discovery::WorkspaceInfo| {
+            ws.last_modified
                 .duration_since(std::time::UNIX_EPOCH)
                 .map(|d| {
                     let secs = d.as_secs();
@@ -1556,8 +1592,13 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     else if days_ago == 1 { "Yesterday".to_string() }
                     else { format!("{} days ago", days_ago) }
                 })
-                .unwrap_or_else(|_| "Unknown".to_string());
+                .unwrap_or_else(|_| "Unknown".to_string())
+        };
 
+        // Helper to generate a workspace card
+        let make_card = |ws: &crate::discovery::WorkspaceInfo| {
+            let description = ws.description.as_deref().unwrap_or("No description");
+            let last_modified = format_last_modified(ws);
             format!(
                 r#"<a href="/w/{}" class="workspace-card">
                     <div class="card-header">
@@ -1577,6 +1618,32 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                 escape_html(&ws.id),
                 last_modified
             )
+        };
+
+        // Generate grouped HTML
+        groups.iter().map(|(group_name, group_workspaces)| {
+            let cards: String = group_workspaces.iter()
+                .map(|ws| make_card(ws))
+                .collect::<Vec<_>>()
+                .join("\n");
+
+            // If group has only one workspace and the group name equals the workspace id,
+            // it's a top-level workspace - don't show a group header
+            if group_workspaces.len() == 1 && group_workspaces[0].id == *group_name {
+                format!(
+                    r#"<div class="workspaces-grid">{}</div>"#,
+                    cards
+                )
+            } else {
+                format!(
+                    r#"<div class="workspace-group">
+                        <h2 class="group-header">{}</h2>
+                        <div class="workspaces-grid">{}</div>
+                    </div>"#,
+                    escape_html(group_name),
+                    cards
+                )
+            }
         }).collect::<Vec<_>>().join("\n")
     };
 
@@ -1686,6 +1753,18 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
             padding: 2px 6px;
             border-radius: 4px;
         }}
+        .workspace-group {{
+            margin-bottom: 32px;
+        }}
+        .group-header {{
+            color: #1a1a2e;
+            font-size: 1.5rem;
+            font-weight: 600;
+            margin: 0 0 16px 0;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #e0e0e0;
+            text-transform: capitalize;
+        }}
     </style>
 </head>
 <body>
@@ -1694,15 +1773,13 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
         <p>{} workspace{} available</p>
     </div>
     <div class="container">
-        <div class="workspaces-grid">
-            {}
-        </div>
+        {}
     </div>
 </body>
 </html>"##,
         workspaces.len(),
         if workspaces.len() == 1 { "" } else { "s" },
-        workspace_cards
+        workspace_content
     );
 
     Ok(Html(html))
@@ -4494,6 +4571,13 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
             }}
 
             hideNoSelection();
+
+            // Load notes eagerly to show count in tab, or render if already loaded
+            if (!notesLoaded) {{
+                loadNotes();
+            }} else {{
+                renderNotes(stepIndex);
+            }}
         }}
 
         // Show step metadata AND expand snackbar (called from arrow click handlers)
@@ -4547,7 +4631,9 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
                 btn.classList.toggle('active', btn.dataset.tab === tabName);
             }});
             document.querySelectorAll('.snackbar .tab-content').forEach(content => {{
-                content.classList.toggle('active', content.id === `tab-${{tabName}}`);
+                const isActive = content.id === `tab-${{tabName}}`;
+                content.classList.toggle('active', isActive);
+                content.style.display = isActive ? 'block' : 'none';
             }});
 
             // Load notes when switching to notes tab
@@ -7133,6 +7219,325 @@ pub async fn workspace_export_d2_nested(
         let base_path = format!("/w/{}", full_id);
         let html = generate_d2_viewer_html(&workspace, &view_key, &base_path, &code);
         Ok(Html(html).into_response())
+    }
+}
+
+// ============================================================================
+// Unified Wildcard Dispatcher
+// ============================================================================
+
+/// Unified workspace route dispatcher for GET requests (including WebSocket upgrades).
+///
+/// This handler uses wildcard routing to support workspace IDs of any depth.
+/// For example: /w/my-workspace, /w/small/startup-saas, /w/team/project/workspace
+///
+/// The path is parsed to find the workspace ID by trying progressively shorter
+/// prefixes until a valid workspace is found.
+///
+/// WebSocket upgrade requests (for /ws/edit/ paths) are detected and handled specially.
+pub async fn workspace_dispatch(
+    ws: Option<axum::extract::ws::WebSocketUpgrade>,
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+    axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    // Check if this is a WebSocket upgrade request for /ws/edit/ paths
+    if let Some(ws_upgrade) = ws {
+        return handle_websocket_dispatch(ws_upgrade, state, &path).await;
+    }
+
+    let (workspace_id, remaining) = parse_workspace_path(&state, &path)
+        .await
+        .ok_or_else(|| Error::WorkspaceNotFound(path.clone()))?;
+
+    let workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    let base_path = format!("/w/{}", workspace_id);
+
+    // Dispatch based on remaining path segments
+    match remaining.as_slice() {
+        // Home page: /w/{workspace}
+        [] => {
+            let html = generate_home_page_html(&workspace, &base_path, Some(&workspace_id));
+            Ok(Html(html).into_response())
+        }
+
+        // Documentation: /w/{workspace}/docs
+        [action] if action == "docs" => {
+            render_documentation_html(&workspace, &base_path)
+                .map(|h| h.into_response())
+        }
+
+        // Search page: /w/{workspace}/search
+        [action] if action == "search" => {
+            let search_term = query.get("q").cloned().unwrap_or_default();
+            let html = generate_search_page_html(&workspace, &base_path, Some(&workspace_id), &search_term);
+            Ok(Html(html).into_response())
+        }
+
+        // Tree view: /w/{workspace}/tree
+        [action] if action == "tree" => {
+            render_tree_view_html(&workspace, &base_path)
+                .map(|h| h.into_response())
+        }
+
+        // Presentation: /w/{workspace}/presentation
+        [action] if action == "presentation" => {
+            let views = query.get("views").cloned();
+            render_presentation_html(&workspace, &base_path, views)
+                .map(|h| h.into_response())
+        }
+
+        // Explore: /w/{workspace}/explore
+        [action] if action == "explore" => {
+            let html = generate_explore_page_html(&workspace, &base_path, Some(&workspace_id));
+            Ok(Html(html).into_response())
+        }
+
+        // View diagram: /w/{workspace}/view/{key}
+        [action, key] if action == "view" => {
+            render_view_diagram_html(&workspace, key, &base_path)
+                .map(|h| h.into_response())
+        }
+
+        // Edit diagram: /w/{workspace}/edit/{key}
+        [action, key] if action == "edit" => {
+            render_edit_diagram_html(&workspace, key, &base_path)
+                .map(|h| h.into_response())
+        }
+
+        // Animated view: /w/{workspace}/view/{key}/animate
+        [action, key, sub] if action == "view" && sub == "animate" => {
+            render_dynamic_animated_html(&workspace, key, &base_path)
+                .map(|h| h.into_response())
+        }
+
+        // SVG export: /w/{workspace}/view/{key}/svg
+        [action, key, sub] if action == "view" && sub == "svg" => {
+            render_view_svg(&workspace, key)
+                .map(|r| r.into_response())
+        }
+
+        // PlantUML export: /w/{workspace}/view/{key}/plantuml
+        [action, key, sub] if action == "view" && sub == "plantuml" => {
+            let raw = query.get("raw").map(|v| v == "true").unwrap_or(false);
+            let code = get_export_code(&workspace, key, "plantuml")?;
+            if raw {
+                Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+            } else {
+                let html = generate_plantuml_viewer_html(&workspace, key, &base_path, &code);
+                Ok(Html(html).into_response())
+            }
+        }
+
+        // Mermaid export: /w/{workspace}/view/{key}/mermaid
+        [action, key, sub] if action == "view" && sub == "mermaid" => {
+            let raw = query.get("raw").map(|v| v == "true").unwrap_or(false);
+            let code = get_export_code(&workspace, key, "mermaid")?;
+            if raw {
+                Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+            } else {
+                let html = generate_mermaid_viewer_html(&workspace, key, &base_path, &code);
+                Ok(Html(html).into_response())
+            }
+        }
+
+        // DOT export: /w/{workspace}/view/{key}/dot
+        [action, key, sub] if action == "view" && sub == "dot" => {
+            let raw = query.get("raw").map(|v| v == "true").unwrap_or(false);
+            let code = get_export_code(&workspace, key, "dot")?;
+            if raw {
+                Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+            } else {
+                let html = generate_dot_viewer_html(&workspace, key, &base_path, &code);
+                Ok(Html(html).into_response())
+            }
+        }
+
+        // D2 export: /w/{workspace}/view/{key}/d2
+        [action, key, sub] if action == "view" && sub == "d2" => {
+            let raw = query.get("raw").map(|v| v == "true").unwrap_or(false);
+            let code = get_export_code(&workspace, key, "d2")?;
+            if raw {
+                Ok(([(header::CONTENT_TYPE, "text/plain; charset=utf-8")], code).into_response())
+            } else {
+                let html = generate_d2_viewer_html(&workspace, key, &base_path, &code);
+                Ok(Html(html).into_response())
+            }
+        }
+
+        // API: Get workspace JSON: /w/{workspace}/api/workspace
+        [action, sub] if action == "api" && sub == "workspace" => {
+            Ok(Json(workspace).into_response())
+        }
+
+        // API: Validate workspace: /w/{workspace}/api/validate
+        [action, sub] if action == "api" && sub == "validate" => {
+            let validation_result = structurizr_dsl::validate_workspace(&workspace);
+            Ok(Json(validation_result).into_response())
+        }
+
+        // API: Search: /w/{workspace}/api/search
+        [action, sub] if action == "api" && sub == "search" => {
+            let query_str = query.get("q").map(|s| s.as_str()).unwrap_or("");
+            let results = search_workspace(&workspace, query_str, "")?;
+            Ok(results.into_response())
+        }
+
+        // API: Get notes: /w/{workspace}/api/view/{view_key}/notes
+        [action, sub, view_key, notes_action] if action == "api" && sub == "view" && notes_action == "notes" => {
+            let info = state.get_workspace_info(&workspace_id).await
+                .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+            let notes_file = NotesFile::load(&info.path).await;
+            let view_notes = notes_file
+                .get_view_notes(view_key)
+                .cloned()
+                .unwrap_or_default();
+            Ok(Json(view_notes).into_response())
+        }
+
+        // API: Get positions: /w/{workspace}/api/view/{view_key}/positions
+        [action, sub, view_key, pos_action] if action == "api" && sub == "view" && pos_action == "positions" => {
+            let positions = state.editor.get_positions(view_key).await;
+            Ok(Json(positions.values().cloned().collect::<Vec<_>>()).into_response())
+        }
+
+        // Export JSON: /w/{workspace}/export/json
+        [action, sub] if action == "export" && sub == "json" => {
+            let json = JsonExporter::export(&workspace)?;
+            Ok(([(header::CONTENT_TYPE, "application/json")], json).into_response())
+        }
+
+        // Not found
+        _ => Err(Error::ViewNotFound(format!("Unknown route: /w/{}", path)))
+    }
+}
+
+/// Handle WebSocket dispatch for editor connections.
+///
+/// Path format: {workspace_path}/ws/edit/{view_key}
+/// Examples:
+/// - my-workspace/ws/edit/Context
+/// - small/startup-saas/ws/edit/Context
+async fn handle_websocket_dispatch(
+    ws: axum::extract::ws::WebSocketUpgrade,
+    state: AppState,
+    path: &str,
+) -> Result<axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    let segments: Vec<&str> = path.trim_start_matches('/').split('/').collect();
+
+    // Find "ws" followed by "edit" to split workspace path from view key
+    let ws_pos = segments.iter().position(|&s| s == "ws");
+
+    if let Some(pos) = ws_pos {
+        if pos + 2 < segments.len() && segments[pos + 1] == "edit" {
+            let workspace_id = segments[..pos].join("/");
+            let view_key = segments[pos + 2].to_string();
+
+            // Verify workspace exists before upgrading
+            if state.workspace_exists(&workspace_id).await {
+                return Ok(ws.on_upgrade(move |socket| {
+                    crate::editor::handle_workspace_editor_socket_public(socket, state, workspace_id, view_key)
+                }).into_response());
+            }
+        }
+    }
+
+    // Invalid path or workspace not found
+    Err(Error::ViewNotFound(format!("Invalid WebSocket path: /w/{}", path)))
+}
+
+/// Unified workspace route dispatcher for PUT requests.
+pub async fn workspace_dispatch_put(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    let (workspace_id, remaining) = parse_workspace_path(&state, &path)
+        .await
+        .ok_or_else(|| Error::WorkspaceNotFound(path.clone()))?;
+
+    // Verify workspace exists
+    let _workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    match remaining.as_slice() {
+        // Batch update positions: /w/{workspace}/api/view/{view_key}/positions
+        [action, sub, view_key, pos_action] if action == "api" && sub == "view" && pos_action == "positions" => {
+            let req: crate::editor::BatchUpdatePositionsRequest = serde_json::from_slice(&body)
+                .map_err(|e| Error::Server(format!("Invalid JSON: {}", e)))?;
+
+            for pos in &req.positions {
+                state.editor.update_position(view_key, &pos.id, pos.x, pos.y).await;
+                state.editor.broadcast(crate::editor::EditorMessage::ElementMoved {
+                    view_key: view_key.clone(),
+                    element_id: pos.id.clone(),
+                    x: pos.x,
+                    y: pos.y,
+                });
+            }
+            state.editor.mark_dirty(&workspace_id).await;
+
+            let positions = state.editor.get_positions(view_key).await;
+            Ok(Json(positions.values().cloned().collect::<Vec<crate::editor::ElementPosition>>()).into_response())
+        }
+
+        _ => Err(Error::ViewNotFound(format!("Unknown PUT route: /w/{}", path)))
+    }
+}
+
+/// Unified workspace route dispatcher for POST requests.
+pub async fn workspace_dispatch_post(
+    State(state): State<AppState>,
+    Path(path): Path<String>,
+    body: axum::body::Bytes,
+) -> Result<axum::response::Response> {
+    use axum::response::IntoResponse;
+
+    let (workspace_id, remaining) = parse_workspace_path(&state, &path)
+        .await
+        .ok_or_else(|| Error::WorkspaceNotFound(path.clone()))?;
+
+    // Verify workspace exists
+    let _workspace = state.get_workspace_by_id(&workspace_id).await
+        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+    match remaining.as_slice() {
+        // Add note: /w/{workspace}/api/view/{view_key}/notes
+        [action, sub, view_key, notes_action] if action == "api" && sub == "view" && notes_action == "notes" => {
+            let req: AddNoteRequest = serde_json::from_slice(&body)
+                .map_err(|e| Error::Server(format!("Invalid JSON: {}", e)))?;
+
+            let info = state.get_workspace_info(&workspace_id).await
+                .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+
+            let mut notes_file = NotesFile::load(&info.path).await;
+            notes_file.add_note(
+                view_key,
+                req.step_index,
+                req.first_name,
+                req.last_name,
+                req.content,
+            );
+            notes_file.save(&info.path).await
+                .map_err(|e| Error::Server(format!("Failed to save notes: {}", e)))?;
+
+            let view_notes = notes_file
+                .get_view_notes(view_key)
+                .cloned()
+                .unwrap_or_default();
+
+            Ok(Json(view_notes).into_response())
+        }
+
+        _ => Err(Error::ViewNotFound(format!("Unknown POST route: /w/{}", path)))
     }
 }
 
