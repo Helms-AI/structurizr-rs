@@ -3433,6 +3433,7 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
         .step-overlay.visible {{ opacity: 1; }}
         .step-overlay .step-number {{ font-size: 12px; color: #0066cc; font-weight: 600; margin-bottom: 6px; }}
         .step-overlay .step-desc {{ font-size: 15px; line-height: 1.4; }}
+        .step-overlay .step-tech {{ font-size: 12px; color: #888; margin-top: 8px; font-family: monospace; }}
         .keyboard-help {{ position: fixed; bottom: 20px; left: 20px; font-size: 11px; color: #666; z-index: 50; }}
         .loading {{ position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666; font-size: 16px; }}
 
@@ -4050,6 +4051,7 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
         <div class="step-overlay" id="step-overlay">
             <div class="step-number" id="overlay-number">Step 1</div>
             <div class="step-desc" id="overlay-desc">Step description</div>
+            <div class="step-tech" id="overlay-tech"></div>
         </div>
     </div>
     <div class="keyboard-help">Space to play/pause • ← → to step • R to reset • 1-9 to jump to step • Scroll to zoom • Drag to pan • Click arrows for details</div>
@@ -4167,12 +4169,54 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
     <script>
         const steps = {steps_json};
         const totalSteps = {step_count};
+
+        // Helper function to get base order number (e.g., "4" from "4.1" or "4.2")
+        function getBaseOrder(order) {{
+            const orderStr = String(order);
+            const dotIndex = orderStr.indexOf('.');
+            return dotIndex === -1 ? orderStr : orderStr.substring(0, dotIndex);
+        }}
+
+        // Helper function to get sub-order number (e.g., "1" from "4.1", "2" from "4.2")
+        function getSubOrder(order) {{
+            const orderStr = String(order);
+            const dotIndex = orderStr.indexOf('.');
+            return dotIndex === -1 ? '0' : orderStr.substring(dotIndex + 1);
+        }}
+
+        // Group steps by base order for parallel step handling
+        const stepGroups = [];  // Array of {{ baseOrder: string, indices: number[] }}
+        let tempGroup = null;
+        steps.forEach((step, idx) => {{
+            const base = getBaseOrder(step.order);
+            if (!tempGroup || tempGroup.baseOrder !== base) {{
+                tempGroup = {{ baseOrder: base, indices: [idx] }};
+                stepGroups.push(tempGroup);
+            }} else {{
+                tempGroup.indices.push(idx);
+            }}
+        }});
+        const totalLogicalSteps = stepGroups.length;
+
+        // Color palette for distinguishing parallel steps
+        const parallelColors = [
+            '#E53E3E',  // Red
+            '#38A169',  // Green
+            '#3182CE',  // Blue
+            '#D69E2E',  // Yellow/Gold
+            '#805AD5',  // Purple
+            '#DD6B20',  // Orange
+            '#319795',  // Teal
+            '#D53F8C',  // Pink
+        ];
+
         let currentStep = 0;
         let isPlaying = false;
         let playInterval = null;
         let playSpeed = 2000;
         let svgWidth = 0, svgHeight = 0, scale = 1, offsetX = 0, offsetY = 0;
         let arrowLines = [], arrowTexts = [];
+        let originalArrowColors = [];  // Store original colors for non-parallel display
         let elementGroups = [];  // For element opacity control
         let isPanning = false, panStartX = 0, panStartY = 0, panStartOffsetX = 0, panStartOffsetY = 0;
         const container = document.getElementById('diagram-container');
@@ -4200,6 +4244,8 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
                 arrowTexts = Array.from(svg.querySelectorAll('text')).filter(t => /^\d+\./.test(t.textContent || ''));
                 arrowLines.forEach((line, idx) => {{ line.classList.add('arrow-line'); line.dataset.stepIndex = idx; }});
                 arrowTexts.forEach((text, idx) => {{ text.classList.add('arrow-text'); text.dataset.stepIndex = idx; }});
+                // Store original arrow colors for resetting after parallel display
+                originalArrowColors = arrowLines.map(line => line.getAttribute('stroke') || '#707070');
                 // Collect element groups for opacity control
                 elementGroups = Array.from(svg.querySelectorAll('.element-group'));
                 fitToScreen();
@@ -4229,62 +4275,111 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
         }}
 
         function updateDisplay() {{
-            document.getElementById('step-counter').textContent = `Step ${{currentStep}} of ${{totalSteps}}`;
+            document.getElementById('step-counter').textContent = `Step ${{currentStep}} of ${{totalLogicalSteps}}`;
             document.getElementById('btn-prev').disabled = currentStep === 0;
-            document.getElementById('btn-next').disabled = currentStep >= totalSteps;
+            document.getElementById('btn-next').disabled = currentStep >= totalLogicalSteps;
 
             if (currentStep === 0) {{
-                // Initial state: everything visible, nothing dimmed
-                arrowLines.forEach(line => line.classList.remove('dimmed'));
-                arrowTexts.forEach(text => text.classList.remove('dimmed'));
-                elementGroups.forEach(group => group.classList.remove('dimmed'));
-            }} else {{
-                // Spotlight mode: only current step visible
-                const currentStepIdx = currentStep - 1;
-                const currentStepData = steps[currentStepIdx];
-
-                // Current step's involved element IDs
-                const activeElementIds = new Set([
-                    currentStepData.sourceId,
-                    currentStepData.destId
-                ]);
-
-                // Arrows: only current step's arrow is NOT dimmed
+                // Initial state: everything visible, nothing dimmed, original colors
                 arrowLines.forEach((line, idx) => {{
-                    line.classList.toggle('dimmed', idx !== currentStepIdx);
+                    line.classList.remove('dimmed');
+                    line.setAttribute('stroke', originalArrowColors[idx] || '#707070');
                 }});
                 arrowTexts.forEach((text, idx) => {{
-                    text.classList.toggle('dimmed', idx !== currentStepIdx);
+                    text.classList.remove('dimmed');
+                    text.setAttribute('fill', originalArrowColors[idx] || '#707070');
+                }});
+                elementGroups.forEach(group => group.classList.remove('dimmed'));
+            }} else {{
+                // Spotlight mode: show ALL steps in current logical group (parallel steps together)
+                const group = stepGroups[currentStep - 1];
+                const activeStepIndices = new Set(group.indices);
+
+                // Collect ALL element IDs from ALL parallel steps in this group
+                const activeElementIds = new Set();
+                group.indices.forEach(idx => {{
+                    activeElementIds.add(steps[idx].sourceId);
+                    activeElementIds.add(steps[idx].destId);
                 }});
 
-                // Elements: only current step's source/destination are NOT dimmed
+                // Reset ALL arrow colors to original first, then apply parallel colors to active ones
+                arrowLines.forEach((line, idx) => {{
+                    line.classList.toggle('dimmed', !activeStepIndices.has(idx));
+                    line.setAttribute('stroke', originalArrowColors[idx] || '#707070');
+                }});
+                arrowTexts.forEach((text, idx) => {{
+                    text.classList.toggle('dimmed', !activeStepIndices.has(idx));
+                    text.setAttribute('fill', originalArrowColors[idx] || '#707070');
+                }});
+
+                // Elements: all involved in parallel steps are NOT dimmed
                 elementGroups.forEach(group => {{
                     const elementId = group.dataset.elementId;
                     const isInCurrentStep = activeElementIds.has(elementId);
                     group.classList.toggle('dimmed', !isInCurrentStep);
                 }});
+
+                // Apply distinct colors only to parallel steps (based on sub-order)
+                if (group.indices.length > 1) {{
+                    group.indices.forEach((stepIdx) => {{
+                        const subOrder = parseInt(getSubOrder(steps[stepIdx].order)) || 1;
+                        const color = parallelColors[(subOrder - 1) % parallelColors.length];
+                        arrowLines[stepIdx].setAttribute('stroke', color);
+                        arrowTexts[stepIdx].setAttribute('fill', color);
+                    }});
+                }}
             }}
 
-            // Update step overlay
+            // Update step overlay for parallel step groups
             const overlay = document.getElementById('step-overlay');
-            if (currentStep > 0 && currentStep <= steps.length) {{
-                const step = steps[currentStep - 1];
-                document.getElementById('overlay-number').textContent = `Step ${{step.order}}`;
-                document.getElementById('overlay-desc').textContent = step.description || 'No description';
+            if (currentStep > 0 && currentStep <= stepGroups.length) {{
+                const group = stepGroups[currentStep - 1];
+                const firstStep = steps[group.indices[0]];
+
+                // Show base order number and parallel indicator
+                const orderDisplay = group.indices.length > 1
+                    ? `Step ${{group.baseOrder}} (${{group.indices.length}} parallel)`
+                    : `Step ${{firstStep.order}}`;
+                document.getElementById('overlay-number').textContent = orderDisplay;
+
+                // Show descriptions of all parallel steps with color-coded bullets (by sub-order)
+                if (group.indices.length > 1) {{
+                    const descList = group.indices.map((idx) => {{
+                        const subOrder = parseInt(getSubOrder(steps[idx].order)) || 1;
+                        const color = parallelColors[(subOrder - 1) % parallelColors.length];
+                        const desc = steps[idx].description || 'No description';
+                        return `<span style="color: ${{color}}">●</span> ${{desc}}`;
+                    }}).join('<br>');
+                    document.getElementById('overlay-desc').innerHTML = descList;
+                }} else {{
+                    document.getElementById('overlay-desc').textContent = firstStep.description || 'No description';
+                }}
+
+                // Display technology if available
+                const techDisplay = document.getElementById('overlay-tech');
+                if (group.indices.length > 1) {{
+                    const techs = [...new Set(group.indices.map(idx => steps[idx].technology).filter(t => t))];
+                    techDisplay.textContent = techs.length > 0 ? techs.join(', ') : '';
+                    techDisplay.style.display = techs.length > 0 ? 'block' : 'none';
+                }} else {{
+                    techDisplay.textContent = firstStep.technology || '';
+                    techDisplay.style.display = firstStep.technology ? 'block' : 'none';
+                }}
+
                 overlay.classList.add('visible');
 
-                // Always keep snackbar content in sync with current step
-                populateSnackbarContent(currentStep - 1);
+                // Always keep snackbar content in sync with first step of group
+                populateSnackbarContent(group.indices[0]);
             }} else {{
                 overlay.classList.remove('visible');
             }}
         }}
 
-        function nextStep() {{ if (currentStep < totalSteps) {{ currentStep++; updateDisplay(); }} if (currentStep >= totalSteps) stopPlaying(); }}
+        function nextStep() {{ if (currentStep < totalLogicalSteps) {{ currentStep++; updateDisplay(); }} if (currentStep >= totalLogicalSteps) stopPlaying(); }}
         function previousStep() {{ if (currentStep > 0) {{ currentStep--; updateDisplay(); }} }}
         function resetAnimation() {{ currentStep = 0; stopPlaying(); updateDisplay(); }}
         function togglePlay() {{ isPlaying ? stopPlaying() : startPlaying(); }}
-        function startPlaying() {{ if (currentStep >= totalSteps) currentStep = 0; isPlaying = true; document.getElementById('btn-play').textContent = '⏸ Pause'; playInterval = setInterval(() => {{ nextStep(); if (currentStep >= totalSteps) stopPlaying(); }}, playSpeed); }}
+        function startPlaying() {{ if (currentStep >= totalLogicalSteps) currentStep = 0; isPlaying = true; document.getElementById('btn-play').textContent = '⏸ Pause'; playInterval = setInterval(() => {{ nextStep(); if (currentStep >= totalLogicalSteps) stopPlaying(); }}, playSpeed); }}
         function stopPlaying() {{ isPlaying = false; document.getElementById('btn-play').textContent = '▶ Play'; if (playInterval) {{ clearInterval(playInterval); playInterval = null; }} }}
         function updateSpeed() {{ playSpeed = parseInt(document.getElementById('speed-select').value); if (isPlaying) {{ stopPlaying(); startPlaying(); }} }}
 
@@ -4314,7 +4409,7 @@ fn generate_dynamic_animated_html(workspace: &Workspace, view_key: &str, base_pa
                 case 'r': case 'R': resetAnimation(); break;
                 case 'f': case 'F': fitToScreen(); break;
                 case '0': resetAnimation(); break;
-                default: if (e.key >= '1' && e.key <= '9') {{ const stepNum = parseInt(e.key); if (stepNum <= totalSteps) {{ currentStep = stepNum; updateDisplay(); }} }}
+                default: if (e.key >= '1' && e.key <= '9') {{ const stepNum = parseInt(e.key); if (stepNum <= totalLogicalSteps) {{ currentStep = stepNum; updateDisplay(); }} }}
             }}
         }});
 

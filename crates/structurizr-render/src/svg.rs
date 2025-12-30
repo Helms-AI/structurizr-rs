@@ -1311,6 +1311,18 @@ impl SvgRenderer {
                     idx, label_x, y - 8.0, default_rel_style.color, escape_xml(&label)
                 ));
                 svg.push('\n');
+
+                // Technology (if available) - render below the arrow with padding
+                let technology = model.relationships.iter()
+                    .find(|r| r.source_id == step.source_id && r.destination_id == step.destination_id)
+                    .and_then(|r| r.technology.as_ref());
+                if let Some(tech) = technology {
+                    svg.push_str(&format!(
+                        r##"  <text data-step-index="{}" x="{:.0}" y="{:.0}" text-anchor="middle" font-family="monospace" font-size="10" fill="#888888">{}</text>"##,
+                        idx, label_x, y + 18.0, escape_xml(tech)
+                    ));
+                    svg.push('\n');
+                }
             }
         }
 
