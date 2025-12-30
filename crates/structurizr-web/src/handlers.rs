@@ -5984,58 +5984,12 @@ fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String
         }).collect()
     };
 
-    // Build decisions list
-    let decisions_html: String = if docs.decisions.is_empty() {
-        String::new()
-    } else {
-        let decisions_list: String = docs.decisions.iter().map(|decision| {
-            let status_class = match decision.status {
-                structurizr_core::workspace::DecisionStatus::Accepted => "accepted",
-                structurizr_core::workspace::DecisionStatus::Proposed => "proposed",
-                structurizr_core::workspace::DecisionStatus::Superseded => "superseded",
-                structurizr_core::workspace::DecisionStatus::Deprecated => "deprecated",
-                structurizr_core::workspace::DecisionStatus::Rejected => "rejected",
-            };
-            format!(
-                r#"<div class="decision" id="adr-{}">
-                    <div class="decision-header">
-                        <span class="decision-id">{}</span>
-                        <h3>{}</h3>
-                        <span class="status {}">{:?}</span>
-                        <span class="date">{}</span>
-                    </div>
-                    <div class="content">{}</div>
-                </div>"#,
-                decision.id,
-                escape_html(&decision.id),
-                escape_html(&decision.title),
-                status_class,
-                decision.status,
-                escape_html(&decision.date),
-                render_markdown(&decision.content)
-            )
-        }).collect();
-
-        format!(
-            r#"<div class="decisions-section">
-                <h2>Architecture Decision Records</h2>
-                {}
-            </div>"#,
-            decisions_list
-        )
-    };
-
     // Build sidebar with tree navigation
     let sidebar_sections = if nav_tree.is_empty() {
         String::new()
     } else {
         format!(r##"<ul class="nav-tree">{}</ul>"##, render_nav_tree(&nav_tree, 0))
     };
-
-    // ADRs as flat list
-    let sidebar_decisions: String = docs.decisions.iter().map(|decision| {
-        format!(r##"<a href="#adr-{}" class="nav-link adr-link">{}: {}</a>"##, decision.id, decision.id, escape_html(&decision.title))
-    }).collect();
 
     // Page-specific styles
     let extra_styles = r##"<style>
@@ -6075,8 +6029,6 @@ fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String
         /* Active parent chain */
         .nav-item.active-parent > .nav-row > .nav-link { color: var(--link-color); }
 
-        /* ADR links */
-        .adr-link { display: block; padding: 6px 8px; margin: 2px 0; font-size: 13px; }
         .main { flex: 1; padding: 40px; overflow-y: auto; }
         .doc-section { background: var(--card-bg); padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px var(--shadow); }
         .doc-section h2 { margin-top: 0; border-bottom: 1px solid var(--border-color); padding-bottom: 10px; }
@@ -6103,18 +6055,6 @@ fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String
         .content dl { margin: 1em 0; }
         .content dt { font-weight: 600; margin-top: 0.5em; }
         .content dd { margin-left: 2em; color: var(--text-secondary); }
-        .decisions-section { margin-top: 40px; }
-        .decision { background: var(--card-bg); padding: 30px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 1px 3px var(--shadow); }
-        .decision-header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
-        .decision-id { font-family: monospace; background: var(--bg-tertiary); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
-        .decision-header h3 { margin: 0; flex: 1; }
-        .status { padding: 4px 10px; border-radius: 20px; font-size: 11px; text-transform: uppercase; font-weight: 600; }
-        .status.accepted { background: var(--status-accepted-bg); color: var(--status-accepted-text); }
-        .status.proposed { background: var(--status-proposed-bg); color: var(--status-proposed-text); }
-        .status.superseded { background: var(--status-superseded-bg); color: var(--status-superseded-text); }
-        .status.deprecated { background: var(--status-deprecated-bg); color: var(--status-deprecated-text); }
-        .status.rejected { background: var(--status-deprecated-bg); color: var(--status-deprecated-text); }
-        .date { color: var(--text-muted); font-size: 12px; }
         .empty { color: var(--text-muted); font-style: italic; }
     </style>"##;
 
@@ -6221,28 +6161,17 @@ fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String
     });
     </script>"##;
 
-    // Build sidebar decisions section
-    let sidebar_decisions_section = if !docs.decisions.is_empty() {
-        format!("<h3 style=\"margin-top: 20px;\">ADRs</h3>{}", sidebar_decisions)
-    } else {
-        String::new()
-    };
-
     // Build content HTML
     let content = format!(
         r#"<div class="sidebar">
             <h3>Sections</h3>
             {}
-            {}
         </div>
         <div class="main">
             {}
-            {}
         </div>"#,
         sidebar_sections,
-        sidebar_decisions_section,
-        sections_html,
-        decisions_html
+        sections_html
     );
 
     let title = format!("Documentation - {}", workspace.name);
@@ -6255,6 +6184,238 @@ fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String
         content_type: ContentType::Sidebar,
         extra_head: extra_styles,
         extra_body_end: extra_scripts,
+    };
+
+    generate_page_layout(&config, &content)
+}
+
+/// Render decisions page HTML wrapper.
+fn render_decisions_html(workspace: &Workspace, base_path: &str) -> Result<Html<String>> {
+    let html = generate_decisions_html(workspace, base_path);
+    Ok(Html(html))
+}
+
+/// Generate decisions (ADR) page HTML with click-to-load navigation.
+///
+/// This function provides a dedicated page for Architecture Decision Records:
+/// - Three-column layout with sidebar navigation
+/// - Click on a decision in sidebar to load it in main area
+/// - First decision is loaded and selected by default
+fn generate_decisions_html(workspace: &Workspace, base_path: &str) -> String {
+    // Extract workspace_id from base_path if present
+    let workspace_id = if base_path.starts_with("/w/") {
+        Some(&base_path[3..])
+    } else {
+        None
+    };
+
+    let docs = &workspace.documentation;
+
+    // Build decisions data as JSON for JavaScript
+    let decisions_json: String = if docs.decisions.is_empty() {
+        "[]".to_string()
+    } else {
+        let decisions_data: Vec<String> = docs.decisions.iter().map(|decision| {
+            let status_str = match decision.status {
+                structurizr_core::workspace::DecisionStatus::Accepted => "Accepted",
+                structurizr_core::workspace::DecisionStatus::Proposed => "Proposed",
+                structurizr_core::workspace::DecisionStatus::Superseded => "Superseded",
+                structurizr_core::workspace::DecisionStatus::Deprecated => "Deprecated",
+                structurizr_core::workspace::DecisionStatus::Rejected => "Rejected",
+            };
+            let status_class = match decision.status {
+                structurizr_core::workspace::DecisionStatus::Accepted => "accepted",
+                structurizr_core::workspace::DecisionStatus::Proposed => "proposed",
+                structurizr_core::workspace::DecisionStatus::Superseded => "superseded",
+                structurizr_core::workspace::DecisionStatus::Deprecated => "deprecated",
+                structurizr_core::workspace::DecisionStatus::Rejected => "rejected",
+            };
+            // Escape content for JSON embedding
+            let content_html = render_markdown(&decision.content);
+            let escaped_content = content_html
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t");
+            let escaped_title = decision.title
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"");
+            let escaped_date = decision.date
+                .replace('\\', "\\\\")
+                .replace('"', "\\\"");
+            format!(
+                r#"{{"id":"{}","title":"{}","status":"{}","statusClass":"{}","date":"{}","content":"{}"}}"#,
+                decision.id,
+                escaped_title,
+                status_str,
+                status_class,
+                escaped_date,
+                escaped_content
+            )
+        }).collect();
+        format!("[{}]", decisions_data.join(","))
+    };
+
+    // Build sidebar with decision links
+    let sidebar_decisions: String = if docs.decisions.is_empty() {
+        "<p class=\"empty\">No decisions available.</p>".to_string()
+    } else {
+        docs.decisions.iter().map(|decision| {
+            let status_class = match decision.status {
+                structurizr_core::workspace::DecisionStatus::Accepted => "accepted",
+                structurizr_core::workspace::DecisionStatus::Proposed => "proposed",
+                structurizr_core::workspace::DecisionStatus::Superseded => "superseded",
+                structurizr_core::workspace::DecisionStatus::Deprecated => "deprecated",
+                structurizr_core::workspace::DecisionStatus::Rejected => "rejected",
+            };
+            format!(
+                r##"<a href="#" class="decision-link" data-id="{}">
+                    <span class="decision-nav-id">{}</span>
+                    <span class="decision-nav-title">{}</span>
+                    <span class="status-dot {}"></span>
+                </a>"##,
+                decision.id,
+                escape_html(&decision.id),
+                escape_html(&decision.title),
+                status_class
+            )
+        }).collect()
+    };
+
+    // Page-specific styles
+    let extra_styles = r##"<style>
+        .sidebar { width: 300px; background: var(--card-bg); border-right: 1px solid var(--border-color); padding: 20px; overflow-y: auto; flex-shrink: 0; }
+        .sidebar h3 { margin: 0 0 15px 0; font-size: 12px; text-transform: uppercase; color: var(--text-muted); }
+
+        /* Decision links in sidebar */
+        .decision-link { display: flex; align-items: center; gap: 8px; padding: 8px 10px; color: var(--text-primary); text-decoration: none; border-radius: 4px; font-size: 13px; margin: 2px 0; cursor: pointer; }
+        .decision-link:hover { background: var(--bg-tertiary); text-decoration: none; }
+        .decision-link.active { background: var(--link-color); color: white; font-weight: 500; }
+        [data-theme="light"] .decision-link.active { background: #e3f2fd; color: #1976d2; }
+        .decision-nav-id { font-family: monospace; font-size: 11px; background: var(--bg-tertiary); padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
+        .decision-link.active .decision-nav-id { background: rgba(255,255,255,0.2); }
+        [data-theme="light"] .decision-link.active .decision-nav-id { background: rgba(0,0,0,0.08); }
+        .decision-nav-title { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .status-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+        .status-dot.accepted { background: var(--status-accepted-text); }
+        .status-dot.proposed { background: var(--status-proposed-text); }
+        .status-dot.superseded { background: var(--status-superseded-text); }
+        .status-dot.deprecated { background: var(--status-deprecated-text); }
+        .status-dot.rejected { background: var(--status-deprecated-text); }
+
+        .main { flex: 1; padding: 40px; overflow-y: auto; }
+        .decision { background: var(--card-bg); padding: 30px; border-radius: 8px; box-shadow: 0 1px 3px var(--shadow); }
+        .decision-header { display: flex; align-items: center; gap: 15px; margin-bottom: 20px; flex-wrap: wrap; }
+        .decision-id { font-family: monospace; background: var(--bg-tertiary); padding: 4px 8px; border-radius: 4px; font-size: 12px; }
+        .decision-header h3 { margin: 0; flex: 1; }
+        .status { padding: 4px 10px; border-radius: 20px; font-size: 11px; text-transform: uppercase; font-weight: 600; }
+        .status.accepted { background: var(--status-accepted-bg); color: var(--status-accepted-text); }
+        .status.proposed { background: var(--status-proposed-bg); color: var(--status-proposed-text); }
+        .status.superseded { background: var(--status-superseded-bg); color: var(--status-superseded-text); }
+        .status.deprecated { background: var(--status-deprecated-bg); color: var(--status-deprecated-text); }
+        .status.rejected { background: var(--status-deprecated-bg); color: var(--status-deprecated-text); }
+        .date { color: var(--text-muted); font-size: 12px; }
+        .empty { color: var(--text-muted); font-style: italic; padding: 20px; }
+
+        .content { line-height: 1.5; }
+        .content h1, .content h2, .content h3 { margin-top: 0.8em; margin-bottom: 0.3em; }
+        .content p { margin: 0.5em 0; }
+        .content ul, .content ol { margin: 0.5em 0; padding-left: 1.5em; }
+        .content pre { background: var(--pre-bg); padding: 15px; border-radius: 4px; overflow-x: auto; }
+        .content code { background: var(--code-bg); color: var(--code-text); padding: 2px 6px; border-radius: 3px; font-family: "SF Mono", Monaco, monospace; font-size: 0.9em; }
+        .content pre code { background: none; padding: 0; }
+        .content blockquote { border-left: 4px solid var(--border-color); margin: 0; padding-left: 20px; color: var(--text-secondary); }
+        .content table { border-collapse: collapse; width: 100%; margin: 1em 0; display: block; overflow-x: auto; }
+        .content th, .content td { border: 1px solid var(--border-color); padding: 10px; text-align: left; }
+        .content th { background: var(--bg-tertiary); font-weight: 600; }
+        .content tr:nth-child(even) { background: var(--bg-secondary); }
+    </style>"##;
+
+    // Page-specific scripts for click-to-load
+    let extra_scripts = format!(r##"<script>
+    document.addEventListener('DOMContentLoaded', function() {{
+        const decisions = {decisions_json};
+        const mainContent = document.getElementById('decision-container');
+        const navLinks = document.querySelectorAll('.sidebar .decision-link');
+
+        function renderDecision(decision) {{
+            if (!decision) {{
+                mainContent.innerHTML = '<p class="empty">Select a decision from the sidebar.</p>';
+                return;
+            }}
+            mainContent.innerHTML = `
+                <div class="decision">
+                    <div class="decision-header">
+                        <span class="decision-id">${{decision.id}}</span>
+                        <h3>${{decision.title}}</h3>
+                        <span class="status ${{decision.statusClass}}">${{decision.status}}</span>
+                        <span class="date">${{decision.date}}</span>
+                    </div>
+                    <div class="content">${{decision.content}}</div>
+                </div>
+            `;
+        }}
+
+        function selectDecision(id) {{
+            // Update active state in sidebar
+            navLinks.forEach(function(link) {{
+                link.classList.remove('active');
+                if (link.dataset.id === id) {{
+                    link.classList.add('active');
+                }}
+            }});
+
+            // Find and render the decision
+            const decision = decisions.find(d => d.id === id);
+            renderDecision(decision);
+        }}
+
+        // Click handler for sidebar links
+        navLinks.forEach(function(link) {{
+            link.addEventListener('click', function(e) {{
+                e.preventDefault();
+                const id = this.dataset.id;
+                selectDecision(id);
+            }});
+        }});
+
+        // Load first decision by default
+        if (decisions.length > 0) {{
+            selectDecision(decisions[0].id);
+        }}
+    }});
+    </script>"##, decisions_json = decisions_json);
+
+    // Build content HTML - main area is a container that will be filled by JS
+    let main_content = if docs.decisions.is_empty() {
+        "<p class=\"empty\">No architecture decision records available.</p>".to_string()
+    } else {
+        String::new()
+    };
+
+    let content = format!(
+        r#"<div class="sidebar">
+            <h3>Decisions</h3>
+            {}
+        </div>
+        <div class="main" id="decision-container">
+            {}
+        </div>"#,
+        sidebar_decisions,
+        main_content
+    );
+
+    let title = format!("Decisions - {}", workspace.name);
+    let config = LayoutConfig {
+        title: &title,
+        workspace_name: Some(&workspace.name),
+        workspace_id,
+        base_path,
+        active_nav: NavItem::Decisions,
+        content_type: ContentType::Sidebar,
+        extra_head: extra_styles,
+        extra_body_end: &extra_scripts,
     };
 
     generate_page_layout(&config, &content)
@@ -7268,6 +7429,12 @@ pub async fn workspace_dispatch(
         // Documentation: /w/{workspace}/docs
         [action] if action == "docs" => {
             render_documentation_html(&workspace, &base_path)
+                .map(|h| h.into_response())
+        }
+
+        // Decisions (ADRs): /w/{workspace}/decisions
+        [action] if action == "decisions" => {
+            render_decisions_html(&workspace, &base_path)
                 .map(|h| h.into_response())
         }
 

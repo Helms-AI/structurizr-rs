@@ -30,6 +30,7 @@ pub struct LayoutConfig<'a> {
 pub enum NavItem {
     Home,
     Docs,
+    Decisions,
     Tree,
     Search,
     Explore,
@@ -278,6 +279,7 @@ fn generate_navigation(config: &LayoutConfig) -> String {
         (NavItem::Home, home_href, "Home"),
         (NavItem::Tree, format!("{}/tree", base), "Tree"),
         (NavItem::Docs, format!("{}/docs", base), "Docs"),
+        (NavItem::Decisions, format!("{}/decisions", base), "Decisions"),
         (NavItem::Search, format!("{}/search", base), "Search"),
         (NavItem::Explore, format!("{}/explore", base), "Explore"),
         (NavItem::Presentation, format!("{}/presentation", base), "Presentation"),
