@@ -9,6 +9,7 @@ pub mod editor;
 pub mod error;
 pub mod explore;
 pub mod handlers;
+pub mod hot_reload;
 pub mod layout;
 pub mod markdown;
 pub mod notes;

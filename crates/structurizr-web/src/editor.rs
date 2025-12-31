@@ -92,6 +92,37 @@ pub enum EditorMessage {
     WorkspaceReloaded {
         timestamp: i64,
     },
+    /// Workspace added notification (hot-reload)
+    WorkspaceAdded {
+        workspace_id: String,
+        timestamp: i64,
+    },
+    /// Workspace deleted notification (hot-reload)
+    WorkspaceDeleted {
+        workspace_id: String,
+        timestamp: i64,
+    },
+    /// Workspace list updated notification (hot-reload)
+    WorkspaceListUpdated {
+        timestamp: i64,
+    },
+    /// Diagram updated notification (hot-reload)
+    DiagramUpdated {
+        workspace_id: String,
+        view_key: Option<String>,
+        timestamp: i64,
+    },
+    /// Positions updated notification (hot-reload)
+    PositionsUpdated {
+        workspace_id: String,
+        view_key: String,
+        timestamp: i64,
+    },
+    /// Documentation updated notification (hot-reload)
+    DocumentationUpdated {
+        workspace_id: String,
+        timestamp: i64,
+    },
     /// Error response
     Error {
         message: String,

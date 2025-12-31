@@ -343,6 +343,11 @@ impl Parser {
                     let element = self.parse_element(ElementKind::DeploymentNode, None)?;
                     model.elements.push(element);
                 }
+                Some(TokenKind::DeploymentEnvironment) => {
+                    self.advance();
+                    let env = self.parse_deployment_environment()?;
+                    model.deployment_environments.push(env);
+                }
                 Some(TokenKind::Group) => {
                     self.advance();
                     let group = self.parse_group()?;
@@ -559,6 +564,21 @@ impl Parser {
                                 let child = self.parse_element(ElementKind::DeploymentNode, Some(id))?;
                                 element.children.push(child);
                             }
+                            (Some(TokenKind::ContainerInstance), ElementKind::DeploymentNode) => {
+                                self.advance();
+                                let child = self.parse_element(ElementKind::ContainerInstance, Some(id))?;
+                                element.children.push(child);
+                            }
+                            (Some(TokenKind::SoftwareSystemInstance), ElementKind::DeploymentNode) => {
+                                self.advance();
+                                let child = self.parse_element(ElementKind::SoftwareSystemInstance, Some(id))?;
+                                element.children.push(child);
+                            }
+                            (Some(TokenKind::InfrastructureNode), ElementKind::DeploymentNode) => {
+                                self.advance();
+                                let child = self.parse_element(ElementKind::InfrastructureNode, Some(id))?;
+                                element.children.push(child);
+                            }
                             _ => {
                                 return Err(Error::Parse(ParseError {
                                     message: "Unexpected element type in body".to_string(),
@@ -705,6 +725,87 @@ impl Parser {
         }
 
         Ok(group)
+    }
+
+    fn parse_deployment_environment(&mut self) -> Result<DeploymentEnvironmentNode> {
+        self.skip_newlines_and_comments();
+        let name = self.expect_string()?;
+
+        self.skip_newlines_and_comments();
+        self.expect(TokenKind::OpenBrace)?;
+
+        let mut children = Vec::new();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind().cloned() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::DeploymentNode) => {
+                    self.advance();
+                    let element = self.parse_element(ElementKind::DeploymentNode, None)?;
+                    children.push(element);
+                }
+                Some(TokenKind::DeploymentGroup) => {
+                    // DeploymentGroup is parsed as identifier = deploymentGroup "name"
+                    // For now, skip this case - it will be handled in identifier parsing
+                    self.advance();
+                    let _name = self.expect_string()?;
+                    // TODO: Store deployment group references for later use
+                }
+                Some(TokenKind::Identifier(id)) => {
+                    let id = id.clone();
+                    self.advance();
+                    self.skip_newlines_and_comments();
+
+                    if self.check(&TokenKind::Equals) {
+                        self.advance();
+                        self.skip_newlines_and_comments();
+
+                        match self.current_kind() {
+                            Some(TokenKind::DeploymentNode) => {
+                                self.advance();
+                                let element = self.parse_element(ElementKind::DeploymentNode, Some(id))?;
+                                children.push(element);
+                            }
+                            Some(TokenKind::DeploymentGroup) => {
+                                self.advance();
+                                let _name = self.expect_string()?;
+                                // TODO: Store deployment group with identifier
+                            }
+                            _ => {
+                                return Err(Error::Parse(ParseError {
+                                    message: "Expected deploymentNode or deploymentGroup after '='".to_string(),
+                                    location: self.current().map(|t| t.location),
+                                }));
+                            }
+                        }
+                    } else {
+                        return Err(Error::Parse(ParseError {
+                            message: "Expected '=' after identifier in deploymentEnvironment".to_string(),
+                            location: self.current().map(|t| t.location),
+                        }));
+                    }
+                }
+                Some(kind) => {
+                    return Err(Error::Parse(ParseError {
+                        message: format!("Unexpected token in deploymentEnvironment: {:?}", kind),
+                        location: self.current().map(|t| t.location),
+                    }));
+                }
+                None => {
+                    return Err(Error::Parse(ParseError {
+                        message: "Unexpected end of input in deploymentEnvironment".to_string(),
+                        location: None,
+                    }));
+                }
+            }
+        }
+
+        Ok(DeploymentEnvironmentNode { name, children })
     }
 
     fn parse_views(&mut self) -> Result<ViewsNode> {
@@ -1809,6 +1910,23 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
         // Build groups after all elements exist
         for group in &model_node.groups {
             build_group(&mut workspace, group, &mut identifiers)?;
+        }
+
+        // Build deployment environments
+        for env in &model_node.deployment_environments {
+            for child in &env.children {
+                if child.kind == ElementKind::DeploymentNode {
+                    let mut node = build_deployment_node(child, &mut identifiers)?;
+                    node.environment = Some(env.name.clone());
+
+                    // Register the node's identifier
+                    if let Some(id) = &child.identifier {
+                        identifiers.insert(id.clone(), node.id());
+                    }
+
+                    workspace.model_mut().deployment_nodes.push(node);
+                }
+            }
         }
 
         // Build relationships after all elements exist

@@ -1167,6 +1167,50 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
     <div class="container">
         {}
     </div>
+    <script>
+    (function() {{
+        const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${{wsProtocol}}//${{location.host}}/ws/reload`;
+        let ws = null;
+        let reconnectAttempts = 0;
+
+        function connect() {{
+            try {{
+                ws = new WebSocket(wsUrl);
+            }} catch (e) {{
+                console.warn('Hot-reload WebSocket not available:', e);
+                return;
+            }}
+
+            ws.onopen = () => {{
+                reconnectAttempts = 0;
+                console.log('Hot-reload connected');
+            }};
+
+            ws.onmessage = (event) => {{
+                try {{
+                    const msg = JSON.parse(event.data);
+                    if (['workspace_list_updated', 'workspace_added', 'workspace_deleted', 'diagram_updated'].includes(msg.type)) {{
+                        console.log('Hot-reload: Workspaces changed, refreshing...');
+                        location.reload();
+                    }}
+                }} catch (e) {{
+                    console.warn('Hot-reload message parse error:', e);
+                }}
+            }};
+
+            ws.onclose = () => {{
+                if (reconnectAttempts < 10) {{
+                    const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                    reconnectAttempts++;
+                    setTimeout(connect, delay);
+                }}
+            }};
+        }}
+
+        connect();
+    }})();
+    </script>
 </body>
 </html>"##,
         workspaces.len(),

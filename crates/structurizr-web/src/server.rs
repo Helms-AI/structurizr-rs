@@ -11,6 +11,7 @@ use tracing::info;
 use crate::editor;
 use crate::error::Result;
 use crate::handlers;
+use crate::hot_reload;
 use crate::state::{AppState, Config};
 
 /// Structurizr web server.
@@ -38,6 +39,9 @@ impl Server {
             // Workspaces index
             .route("/", get(handlers::workspaces_index))
             .route("/health", get(handlers::health))
+
+            // Hot-reload WebSocket endpoint
+            .route("/ws/reload", get(hot_reload::hot_reload_ws_handler))
 
             // Unified wildcard routes for all workspace operations
             // The dispatcher parses the path to extract workspace_id and remaining segments

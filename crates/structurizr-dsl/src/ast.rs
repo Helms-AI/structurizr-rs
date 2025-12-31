@@ -62,6 +62,7 @@ pub struct ModelNode {
     pub elements: Vec<ElementNode>,
     pub relationships: Vec<RelationshipNode>,
     pub groups: Vec<GroupNode>,
+    pub deployment_environments: Vec<DeploymentEnvironmentNode>,
 }
 
 /// An element definition (person, softwareSystem, container, component).
@@ -111,6 +112,13 @@ pub struct GroupNode {
     pub name: String,
     pub elements: Vec<ElementNode>,
     pub groups: Vec<GroupNode>,
+}
+
+/// A deployment environment containing deployment nodes and groups.
+#[derive(Debug, Clone)]
+pub struct DeploymentEnvironmentNode {
+    pub name: String,
+    pub children: Vec<ElementNode>,
 }
 
 /// The views block containing all view definitions.

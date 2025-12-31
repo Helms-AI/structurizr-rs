@@ -473,7 +473,286 @@ fn generate_base_css() -> &'static str {
     "##
 }
 
-/// Generate the complete page wrapper with header, navigation, and theme toggle.
+/// Generate CSS for hot-reload UI elements.
+fn generate_hot_reload_css() -> &'static str {
+    r##"
+        /* Hot-reload toast notification */
+        .hot-reload-toast {
+            position: fixed;
+            bottom: 20px;
+            right: 20px;
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-left: 4px solid #4caf50;
+            border-radius: 8px;
+            padding: 12px 16px;
+            box-shadow: 0 4px 12px var(--shadow);
+            z-index: 10000;
+            animation: hotReloadSlideIn 0.3s ease;
+            max-width: 300px;
+            font-size: 14px;
+        }
+
+        .hot-reload-toast.error {
+            border-left-color: #f44336;
+        }
+
+        .hot-reload-toast strong {
+            display: block;
+            margin-bottom: 4px;
+            color: var(--text-primary);
+        }
+
+        .hot-reload-toast span {
+            color: var(--text-secondary);
+        }
+
+        /* Hot-reload connection indicator */
+        .hot-reload-indicator {
+            position: fixed;
+            bottom: 10px;
+            left: 10px;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            z-index: 10000;
+            transition: background-color 0.3s ease;
+            cursor: help;
+        }
+
+        .hot-reload-indicator.connected {
+            background: #4caf50;
+        }
+
+        .hot-reload-indicator.disconnected {
+            background: #f44336;
+            animation: hotReloadPulse 2s infinite;
+        }
+
+        .hot-reload-indicator.connecting {
+            background: #ff9800;
+            animation: hotReloadPulse 1s infinite;
+        }
+
+        @keyframes hotReloadSlideIn {
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
+        }
+
+        @keyframes hotReloadPulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
+        }
+    "##
+}
+
+/// Generate JavaScript for hot-reload WebSocket client.
+fn generate_hot_reload_js(workspace_id: Option<&str>) -> String {
+    let workspace_id_js = workspace_id
+        .map(|id| format!("'{}'", id))
+        .unwrap_or_else(|| "null".to_string());
+
+    format!(
+        r##"<script>
+    (function() {{
+        const workspaceId = {workspace_id};
+        const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = workspaceId
+            ? `${{wsProtocol}}//${{location.host}}/ws/reload?workspace_id=${{workspaceId}}`
+            : `${{wsProtocol}}//${{location.host}}/ws/reload`;
+
+        let ws = null;
+        let reconnectAttempts = 0;
+        const maxReconnectAttempts = 10;
+        let toastTimeout = null;
+
+        function connect() {{
+            showIndicator('connecting');
+
+            try {{
+                ws = new WebSocket(wsUrl);
+            }} catch (e) {{
+                console.warn('Hot-reload WebSocket not available:', e);
+                showIndicator('disconnected');
+                return;
+            }}
+
+            ws.onopen = () => {{
+                reconnectAttempts = 0;
+                showIndicator('connected');
+                console.log('Hot-reload connected');
+            }};
+
+            ws.onmessage = (event) => {{
+                try {{
+                    const msg = JSON.parse(event.data);
+                    handleReloadMessage(msg);
+                }} catch (e) {{
+                    console.warn('Hot-reload message parse error:', e);
+                }}
+            }};
+
+            ws.onclose = () => {{
+                showIndicator('disconnected');
+                scheduleReconnect();
+            }};
+
+            ws.onerror = (error) => {{
+                console.warn('Hot-reload WebSocket error:', error);
+            }};
+        }}
+
+        function handleReloadMessage(msg) {{
+            console.log('Hot-reload message:', msg.type);
+
+            switch(msg.type) {{
+                case 'connected':
+                    // Initial connection acknowledged
+                    break;
+
+                case 'pong':
+                    // Heartbeat response
+                    break;
+
+                case 'workspace_reloaded':
+                case 'diagram_updated':
+                    // Check if this message is for our workspace
+                    if (!workspaceId || (msg.workspace_id && msg.workspace_id === workspaceId) || !msg.workspace_id) {{
+                        showToast('Workspace Updated', 'Refreshing page...');
+                        setTimeout(() => location.reload(), 500);
+                    }}
+                    break;
+
+                case 'positions_updated':
+                    // Soft refresh for position changes
+                    if (!workspaceId || msg.workspace_id === workspaceId) {{
+                        if (window.__hotReloadRefreshPositions) {{
+                            window.__hotReloadRefreshPositions();
+                            showToast('Positions Updated', 'Diagram updated');
+                        }} else {{
+                            // No soft refresh handler, do full reload on diagram pages
+                            if (location.pathname.includes('/view/') || location.pathname.includes('/edit/')) {{
+                                showToast('Positions Updated', 'Refreshing...');
+                                setTimeout(() => location.reload(), 500);
+                            }}
+                        }}
+                    }}
+                    break;
+
+                case 'documentation_updated':
+                    // Refresh documentation pages
+                    if (!workspaceId || msg.workspace_id === workspaceId) {{
+                        if (location.pathname.includes('/docs') || location.pathname.includes('/decisions')) {{
+                            showToast('Documentation Updated', 'Refreshing...');
+                            setTimeout(() => location.reload(), 500);
+                        }}
+                    }}
+                    break;
+
+                case 'workspace_list_updated':
+                case 'workspace_added':
+                case 'workspace_deleted':
+                    // Refresh workspace index page
+                    if (location.pathname === '/' || location.pathname === '') {{
+                        showToast('Workspaces Changed', 'Updating list...');
+                        setTimeout(() => location.reload(), 500);
+                    }} else if (msg.type === 'workspace_deleted' && workspaceId && msg.workspace_id === workspaceId) {{
+                        // Our workspace was deleted, go back to index
+                        showToast('Workspace Deleted', 'Redirecting...', true);
+                        setTimeout(() => location.href = '/', 1000);
+                    }}
+                    break;
+            }}
+        }}
+
+        function showToast(title, message, isError) {{
+            // Remove existing toast
+            const existing = document.querySelector('.hot-reload-toast');
+            if (existing) {{
+                existing.remove();
+            }}
+            if (toastTimeout) {{
+                clearTimeout(toastTimeout);
+            }}
+
+            const toast = document.createElement('div');
+            toast.className = 'hot-reload-toast' + (isError ? ' error' : '');
+            toast.innerHTML = `<strong>${{title}}</strong><span>${{message}}</span>`;
+            document.body.appendChild(toast);
+
+            toastTimeout = setTimeout(() => {{
+                toast.style.animation = 'hotReloadSlideIn 0.3s ease reverse';
+                setTimeout(() => toast.remove(), 300);
+            }}, 3000);
+        }}
+
+        function showIndicator(status) {{
+            let indicator = document.getElementById('hot-reload-indicator');
+            if (!indicator) {{
+                indicator = document.createElement('div');
+                indicator.id = 'hot-reload-indicator';
+                indicator.title = 'Hot-reload connection status';
+                document.body.appendChild(indicator);
+            }}
+            indicator.className = 'hot-reload-indicator ' + status;
+
+            // Update title based on status
+            switch(status) {{
+                case 'connected':
+                    indicator.title = 'Hot-reload: Connected';
+                    break;
+                case 'disconnected':
+                    indicator.title = 'Hot-reload: Disconnected (reconnecting...)';
+                    break;
+                case 'connecting':
+                    indicator.title = 'Hot-reload: Connecting...';
+                    break;
+            }}
+        }}
+
+        function scheduleReconnect() {{
+            if (reconnectAttempts < maxReconnectAttempts) {{
+                const delay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000);
+                reconnectAttempts++;
+                console.log(`Hot-reload reconnecting in ${{delay}}ms (attempt ${{reconnectAttempts}})`);
+                setTimeout(connect, delay);
+            }} else {{
+                console.warn('Hot-reload: Max reconnection attempts reached');
+            }}
+        }}
+
+        // Start heartbeat to keep connection alive
+        function startHeartbeat() {{
+            setInterval(() => {{
+                if (ws && ws.readyState === WebSocket.OPEN) {{
+                    ws.send(JSON.stringify({{ type: 'ping' }}));
+                }}
+            }}, 30000);
+        }}
+
+        // Initialize
+        if (document.readyState === 'loading') {{
+            document.addEventListener('DOMContentLoaded', () => {{
+                connect();
+                startHeartbeat();
+            }});
+        }} else {{
+            connect();
+            startHeartbeat();
+        }}
+    }})();
+    </script>"##,
+        workspace_id = workspace_id_js
+    )
+}
+
+/// Generate the complete page wrapper with header, navigation, theme toggle, and hot-reload.
 pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
     let breadcrumb_html = generate_breadcrumb(config);
     let nav_html = generate_navigation(config);
@@ -481,6 +760,8 @@ pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
     let theme_css = generate_theme_css();
     let theme_js = generate_theme_js();
     let base_css = generate_base_css();
+    let hot_reload_css = generate_hot_reload_css();
+    let hot_reload_js = generate_hot_reload_js(config.workspace_id);
 
     let container_class = match config.content_type {
         ContentType::Standard => "layout-content standard",
@@ -499,6 +780,7 @@ pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
     <style>
         {theme_css}
         {base_css}
+        {hot_reload_css}
     </style>
     {extra_head}
 </head>
@@ -520,12 +802,14 @@ pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
         {content}
     </main>
     {theme_js}
+    {hot_reload_js}
     {extra_body_end}
 </body>
 </html>"##,
         title = escape_html(config.title),
         theme_css = theme_css,
         base_css = base_css,
+        hot_reload_css = hot_reload_css,
         extra_head = config.extra_head,
         breadcrumb_html = breadcrumb_html,
         theme_toggle_html = theme_toggle_html,
@@ -533,6 +817,7 @@ pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
         container_class = container_class,
         content = content,
         theme_js = theme_js,
+        hot_reload_js = hot_reload_js,
         extra_body_end = config.extra_body_end,
     )
 }
