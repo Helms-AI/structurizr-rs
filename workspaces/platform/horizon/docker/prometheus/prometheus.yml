@@ -1,0 +1,72 @@
+# Prometheus Configuration for Horizon Platform
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: []
+
+rule_files: []
+
+scrape_configs:
+  # Prometheus self-monitoring
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # NATS JetStream metrics
+  - job_name: 'nats'
+    static_configs:
+      - targets: ['nats:8222']
+    metrics_path: /varz
+
+  # PostgreSQL metrics (via postgres_exporter if deployed)
+  # - job_name: 'postgres'
+  #   static_configs:
+  #     - targets: ['postgres-exporter:9187']
+
+  # Redis metrics (via redis_exporter if deployed)
+  # - job_name: 'redis'
+  #   static_configs:
+  #     - targets: ['redis-exporter:9121']
+
+  # Elasticsearch metrics
+  # - job_name: 'elasticsearch'
+  #   static_configs:
+  #     - targets: ['elasticsearch:9200']
+  #   metrics_path: /_prometheus/metrics
+
+  # ClickHouse metrics
+  - job_name: 'clickhouse'
+    static_configs:
+      - targets: ['clickhouse:9363']
+
+  # Qdrant metrics
+  - job_name: 'qdrant'
+    static_configs:
+      - targets: ['qdrant:6333']
+    metrics_path: /metrics
+
+  # Application services (uncomment when deployed)
+  # - job_name: 'api-gateway'
+  #   static_configs:
+  #     - targets: ['api-gateway:8080']
+  #   metrics_path: /metrics
+
+  # - job_name: 'websocket-gateway'
+  #   static_configs:
+  #     - targets: ['websocket-gateway:8081']
+  #   metrics_path: /metrics
+
+  # - job_name: 'collaboration-engine'
+  #   static_configs:
+  #     - targets: ['collaboration-engine:8082']
+  #   metrics_path: /metrics
+
+  # - job_name: 'ai-gateway'
+  #   static_configs:
+  #     - targets: ['ai-gateway:8083']
+  #   metrics_path: /metrics

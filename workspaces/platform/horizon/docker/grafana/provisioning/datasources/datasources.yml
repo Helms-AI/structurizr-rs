@@ -1,0 +1,42 @@
+# Grafana Datasource Provisioning for Horizon Platform
+
+apiVersion: 1
+
+datasources:
+  # Prometheus for metrics
+  - name: Prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+    editable: false
+
+  # Jaeger for distributed tracing
+  - name: Jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    editable: false
+
+  # PostgreSQL for direct queries
+  - name: PostgreSQL
+    type: postgres
+    url: postgres:5432
+    database: horizon
+    user: horizon
+    secureJsonData:
+      password: ${POSTGRES_PASSWORD:-devpassword}
+    jsonData:
+      sslmode: disable
+      maxOpenConns: 5
+      maxIdleConns: 2
+      connMaxLifetime: 14400
+    editable: false
+
+  # ClickHouse for analytics
+  - name: ClickHouse
+    type: grafana-clickhouse-datasource
+    url: http://clickhouse:8123
+    jsonData:
+      defaultDatabase: horizon
+    editable: false

@@ -1,0 +1,15 @@
+# Grafana Dashboard Provisioning for Horizon Platform
+
+apiVersion: 1
+
+providers:
+  - name: 'Horizon Platform'
+    orgId: 1
+    folder: 'Horizon'
+    folderUid: 'horizon'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /etc/grafana/provisioning/dashboards/json

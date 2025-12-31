@@ -1,0 +1,189 @@
+version: '3.9'
+
+# Horizon Platform - Development Overrides
+# =========================================
+# This file extends docker-compose.yml with development-specific configuration.
+# It enables hot-reload for application services.
+#
+# Usage:
+#   docker-compose up -d          # Automatically uses this override
+#   docker-compose -f docker-compose.yml up -d  # Production-like (no override)
+
+services:
+  # ==========================================
+  # Application Services with Hot-Reload
+  # ==========================================
+
+  # Go services use air for hot-reload
+  # Example:
+  # api-gateway:
+  #   build:
+  #     context: ./services/api-gateway
+  #     dockerfile: Dockerfile.dev
+  #   command: ["air", "-c", ".air.toml"]
+  #   volumes:
+  #     - ./services/api-gateway:/app
+  #   environment:
+  #     - DATABASE_URL=postgres://horizon:devpassword@postgres:5432/horizon
+  #     - REDIS_URL=redis://redis:6379
+  #     - NATS_URL=nats://nats:4222
+  #   depends_on:
+  #     - postgres
+  #     - redis
+  #     - nats
+  #   ports:
+  #     - "8080:8080"
+
+  # websocket-gateway:
+  #   build:
+  #     context: ./services/websocket-gateway
+  #     dockerfile: Dockerfile.dev
+  #   command: ["air", "-c", ".air.toml"]
+  #   volumes:
+  #     - ./services/websocket-gateway:/app
+  #   environment:
+  #     - NATS_URL=nats://nats:4222
+  #     - NATS_WS_URL=ws://nats:9222
+  #   depends_on:
+  #     - nats
+  #   ports:
+  #     - "8081:8081"
+
+  # Rust services use cargo-watch
+  # Example:
+  # collaboration-engine:
+  #   build:
+  #     context: ./services/collaboration-engine
+  #     dockerfile: Dockerfile.dev
+  #   command: ["cargo", "watch", "-x", "run"]
+  #   volumes:
+  #     - ./services/collaboration-engine:/app
+  #     - cargo_cache:/usr/local/cargo/registry
+  #   environment:
+  #     # NATS for presence, events, and CRDT snapshots (see ADR-018)
+  #     - NATS_URL=nats://nats:4222
+  #     - NATS_JETSTREAM_ENABLED=true
+  #     # Redis for caching only
+  #     - REDIS_URL=redis://redis:6379
+  #   depends_on:
+  #     - nats
+  #     - redis
+  #   ports:
+  #     - "8082:8082"
+
+  # Python services use uvicorn --reload
+  # Example:
+  # ai-gateway:
+  #   build:
+  #     context: ./services/ai-gateway
+  #     dockerfile: Dockerfile.dev
+  #   command: ["uvicorn", "main:app", "--reload", "--host", "0.0.0.0", "--port", "8083"]
+  #   volumes:
+  #     - ./services/ai-gateway:/app
+  #   environment:
+  #     - CLAUDE_CODE_OAUTH_TOKEN=${CLAUDE_CODE_OAUTH_TOKEN}
+  #     - QDRANT_HOST=qdrant
+  #     - QDRANT_PORT=6333
+  #     - REDIS_URL=redis://redis:6379
+  #     - NATS_URL=nats://nats:4222
+  #   depends_on:
+  #     - qdrant
+  #     - redis
+  #     - nats
+  #   ports:
+  #     - "8083:8083"
+
+  # container-orchestrator:
+  #   build:
+  #     context: ./services/container-orchestrator
+  #     dockerfile: Dockerfile.dev
+  #   command: ["air", "-c", ".air.toml"]
+  #   volumes:
+  #     - ./services/container-orchestrator:/app
+  #   environment:
+  #     - DATABASE_URL=postgres://horizon:devpassword@postgres:5432/horizon
+  #     - NATS_URL=nats://nats:4222
+  #     - MINIO_ENDPOINT=minio:9000
+  #     - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+  #     - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+  #   depends_on:
+  #     - postgres
+  #     - nats
+  #     - minio
+  #   ports:
+  #     - "8085:8085"
+
+  # TypeScript services use ts-node-dev
+  # Example:
+  # lsp-hub:
+  #   build:
+  #     context: ./services/lsp-hub
+  #     dockerfile: Dockerfile.dev
+  #   command: ["npx", "ts-node-dev", "--respawn", "--transpile-only", "src/index.ts"]
+  #   volumes:
+  #     - ./services/lsp-hub:/app
+  #     - /app/node_modules
+  #   environment:
+  #     - NATS_URL=nats://nats:4222
+  #   depends_on:
+  #     - nats
+  #   ports:
+  #     - "8084:8084"
+
+  # messaging-service:
+  #   build:
+  #     context: ./services/messaging-service
+  #     dockerfile: Dockerfile.dev
+  #   command: ["npx", "ts-node-dev", "--respawn", "--transpile-only", "src/index.ts"]
+  #   volumes:
+  #     - ./services/messaging-service:/app
+  #     - /app/node_modules
+  #   environment:
+  #     - DATABASE_URL=postgres://horizon:devpassword@postgres:5432/horizon
+  #     - NATS_URL=nats://nats:4222
+  #   depends_on:
+  #     - postgres
+  #     - nats
+  #   ports:
+  #     - "8086:8086"
+
+  # deployment-orchestrator:
+  #   build:
+  #     context: ./services/deployment-orchestrator
+  #     dockerfile: Dockerfile.dev
+  #   command: ["air", "-c", ".air.toml"]
+  #   volumes:
+  #     - ./services/deployment-orchestrator:/app
+  #   environment:
+  #     - DATABASE_URL=postgres://horizon:devpassword@postgres:5432/horizon
+  #     - NATS_URL=nats://nats:4222
+  #     - MINIO_ENDPOINT=minio:9000
+  #   depends_on:
+  #     - postgres
+  #     - nats
+  #     - minio
+  #   ports:
+  #     - "8087:8087"
+
+  # React frontend with Vite HMR
+  # Example:
+  # web-ide:
+  #   build:
+  #     context: ./frontend/web-ide
+  #     dockerfile: Dockerfile.dev
+  #   command: ["npm", "run", "dev", "--", "--host"]
+  #   volumes:
+  #     - ./frontend/web-ide:/app
+  #     - /app/node_modules
+  #   ports:
+  #     - "3000:3000"
+  #   environment:
+  #     - VITE_API_URL=http://localhost:8080
+  #     - VITE_WS_URL=ws://localhost:8081
+  #     - VITE_NATS_WS_URL=ws://localhost:9222
+  #     - VITE_KEYCLOAK_URL=http://localhost:8180
+
+# Additional development volumes
+# volumes:
+#   cargo_cache:
+#     name: horizon-cargo-cache
