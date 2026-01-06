@@ -24,6 +24,7 @@ User-facing documentation for structurizr-rs features:
 | [Scripting API Reference](features/scripting-api-reference.md) | Complete workspace API for scripts |
 | [Groovy Migration](features/groovy-migration.md) | Migrate existing Groovy scripts to Lua |
 | [WASM Plugins](features/plugins.md) | Build WASM plugins for advanced extensibility |
+| [MCP Integration](features/mcp-integration.md) | Model Context Protocol server for AI assistant integration |
 
 ---
 
@@ -78,7 +79,8 @@ structurizr-rs/
 │   ├── structurizr-render/   # SVG rendering
 │   ├── structurizr-export/   # Export formats (JSON, PlantUML, Mermaid, etc.)
 │   ├── structurizr-scripting/ # Lua scripting and WASM plugins
-│   └── structurizr-web/      # Axum-based web server
+│   ├── structurizr-web/      # Axum-based web server
+│   └── structurizr-mcp/      # Model Context Protocol server
 ├── docs/                     # This documentation
 ├── demo/                     # Demo workspace
 ├── workspaces/               # Example files
