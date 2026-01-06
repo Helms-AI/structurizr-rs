@@ -195,10 +195,26 @@ impl PluginEngine {
             }).map_err(|e| ScriptError::Configuration(format!("Failed to register function: {}", e)))?;
         }
 
-        // Log function (always available)
-        linker.func_wrap("env", "log", |_caller: Caller<'_, ()>, _ptr: i32, _len: i32| {
-            // Placeholder for logging
-            println!("[WASM Plugin] log called");
+        // Log function (always available) - reads string from WASM memory
+        linker.func_wrap("env", "log", |mut caller: Caller<'_, ()>, ptr: i32, len: i32| {
+            // Get the exported memory
+            if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) {
+                let data = memory.data(&caller);
+                let start = ptr as usize;
+                let end = start + len as usize;
+
+                if end <= data.len() {
+                    if let Ok(msg) = std::str::from_utf8(&data[start..end]) {
+                        println!("[Plugin] {}", msg);
+                    } else {
+                        println!("[Plugin] <invalid UTF-8>");
+                    }
+                } else {
+                    println!("[Plugin] <out of bounds>");
+                }
+            } else {
+                println!("[Plugin] <no memory export>");
+            }
         }).map_err(|e| ScriptError::Configuration(format!("Failed to register function: {}", e)))?;
 
         Ok(())

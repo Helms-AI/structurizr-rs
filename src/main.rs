@@ -10,7 +10,7 @@ use std::path::PathBuf;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use structurizr_core::Workspace;
-use structurizr_dsl::parse;
+use structurizr_dsl::parse_with_base_path;
 use structurizr_export::{JsonExporter, PlantUmlExporter, MermaidExporter};
 use structurizr_render::SvgRenderer;
 use structurizr_web::{Server, state::Config};
@@ -133,7 +133,8 @@ async fn main() -> anyhow::Result<()> {
             println!();
 
             let content = std::fs::read_to_string(&file)?;
-            match parse(&content) {
+            let base_path = file.parent();
+            match parse_with_base_path(&content, base_path) {
                 Ok(workspace) => {
                     println!("✓ DSL Parsing: Valid workspace: {}", workspace.name);
                     println!("  People: {}", workspace.model().people.len());
@@ -308,11 +309,12 @@ async fn main() -> anyhow::Result<()> {
 
 fn load_workspace(path: &PathBuf) -> anyhow::Result<Workspace> {
     let content = std::fs::read_to_string(path)?;
+    let base_path = path.parent();
 
     if path.extension().and_then(|e| e.to_str()) == Some("json") {
         Ok(Workspace::from_json(&content)?)
     } else {
-        Ok(parse(&content)?)
+        Ok(parse_with_base_path(&content, base_path)?)
     }
 }
 

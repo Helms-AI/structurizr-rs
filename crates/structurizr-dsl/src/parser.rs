@@ -18,6 +18,9 @@ use crate::lexer::{Lexer, Token, TokenKind};
 #[cfg(feature = "scripting")]
 use structurizr_scripting::{ScriptEngine, ScriptLanguage, ScriptConfig};
 
+#[cfg(feature = "scripting")]
+use structurizr_scripting::PluginEngine;
+
 /// Parse a DSL string into a Workspace.
 pub fn parse(input: &str) -> Result<Workspace> {
     parse_with_base_path(input, None)
@@ -43,7 +46,15 @@ pub fn parse_with_base_path(input: &str, base_path: Option<&std::path::Path>) ->
         })
         .collect();
 
-    // Mutable when scripting feature is enabled (scripts can modify workspace)
+    // Extract plugin directives before building
+    let plugins: Vec<_> = ast.directives.iter()
+        .filter_map(|d| match d {
+            Directive::Plugin(p) => Some(p.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Mutable when scripting feature is enabled (scripts/plugins can modify workspace)
     #[allow(unused_mut)]
     let mut workspace = build_workspace(ast)?;
 
@@ -53,11 +64,24 @@ pub fn parse_with_base_path(input: &str, base_path: Option<&std::path::Path>) ->
         execute_scripts(&mut workspace, &scripts, base_path)?;
     }
 
+    // Execute plugins when scripting feature is enabled
+    #[cfg(feature = "scripting")]
+    {
+        execute_plugins(&mut workspace, &plugins, base_path)?;
+    }
+
     // Warn about scripts when feature is not enabled (but don't fail)
     #[cfg(not(feature = "scripting"))]
     if !scripts.is_empty() {
         eprintln!("Warning: !script directives found but scripting feature is not enabled");
         eprintln!("Scripts will be skipped. Enable 'scripting' feature to execute scripts.");
+    }
+
+    // Warn about plugins when feature is not enabled (but don't fail)
+    #[cfg(not(feature = "scripting"))]
+    if !plugins.is_empty() {
+        eprintln!("Warning: !plugin directives found but scripting feature is not enabled");
+        eprintln!("Plugins will be skipped. Enable 'scripting' feature to execute plugins.");
     }
 
     Ok(workspace)
@@ -120,6 +144,63 @@ fn execute_scripts(
                     location: None,
                 }))?;
         }
+    }
+
+    Ok(())
+}
+
+/// Execute plugin directives against a workspace.
+#[cfg(feature = "scripting")]
+fn execute_plugins(
+    workspace: &mut Workspace,
+    plugins: &[String],
+    base_path: Option<&std::path::Path>,
+) -> Result<()> {
+    if plugins.is_empty() {
+        return Ok(());
+    }
+
+    // Create a plugin engine
+    let engine = PluginEngine::new()
+        .map_err(|e| Error::Parse(ParseError {
+            message: format!("Failed to create plugin engine: {}", e),
+            location: None,
+        }))?;
+
+    for plugin_path in plugins {
+        let path = std::path::Path::new(plugin_path);
+
+        // Resolve the path relative to workspace if not absolute
+        let full_path = if path.is_absolute() {
+            path.to_path_buf()
+        } else if let Some(base) = base_path {
+            base.join(path)
+        } else {
+            path.to_path_buf()
+        };
+
+        // Check if this is a directory (plugin.toml inside) or direct path
+        let manifest_path = if full_path.is_dir() {
+            full_path.join("plugin.toml")
+        } else if full_path.file_name().map(|n| n == "plugin.toml").unwrap_or(false) {
+            full_path.clone()
+        } else {
+            // Assume it's a directory path, try adding plugin.toml
+            full_path.join("plugin.toml")
+        };
+
+        if !manifest_path.exists() {
+            return Err(Error::Parse(ParseError {
+                message: format!("Plugin manifest not found: {}", manifest_path.display()),
+                location: None,
+            }));
+        }
+
+        engine.execute_plugin(&manifest_path, workspace)
+            .map_err(|e| Error::Parse(ParseError {
+                message: format!("Plugin execution error ({}): {}", plugin_path, e),
+                location: None,
+            }))?;
     }
 
     Ok(())

@@ -7,7 +7,7 @@ authors.workspace = true
 description = "Scripting and plugin support for structurizr-rs"
 
 [features]
-default = []
+default = ["wasm"]
 wasm = ["wasmtime", "toml"]
 
 [dependencies]

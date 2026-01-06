@@ -1,0 +1,23 @@
+[package]
+name = "workspace-analyzer"
+version = "1.0.0"
+edition = "2021"
+description = "Example WASM plugin for structurizr-rs"
+
+# This makes the plugin a standalone project, not part of the parent workspace
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[profile.release]
+# Optimize for size
+opt-level = "s"
+# Enable link-time optimization
+lto = true
+# Strip debug info
+strip = true
+
+[profile.dev]
+# Even in dev, we need cdylib
+opt-level = 1

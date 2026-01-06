@@ -1,0 +1,36 @@
+# Workspace Analyzer Plugin
+#
+# This is an example plugin manifest that demonstrates the plugin.toml format.
+# The plugin analyzes workspace structure and logs statistics.
+#
+# To build this plugin:
+#   cd plugins/workspace-analyzer
+#   cargo build --release --target wasm32-unknown-unknown
+#   cp target/wasm32-unknown-unknown/release/workspace_analyzer.wasm plugin.wasm
+
+[plugin]
+name = "workspace-analyzer"
+version = "1.0.0"
+description = "Analyzes workspace structure and reports statistics"
+wasm = "plugin.wasm"
+author = "structurizr-rs contributors"
+homepage = "https://github.com/structurizr/structurizr-rs"
+
+[capabilities]
+# Can read workspace data (people, systems, relationships)
+read_workspace = true
+
+# Cannot modify the workspace (read-only analysis)
+modify_workspace = false
+
+# No filesystem access needed
+filesystem = false
+
+# No network access needed
+network = false
+
+# Memory limit: 32MB (sufficient for analysis)
+max_memory = 33554432
+
+# Time limit: 5 seconds (analysis should be fast)
+max_time = 5000

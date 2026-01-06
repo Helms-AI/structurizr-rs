@@ -16,6 +16,15 @@ User-facing documentation for structurizr-rs features:
 | [Presentation Mode](features/presentation.md) | Full-screen slideshow of diagrams |
 | [Validation](features/validation.md) | Workspace validation and inspections |
 
+### Scripting & Extensibility
+
+| Feature | Description |
+|---------|-------------|
+| [Scripting](features/scripting.md) | Lua scripting with `!script` directive |
+| [Scripting API Reference](features/scripting-api-reference.md) | Complete workspace API for scripts |
+| [Groovy Migration](features/groovy-migration.md) | Migrate existing Groovy scripts to Lua |
+| [WASM Plugins](features/plugins.md) | Build WASM plugins for advanced extensibility |
+
 ---
 
 ## Development Documentation
@@ -47,23 +56,33 @@ Implementation details and architecture documentation:
 | [Perspectives Implementation](development/perspectives-impl.md) | Perspectives filtering internals |
 | [Validation Implementation](development/validation-impl.md) | Workspace validation internals |
 
+### Scripting Implementation
+
+| Document | Description |
+|----------|-------------|
+| [Scripting Implementation](development/scripting-impl.md) | ScriptEngine architecture and integration |
+| [Transpiler Implementation](development/transpiler-impl.md) | Groovy-to-Lua transpiler internals |
+| [Sandbox Implementation](development/sandbox-impl.md) | Security and sandboxing architecture |
+| [Plugin System Implementation](development/plugin-system-impl.md) | WASM plugin runtime internals |
+
 ---
 
 ## Project Structure
 
 ```
 structurizr-rs/
-├── src/main.rs             # CLI entry point
+├── src/main.rs               # CLI entry point
 ├── crates/
-│   ├── structurizr-core/   # C4 model types and workspace
-│   ├── structurizr-dsl/    # DSL parser (lexer + parser)
-│   ├── structurizr-render/ # SVG rendering
-│   ├── structurizr-export/ # Export formats (JSON, PlantUML, Mermaid, etc.)
-│   └── structurizr-web/    # Axum-based web server
-├── docs/                   # This documentation
-├── demo/                   # Demo workspace
+│   ├── structurizr-core/     # C4 model types and workspace
+│   ├── structurizr-dsl/      # DSL parser (lexer + parser)
+│   ├── structurizr-render/   # SVG rendering
+│   ├── structurizr-export/   # Export formats (JSON, PlantUML, Mermaid, etc.)
+│   ├── structurizr-scripting/ # Lua scripting and WASM plugins
+│   └── structurizr-web/      # Axum-based web server
+├── docs/                     # This documentation
+├── demo/                     # Demo workspace
 ├── workspaces/               # Example files
-└── assets/                 # Diagrams, images, exports
+└── assets/                   # Diagrams, images, exports
 ```
 
 ---
