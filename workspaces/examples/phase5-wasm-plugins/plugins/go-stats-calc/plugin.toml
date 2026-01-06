@@ -1,0 +1,29 @@
+# Plugin manifest for Go Statistics Calculator
+# Demonstrates TinyGo compilation to WASM
+
+[plugin]
+name = "go-stats-calc"
+version = "1.0.0"
+description = "Educational plugin showing Go's simplicity and TinyGo's WASM compilation"
+wasm = "plugin.wasm"
+author = "structurizr-rs contributors"
+homepage = "https://github.com/structurizr/structurizr-rs"
+
+[capabilities]
+# Read workspace information
+read_workspace = true
+
+# No modification needed
+modify_workspace = false
+
+# No filesystem access
+filesystem = false
+
+# No network access
+network = false
+
+# Memory limit: 32MB (TinyGo includes GC runtime)
+max_memory = 33554432
+
+# Execution timeout: 2 seconds
+max_time = 2000
