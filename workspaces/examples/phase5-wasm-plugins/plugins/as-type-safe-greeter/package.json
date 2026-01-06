@@ -1,0 +1,15 @@
+{
+  "name": "as-type-safe-greeter",
+  "version": "1.0.0",
+  "description": "Educational AssemblyScript WASM plugin",
+  "author": "structurizr-rs contributors",
+  "license": "MIT",
+  "scripts": {
+    "build": "asc assembly/index.ts -b plugin.wasm -t plugin.wat --optimize --noAssert",
+    "build:debug": "asc assembly/index.ts -b plugin.wasm -t plugin.wat --debug",
+    "clean": "rm -f plugin.wasm plugin.wat"
+  },
+  "devDependencies": {
+    "assemblyscript": "^0.27.0"
+  }
+}

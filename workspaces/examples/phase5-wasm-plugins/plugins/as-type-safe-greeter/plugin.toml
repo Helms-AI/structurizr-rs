@@ -1,0 +1,29 @@
+# Plugin manifest for AssemblyScript Type-Safe Greeter
+# Demonstrates TypeScript-to-WASM compilation
+
+[plugin]
+name = "as-type-safe-greeter"
+version = "1.0.0"
+description = "Educational plugin showing how TypeScript developers can create WASM using AssemblyScript"
+wasm = "plugin.wasm"
+author = "structurizr-rs contributors"
+homepage = "https://github.com/structurizr/structurizr-rs"
+
+[capabilities]
+# Read workspace information
+read_workspace = true
+
+# No modification needed
+modify_workspace = false
+
+# No filesystem access
+filesystem = false
+
+# No network access
+network = false
+
+# Memory limit: 16MB (AssemblyScript includes GC)
+max_memory = 16777216
+
+# Execution timeout: 1 second
+max_time = 1000

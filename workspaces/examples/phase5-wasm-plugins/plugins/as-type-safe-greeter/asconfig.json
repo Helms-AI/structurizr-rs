@@ -1,0 +1,20 @@
+{
+  "targets": {
+    "release": {
+      "outFile": "plugin.wasm",
+      "textFile": "plugin.wat",
+      "optimize": true,
+      "noAssert": true,
+      "runtime": "minimal",
+      "exportRuntime": false
+    },
+    "debug": {
+      "outFile": "plugin.wasm",
+      "textFile": "plugin.wat",
+      "debug": true
+    }
+  },
+  "options": {
+    "bindings": "raw"
+  }
+}
