@@ -1,0 +1,29 @@
+# Plugin manifest for Zig Pattern Matcher
+# Demonstrates Zig's compile-time features and explicit control
+
+[plugin]
+name = "zig-pattern-matcher"
+version = "1.0.0"
+description = "Educational plugin showcasing Zig's comptime features and explicit memory control"
+wasm = "plugin.wasm"
+author = "structurizr-rs contributors"
+homepage = "https://github.com/structurizr/structurizr-rs"
+
+[capabilities]
+# Read workspace information
+read_workspace = true
+
+# No modification needed
+modify_workspace = false
+
+# No filesystem access
+filesystem = false
+
+# No network access
+network = false
+
+# Memory limit: 8MB (Zig has no GC, very efficient)
+max_memory = 8388608
+
+# Execution timeout: 1 second
+max_time = 1000
