@@ -18,6 +18,9 @@ pub mod server;
 pub mod state;
 pub mod watcher;
 
+#[cfg(feature = "mcp-proxy")]
+pub mod mcp_proxy;
+
 pub use discovery::{WorkspaceInfo, WorkspaceRegistry};
 pub use editor::EditorState;
 pub use error::{Error, Result};

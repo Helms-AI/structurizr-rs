@@ -5,11 +5,16 @@ edition.workspace = true
 license.workspace = true
 description = "Web server for Structurizr Lite"
 
+[features]
+default = []
+mcp-proxy = ["dep:reqwest", "dep:futures-util", "dep:tokio-tungstenite"]
+
 [dependencies]
 structurizr-core.workspace = true
 structurizr-dsl.workspace = true
 structurizr-render.workspace = true
 structurizr-export.workspace = true
+structurizr-config.workspace = true
 axum.workspace = true
 tokio.workspace = true
 tower.workspace = true
@@ -24,6 +29,11 @@ uuid.workspace = true
 regex-lite.workspace = true
 chrono.workspace = true
 comrak.workspace = true
+
+# Optional dependencies for MCP proxy
+reqwest = { version = "0.11", optional = true, features = ["json", "stream"] }
+futures-util = { version = "0.3", optional = true }
+tokio-tungstenite = { version = "0.24", optional = true }
 
 [dev-dependencies]
 pretty_assertions.workspace = true

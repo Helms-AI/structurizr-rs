@@ -1,0 +1,122 @@
+# Structurizr Configuration File
+# This file configures the structurizr-rs server and MCP integration.
+# It is committed to version control for team consistency.
+# Use environment variables for machine-specific overrides.
+
+[meta]
+# Configuration schema version
+version = "1.0"
+# Active profile (can be overridden with STRUCTURIZR_PROFILE env var)
+# Options: default, development, production
+profile = "default"
+
+[server]
+# Server port (can be overridden with STRUCTURIZR_PORT env var)
+port = 8585
+# Server host
+host = "127.0.0.1"
+# Workspaces directory (can be overridden with STRUCTURIZR_WORKSPACES_DIR env var)
+workspaces_dir = "workspaces"
+
+# MCP (Model Context Protocol) Configuration
+[mcp]
+# Enable MCP server functionality
+enabled = true
+# Automatically start MCP server when web server starts
+auto_start = true
+
+[mcp.server]
+# MCP server port (used internally)
+port = 8586
+# Transport type: stdio | websocket | sse
+transport = "sse"  # NEW DEFAULT (was "websocket")
+# Health check interval in milliseconds
+health_check_interval_ms = 30000
+
+[mcp.proxy]
+# Enable MCP proxy on web server (/mcp/* endpoints)
+enabled = true
+# Request timeout in milliseconds
+timeout_ms = 30000
+# Number of retry attempts for failed requests
+retry_attempts = 3
+
+[mcp.sse]
+# SSE-specific configuration
+keep_alive_interval_ms = 30000
+max_connections_per_client = 5
+request_timeout_ms = 30000
+# Custom reconnection pattern: 1s×4, 3s×3, 5s continuous
+reconnect_pattern = "custom"
+cookie_session = true
+
+[mcp.websocket]
+# WebSocket still available as fallback
+enabled = true
+
+[mcp.workspace_scope]
+# Workspace access mode:
+# - "all": All workspaces accessible (development default)
+# - "allow": Only workspaces matching patterns
+# - "deny": All except workspaces matching patterns
+mode = "all"
+
+# Glob patterns for workspace filtering
+# Use "!" prefix for exclusions
+patterns = [
+    # "team-a/*",        # Include all team-a workspaces
+    # "!team-a/secret",  # Exclude secret workspace
+    # "shared/**",       # Include nested shared workspaces
+]
+
+# Auto-include workspaces created during this session
+auto_include_created = true
+
+# Log all workspace access attempts
+audit_access = false
+
+# Collaboration Features
+[collaboration]
+# Enable real-time notifications
+enable_notifications = true
+# Transport for notifications: sse | websocket
+notification_transport = "sse"
+
+[collaboration.crdt]
+# Enable CRDT-based collaborative editing
+enabled = true
+# CRDT algorithm: yjs | automerge | custom
+algorithm = "yjs"
+# Synchronization interval in milliseconds
+sync_interval_ms = 1000
+# Conflict resolution: last-write-wins | operational-transform
+conflict_strategy = "last-write-wins"
+
+[collaboration.file_watch]
+# Enable file watching (auto-disabled in production)
+enabled = true
+# Debounce file changes in milliseconds
+debounce_ms = 500
+# File patterns to watch
+patterns = [
+    "*.dsl",
+    "docs/*.md",
+    "adrs/*.md",
+]
+
+# Profile-specific overrides
+[profiles.development]
+[profiles.development.mcp.workspace_scope]
+mode = "all"
+[profiles.development.collaboration.file_watch]
+enabled = true
+
+[profiles.production]
+[profiles.production.mcp.workspace_scope]
+mode = "deny"
+patterns = ["public/*", "demo/*"]
+audit_access = true
+[profiles.production.collaboration.file_watch]
+enabled = false
+[profiles.production.collaboration.crdt]
+enabled = false

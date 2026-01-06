@@ -11,9 +11,9 @@ use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 
 use structurizr_core::Workspace;
 use structurizr_dsl::parse_with_base_path;
-use structurizr_export::{JsonExporter, PlantUmlExporter, MermaidExporter};
+use structurizr_export::{JsonExporter, MermaidExporter, PlantUmlExporter};
 use structurizr_render::SvgRenderer;
-use structurizr_web::{Server, state::Config};
+use structurizr_web::{state::Config, Server};
 
 /// Structurizr - Software architecture visualization tool
 #[derive(Parser)]
@@ -92,6 +92,22 @@ enum Commands {
         #[arg(short, long, default_value = "workspace.dsl")]
         output: PathBuf,
     },
+
+    /// Start MCP server for AI assistant integration
+    #[cfg(feature = "mcp")]
+    McpServe {
+        /// Directory containing workspaces
+        #[arg(long, default_value = "workspaces")]
+        workspaces_dir: PathBuf,
+
+        /// Transport type (stdio, websocket, sse)
+        #[arg(long, default_value = "stdio")]
+        transport: String,
+
+        /// Port for websocket/sse transport
+        #[arg(short, long, default_value = "8586")]
+        port: u16,
+    },
 }
 
 #[tokio::main]
@@ -109,9 +125,16 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     match cli.command {
-        Commands::Serve { workspaces_dir, port, host } => {
+        Commands::Serve {
+            workspaces_dir,
+            port,
+            host,
+        } => {
             if !workspaces_dir.exists() {
-                eprintln!("Error: Workspaces directory '{}' does not exist.", workspaces_dir.display());
+                eprintln!(
+                    "Error: Workspaces directory '{}' does not exist.",
+                    workspaces_dir.display()
+                );
                 eprintln!("Create the directory and add workspace subdirectories, or use --workspaces-dir to specify a different path.");
                 std::process::exit(1);
             }
@@ -138,7 +161,10 @@ async fn main() -> anyhow::Result<()> {
                 Ok(workspace) => {
                     println!("✓ DSL Parsing: Valid workspace: {}", workspace.name);
                     println!("  People: {}", workspace.model().people.len());
-                    println!("  Software Systems: {}", workspace.model().software_systems.len());
+                    println!(
+                        "  Software Systems: {}",
+                        workspace.model().software_systems.len()
+                    );
                     println!("  Relationships: {}", workspace.model().relationships.len());
                     println!("  Views: {}", workspace.views().all_keys().len());
                     println!();
@@ -159,7 +185,11 @@ async fn main() -> anyhow::Result<()> {
                         println!();
 
                         // Group issues by severity
-                        for severity in &[structurizr_dsl::Severity::Error, structurizr_dsl::Severity::Warning, structurizr_dsl::Severity::Info] {
+                        for severity in &[
+                            structurizr_dsl::Severity::Error,
+                            structurizr_dsl::Severity::Warning,
+                            structurizr_dsl::Severity::Info,
+                        ] {
                             let issues = validation_result.issues_by_severity(*severity);
                             if !issues.is_empty() {
                                 for issue in issues {
@@ -168,7 +198,10 @@ async fn main() -> anyhow::Result<()> {
                                     } else {
                                         String::new()
                                     };
-                                    println!("  [{}] {}{}", issue.severity, issue.message, element_info);
+                                    println!(
+                                        "  [{}] {}{}",
+                                        issue.severity, issue.message, element_info
+                                    );
                                 }
                             }
                         }
@@ -177,7 +210,10 @@ async fn main() -> anyhow::Result<()> {
                         if validation_result.is_valid() {
                             println!("✓ Validation passed (warnings and info only)");
                         } else {
-                            eprintln!("✗ Validation failed with {} error(s)", validation_result.error_count);
+                            eprintln!(
+                                "✗ Validation failed with {} error(s)",
+                                validation_result.error_count
+                            );
                             std::process::exit(1);
                         }
                     } else {
@@ -191,7 +227,11 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Export { workspace, format, output } => {
+        Commands::Export {
+            workspace,
+            format,
+            output,
+        } => {
             let ws = load_workspace(&workspace)?;
 
             let exported = match format.to_lowercase().as_str() {
@@ -202,7 +242,10 @@ async fn main() -> anyhow::Result<()> {
                 }
                 "mermaid" => MermaidExporter::export_flowchart(&ws)?,
                 _ => {
-                    eprintln!("Unknown format: {}. Supported: json, plantuml, mermaid", format);
+                    eprintln!(
+                        "Unknown format: {}. Supported: json, plantuml, mermaid",
+                        format
+                    );
                     std::process::exit(1);
                 }
             };
@@ -215,7 +258,11 @@ async fn main() -> anyhow::Result<()> {
             }
         }
 
-        Commands::Render { workspace, view, output } => {
+        Commands::Render {
+            workspace,
+            view,
+            output,
+        } => {
             let ws = load_workspace(&workspace)?;
             let renderer = SvgRenderer::default();
 
@@ -302,6 +349,76 @@ async fn main() -> anyhow::Result<()> {
             println!("  1. Edit {} to define your architecture", output.display());
             println!("  2. Run 'structurizr serve' to view your diagrams");
         }
+
+        #[cfg(feature = "mcp")]
+        Commands::McpServe {
+            workspaces_dir,
+            transport,
+            port,
+        } => {
+            use structurizr_mcp::StructurizrMcpServer;
+
+            if !workspaces_dir.exists() {
+                eprintln!(
+                    "Error: Workspaces directory '{}' does not exist.",
+                    workspaces_dir.display()
+                );
+                eprintln!("Create the directory and add workspace subdirectories, or use --workspaces-dir to specify a different path.");
+                std::process::exit(1);
+            }
+
+            println!("Starting Structurizr MCP server...");
+            println!("  Workspaces directory: {}", workspaces_dir.display());
+            println!("  Transport: {}", transport);
+            if transport != "stdio" {
+                println!("  Port: {}", port);
+            }
+            println!();
+
+            let server = StructurizrMcpServer::new(workspaces_dir);
+
+            match transport.as_str() {
+                "stdio" => {
+                    println!("MCP server ready on stdio transport");
+                    println!("Configure your MCP client to connect to this process");
+                    server.run_stdio().await?;
+                }
+                #[cfg(feature = "mcp-websocket")]
+                "websocket" | "ws" => {
+                    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+                    println!("MCP server starting on WebSocket transport");
+                    println!("Connect via ws://localhost:{}", port);
+                    server.run_websocket(addr).await?;
+                }
+                #[cfg(feature = "mcp-sse")]
+                "sse" | "http" => {
+                    let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
+                    println!("MCP server starting on HTTP/SSE transport");
+                    println!("Endpoint: http://localhost:{}/mcp", port);
+                    println!("SSE stream: http://localhost:{}/mcp/sse", port);
+                    server.run_http(addr).await?;
+                }
+                #[cfg(not(feature = "mcp-websocket"))]
+                "websocket" | "ws" => {
+                    eprintln!("WebSocket transport not enabled. Rebuild with:");
+                    eprintln!("  cargo build --features mcp-websocket");
+                    std::process::exit(1);
+                }
+                #[cfg(not(feature = "mcp-sse"))]
+                "sse" | "http" => {
+                    eprintln!("HTTP/SSE transport not enabled. Rebuild with:");
+                    eprintln!("  cargo build --features mcp-sse");
+                    std::process::exit(1);
+                }
+                _ => {
+                    eprintln!("Unknown transport '{}'. Available transports:", transport);
+                    eprintln!("  stdio     - Standard input/output (default)");
+                    eprintln!("  websocket - WebSocket server (requires websocket feature)");
+                    eprintln!("  sse       - HTTP/SSE server (requires sse feature)");
+                    std::process::exit(1);
+                }
+            }
+        }
     }
 
     Ok(())
@@ -324,31 +441,66 @@ fn render_view(
     view_key: &str,
 ) -> anyhow::Result<String> {
     // Try to find the view by key across all view types
-    if let Some(view) = workspace.views().system_landscape_views.iter().find(|v| v.properties.key == view_key) {
+    if let Some(view) = workspace
+        .views()
+        .system_landscape_views
+        .iter()
+        .find(|v| v.properties.key == view_key)
+    {
         return Ok(renderer.render_system_landscape(workspace, view)?);
     }
 
-    if let Some(view) = workspace.views().system_context_views.iter().find(|v| v.properties.key == view_key) {
+    if let Some(view) = workspace
+        .views()
+        .system_context_views
+        .iter()
+        .find(|v| v.properties.key == view_key)
+    {
         return Ok(renderer.render_system_context(workspace, view)?);
     }
 
-    if let Some(view) = workspace.views().container_views.iter().find(|v| v.properties.key == view_key) {
+    if let Some(view) = workspace
+        .views()
+        .container_views
+        .iter()
+        .find(|v| v.properties.key == view_key)
+    {
         return Ok(renderer.render_container(workspace, view)?);
     }
 
-    if let Some(view) = workspace.views().component_views.iter().find(|v| v.properties.key == view_key) {
+    if let Some(view) = workspace
+        .views()
+        .component_views
+        .iter()
+        .find(|v| v.properties.key == view_key)
+    {
         return Ok(renderer.render_component(workspace, view)?);
     }
 
-    if let Some(view) = workspace.views().deployment_views.iter().find(|v| v.properties.key == view_key) {
+    if let Some(view) = workspace
+        .views()
+        .deployment_views
+        .iter()
+        .find(|v| v.properties.key == view_key)
+    {
         return Ok(renderer.render_deployment(workspace, view)?);
     }
 
-    if let Some(view) = workspace.views().dynamic_views.iter().find(|v| v.properties.key == view_key) {
+    if let Some(view) = workspace
+        .views()
+        .dynamic_views
+        .iter()
+        .find(|v| v.properties.key == view_key)
+    {
         return Ok(renderer.render_dynamic(workspace, view)?);
     }
 
-    if let Some(view) = workspace.views().filtered_views.iter().find(|v| v.properties.key == view_key) {
+    if let Some(view) = workspace
+        .views()
+        .filtered_views
+        .iter()
+        .find(|v| v.properties.key == view_key)
+    {
         return Ok(renderer.render_filtered(workspace, view)?);
     }
 

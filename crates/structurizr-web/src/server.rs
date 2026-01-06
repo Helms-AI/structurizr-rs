@@ -34,8 +34,11 @@ impl Server {
     ///
     /// Uses wildcard routing to support workspace IDs of any depth.
     /// For example: /w/my-workspace, /w/small/startup-saas, /w/team/project/app
-    fn build_multi_router(state: AppState) -> Router {
-        Router::new()
+    fn build_multi_router(
+        state: AppState,
+        #[cfg(feature = "mcp-proxy")] mcp_proxy: Option<std::sync::Arc<crate::mcp_proxy::McpProxyState>>,
+    ) -> Router {
+        let mut app = Router::new()
             // Workspaces index
             .route("/", get(handlers::workspaces_index))
             .route("/health", get(handlers::health))
@@ -47,8 +50,23 @@ impl Server {
             // The dispatcher parses the path to extract workspace_id and remaining segments
             .route("/w/*path", get(handlers::workspace_dispatch))
             .route("/w/*path", put(handlers::workspace_dispatch_put))
-            .route("/w/*path", post(handlers::workspace_dispatch_post))
+            .route("/w/*path", post(handlers::workspace_dispatch_post));
 
+        // Add MCP proxy routes if enabled
+        #[cfg(feature = "mcp-proxy")]
+        if let Some(proxy) = mcp_proxy {
+            app = app
+                .route("/mcp/health", get(crate::mcp_proxy::mcp_health))
+                .route("/mcp", post(crate::mcp_proxy::post_proxy_handler))
+                .route("/mcp/ws", get(crate::mcp_proxy::websocket_proxy_handler))
+                .route("/mcp/sse", get(crate::mcp_proxy::sse_proxy_handler))
+                // OAuth metadata endpoints - return proper JSON 404 to prevent OAuth flow
+                .route("/.well-known/oauth-authorization-server", get(crate::mcp_proxy::oauth_metadata_handler))
+                .route("/.well-known/oauth-protected-resource", get(crate::mcp_proxy::oauth_protected_resource_handler))
+                .layer(axum::Extension(proxy));
+        }
+
+        app
             // Middleware
             .layer(TraceLayer::new_for_http())
             .layer(CorsLayer::permissive())
@@ -81,7 +99,43 @@ impl Server {
         let _auto_save_handle = editor::start_auto_save_task(state.clone());
         info!("Auto-save task started - positions will be saved automatically");
 
-        let app = Self::build_multi_router(state);
+        // Initialize MCP proxy if enabled
+        #[cfg(feature = "mcp-proxy")]
+        let mcp_proxy = {
+            // Load configuration
+            let config = match structurizr_config::Config::load() {
+                Ok(config) => config,
+                Err(e) => {
+                    tracing::warn!("Failed to load config file: {}. Using defaults.", e);
+                    structurizr_config::Config::default()
+                }
+            };
+
+            if config.mcp.enabled {
+                match crate::mcp_proxy::McpProxyState::new(
+                    config.mcp.clone(),
+                    workspaces_dir.to_string_lossy().to_string(),
+                ).await {
+                    Ok(proxy) => {
+                        info!("MCP proxy initialized - available at /mcp/*");
+                        Some(std::sync::Arc::new(proxy))
+                    }
+                    Err(e) => {
+                        tracing::warn!("Failed to initialize MCP proxy: {}. MCP endpoints disabled.", e);
+                        None
+                    }
+                }
+            } else {
+                info!("MCP proxy disabled in configuration");
+                None
+            }
+        };
+
+        let app = Self::build_multi_router(
+            state,
+            #[cfg(feature = "mcp-proxy")]
+            mcp_proxy,
+        );
 
         let addr = self.config.address();
         info!("Starting Structurizr server at http://{}", addr);

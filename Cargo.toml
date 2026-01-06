@@ -7,6 +7,8 @@ members = [
     "crates/structurizr-export",
     "crates/structurizr-web",
     "crates/structurizr-scripting",
+    "crates/structurizr-mcp",
+    "crates/structurizr-config",
 ]
 
 [workspace.package]
@@ -83,6 +85,8 @@ structurizr-render = { path = "crates/structurizr-render" }
 structurizr-export = { path = "crates/structurizr-export" }
 structurizr-web = { path = "crates/structurizr-web" }
 structurizr-scripting = { path = "crates/structurizr-scripting" }
+structurizr-mcp = { path = "crates/structurizr-mcp" }
+structurizr-config = { path = "crates/structurizr-config" }
 
 [package]
 name = "structurizr-rs"
@@ -97,9 +101,17 @@ name = "structurizr"
 path = "src/main.rs"
 
 [features]
-default = ["scripting"]
+default = ["scripting", "mcp-all"]
 # Enable script execution in DSL files (!script lua/groovy directives)
 scripting = ["structurizr-dsl/scripting"]
+# Enable MCP server for AI assistant integration
+mcp = ["dep:structurizr-mcp", "structurizr-web/mcp-proxy"]
+# Enable WebSocket transport for MCP server
+mcp-websocket = ["mcp", "structurizr-mcp/websocket"]
+# Enable HTTP/SSE transport for MCP server
+mcp-sse = ["mcp", "structurizr-mcp/sse"]
+# Enable all MCP transports
+mcp-all = ["mcp", "mcp-websocket", "mcp-sse"]
 
 [dependencies]
 structurizr-core.workspace = true
@@ -107,6 +119,7 @@ structurizr-dsl.workspace = true
 structurizr-render.workspace = true
 structurizr-export.workspace = true
 structurizr-web.workspace = true
+structurizr-mcp = { workspace = true, optional = true }
 clap.workspace = true
 tokio.workspace = true
 tracing.workspace = true

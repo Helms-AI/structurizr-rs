@@ -1,0 +1,30 @@
+[package]
+name = "structurizr-config"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Configuration management for structurizr-rs"
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+tokio.workspace = true
+
+# For config file discovery
+dirs = "5.0"
+
+# For glob pattern matching
+globset = "0.4"
+
+# For environment variable interpolation
+envsubst = "0.2"
+
+# For unique IDs in CRDT
+uuid.workspace = true
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+tempfile = "3"

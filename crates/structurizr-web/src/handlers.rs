@@ -1044,6 +1044,7 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
 <html>
 <head>
     <title>Structurizr Workspaces</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
     <style>
         * {{ box-sizing: border-box; }}
         body {{
@@ -1058,6 +1059,10 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
             color: white;
             padding: 40px 20px;
             text-align: center;
+            position: relative;
+        }}
+        .header-content {{
+            position: relative;
         }}
         .header h1 {{
             margin: 0 0 10px 0;
@@ -1068,6 +1073,32 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
             margin: 0;
             opacity: 0.8;
             font-size: 1.1rem;
+        }}
+        .mcp-btn {{
+            position: absolute;
+            top: 0;
+            right: 0;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 18px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.25);
+            border-radius: 8px;
+            color: white;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+        }}
+        .mcp-btn:hover {{
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+            transform: translateY(-1px);
+        }}
+        .mcp-btn svg {{
+            width: 18px;
+            height: 18px;
         }}
         .container {{
             max-width: 1400px;
@@ -1157,17 +1188,695 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
             border-bottom: 2px solid #e0e0e0;
             text-transform: capitalize;
         }}
+
+        /* MCP Modal Styles */
+        .mcp-modal {{
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+        }}
+        .mcp-modal.open {{
+            display: flex;
+        }}
+        .mcp-modal-content {{
+            background: white;
+            border-radius: 16px;
+            width: 95%;
+            max-width: 1100px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 25px 80px rgba(0, 0, 0, 0.4);
+            overflow: hidden;
+        }}
+        .mcp-modal-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 24px 28px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+        }}
+        .mcp-modal-header h2 {{
+            margin: 0;
+            font-size: 1.5rem;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }}
+        .mcp-modal-header h2 svg {{
+            width: 28px;
+            height: 28px;
+        }}
+        .mcp-close-btn {{
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            cursor: pointer;
+            padding: 8px;
+            border-radius: 8px;
+            color: white;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+        .mcp-close-btn:hover {{
+            background: rgba(255, 255, 255, 0.2);
+        }}
+        .mcp-close-btn svg {{
+            width: 20px;
+            height: 20px;
+        }}
+        .mcp-tabs {{
+            display: flex;
+            padding: 0 28px;
+            border-bottom: 1px solid #e0e0e0;
+            background: #fafafa;
+        }}
+        .mcp-tab {{
+            background: none;
+            border: none;
+            padding: 16px 24px;
+            font-size: 14px;
+            font-weight: 600;
+            color: #666;
+            cursor: pointer;
+            border-bottom: 3px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+        }}
+        .mcp-tab:hover {{
+            color: #333;
+            background: rgba(0, 0, 0, 0.02);
+        }}
+        .mcp-tab.active {{
+            color: #0066cc;
+            border-bottom-color: #0066cc;
+            background: white;
+        }}
+        .mcp-tab-content {{
+            flex: 1;
+            overflow-y: auto;
+            padding: 28px;
+        }}
+        .ide-selector {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 12px;
+            margin-bottom: 28px;
+        }}
+        .ide-btn {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 18px;
+            background: #f8f9fa;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: #333;
+            transition: all 0.2s;
+        }}
+        .ide-btn:hover {{
+            background: #e8f4fd;
+            border-color: #a8d4ff;
+        }}
+        .ide-btn.active {{
+            background: #e8f4fd;
+            border-color: #0066cc;
+            color: #0066cc;
+            box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+        }}
+        .ide-btn svg {{
+            width: 18px;
+            height: 18px;
+        }}
+        .config-section {{
+            margin-top: 8px;
+        }}
+        .config-section h4 {{
+            margin: 0 0 8px 0;
+            font-size: 16px;
+            color: #1a1a2e;
+        }}
+        .config-path {{
+            color: #666;
+            font-size: 13px;
+            margin-bottom: 12px;
+        }}
+        .config-path code {{
+            background: #f5f5f5;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+        }}
+        .config-block {{
+            background: #1e1e1e;
+            border-radius: 10px;
+            overflow: hidden;
+        }}
+        .config-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 16px;
+            background: #2d2d2d;
+            color: #a0a0a0;
+            font-size: 13px;
+        }}
+        .copy-btn {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 14px;
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            border-radius: 6px;
+            color: #a0a0a0;
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+        }}
+        .copy-btn:hover {{
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+        }}
+        .copy-btn svg {{
+            width: 14px;
+            height: 14px;
+        }}
+        .config-code {{
+            padding: 20px;
+            margin: 0;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 13px;
+            line-height: 1.7;
+            color: #d4d4d4;
+            overflow-x: auto;
+            white-space: pre;
+        }}
+        .info-box {{
+            margin-top: 24px;
+            padding: 18px 20px;
+            background: linear-gradient(135deg, #e8f4fd 0%, #f0f8ff 100%);
+            border-radius: 10px;
+            border-left: 4px solid #0066cc;
+        }}
+        .info-box h4 {{
+            margin: 0 0 8px 0;
+            color: #0066cc;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 14px;
+        }}
+        .info-box h4 svg {{
+            width: 18px;
+            height: 18px;
+        }}
+        .info-box p {{
+            margin: 0;
+            font-size: 14px;
+            color: #333;
+            line-height: 1.5;
+        }}
+        .info-box code {{
+            background: white;
+            padding: 3px 8px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 13px;
+        }}
+        /* Method tabs within IDE config */
+        .method-tabs {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 20px;
+            padding-bottom: 16px;
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        .method-tab {{
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 10px 16px;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 13px;
+            font-weight: 500;
+            color: #555;
+            transition: all 0.2s;
+        }}
+        .method-tab:hover {{
+            background: #e8f4fd;
+            border-color: #a8d4ff;
+            color: #0066cc;
+        }}
+        .method-tab.active {{
+            background: #e8f4fd;
+            border-color: #0066cc;
+            color: #0066cc;
+            box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+        }}
+        .method-tab svg {{
+            width: 16px;
+            height: 16px;
+        }}
+        .method-tab .recommended-badge {{
+            background: #22c55e;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+            margin-left: 4px;
+        }}
+        .method-content {{
+            margin-top: 16px;
+        }}
+        .method-description {{
+            color: #666;
+            font-size: 14px;
+            margin-bottom: 16px;
+            line-height: 1.5;
+        }}
+        .command-list {{
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }}
+        .command-item {{
+            background: #1e1e1e;
+            border-radius: 8px;
+            overflow: hidden;
+        }}
+        .command-label {{
+            background: #2d2d2d;
+            color: #a0a0a0;
+            padding: 8px 14px;
+            font-size: 12px;
+            font-weight: 500;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }}
+        .command-code {{
+            padding: 14px 16px;
+            font-family: 'SF Mono', Monaco, Consolas, monospace;
+            font-size: 13px;
+            color: #d4d4d4;
+            overflow-x: auto;
+            white-space: pre;
+            margin: 0;
+        }}
+        .command-copy-btn {{
+            background: rgba(255, 255, 255, 0.08);
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            color: #a0a0a0;
+            cursor: pointer;
+            font-size: 11px;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            transition: all 0.2s;
+        }}
+        .command-copy-btn:hover {{
+            background: rgba(255, 255, 255, 0.15);
+            color: white;
+        }}
+        .command-copy-btn svg {{
+            width: 12px;
+            height: 12px;
+        }}
+        .steps-list {{
+            background: #f8f9fa;
+            border-radius: 10px;
+            padding: 20px;
+            counter-reset: step-counter;
+        }}
+        .steps-list ol {{
+            margin: 0;
+            padding-left: 0;
+            list-style: none;
+        }}
+        .steps-list li {{
+            counter-increment: step-counter;
+            display: flex;
+            align-items: flex-start;
+            gap: 14px;
+            padding: 12px 0;
+            border-bottom: 1px solid #e5e5e5;
+            font-size: 14px;
+            color: #333;
+            line-height: 1.5;
+        }}
+        .steps-list li:last-child {{
+            border-bottom: none;
+            padding-bottom: 0;
+        }}
+        .steps-list li:first-child {{
+            padding-top: 0;
+        }}
+        .steps-list li::before {{
+            content: counter(step-counter);
+            background: #0066cc;
+            color: white;
+            width: 26px;
+            height: 26px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 13px;
+            font-weight: 600;
+            flex-shrink: 0;
+        }}
+        .steps-list li code {{
+            background: #e8f4fd;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 13px;
+            color: #0066cc;
+        }}
+        .steps-note {{
+            margin-top: 16px;
+            padding: 12px 16px;
+            background: #fef3c7;
+            border-radius: 8px;
+            border-left: 3px solid #f59e0b;
+            font-size: 13px;
+            color: #92400e;
+        }}
+        .chat-command {{
+            background: #f3f4f6;
+            border-radius: 10px;
+            padding: 20px;
+        }}
+        .chat-command-label {{
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 12px;
+        }}
+        .chat-prompt {{
+            background: white;
+            border: 1px solid #e0e0e0;
+            border-radius: 8px;
+            padding: 16px;
+            font-family: inherit;
+            font-size: 14px;
+            color: #333;
+            position: relative;
+        }}
+        .chat-prompt::before {{
+            content: '>';
+            position: absolute;
+            left: 16px;
+            top: 16px;
+            color: #0066cc;
+            font-weight: bold;
+        }}
+        .chat-prompt code {{
+            background: #e8f4fd;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 13px;
+        }}
+        .tool-category {{
+            margin-bottom: 28px;
+        }}
+        .tool-category-header {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 17px;
+            color: #1a1a2e;
+            margin: 0 0 14px 0;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #e0e0e0;
+        }}
+        .tool-category-header svg {{
+            width: 20px;
+            height: 20px;
+            color: #0066cc;
+        }}
+        .tool-count {{
+            background: #e8f4fd;
+            color: #0066cc;
+            padding: 2px 10px;
+            border-radius: 12px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: auto;
+        }}
+        .accordion {{
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            overflow: hidden;
+        }}
+        .accordion-item {{
+            border-bottom: 1px solid #e0e0e0;
+        }}
+        .accordion-item:last-child {{
+            border-bottom: none;
+        }}
+        .accordion-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 18px;
+            background: #fafafa;
+            cursor: pointer;
+            transition: background 0.2s;
+        }}
+        .accordion-header:hover {{
+            background: #f0f0f0;
+        }}
+        .accordion-title {{
+            font-weight: 600;
+            color: #333;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 14px;
+        }}
+        .accordion-chevron {{
+            transition: transform 0.2s;
+            color: #666;
+        }}
+        .accordion-item.open .accordion-chevron {{
+            transform: rotate(180deg);
+        }}
+        .accordion-content {{
+            display: none;
+            padding: 18px;
+            background: white;
+            border-top: 1px solid #eee;
+        }}
+        .accordion-item.open .accordion-content {{
+            display: block;
+        }}
+        .tool-description {{
+            color: #555;
+            margin: 0 0 14px 0;
+            font-size: 14px;
+            line-height: 1.5;
+        }}
+        .tool-params {{
+            background: #f8f9fa;
+            border-radius: 8px;
+            padding: 14px 16px;
+        }}
+        .tool-params h5 {{
+            margin: 0 0 10px 0;
+            font-size: 13px;
+            color: #333;
+            font-weight: 600;
+        }}
+        .param-list {{
+            margin: 0;
+            padding-left: 0;
+            list-style: none;
+        }}
+        .param-list li {{
+            margin-bottom: 8px;
+            font-size: 13px;
+            display: flex;
+            align-items: baseline;
+            gap: 8px;
+        }}
+        .param-name {{
+            font-family: 'SF Mono', Monaco, monospace;
+            color: #0066cc;
+            font-weight: 500;
+        }}
+        .param-type {{
+            color: #666;
+            font-size: 12px;
+        }}
+        .param-required {{
+            background: #fee2e2;
+            color: #dc2626;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+            font-weight: 600;
+        }}
+        .param-optional {{
+            background: #f3f4f6;
+            color: #6b7280;
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 11px;
+        }}
+        .example-section {{
+            margin-bottom: 36px;
+        }}
+        .example-section-header {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 18px;
+            color: #1a1a2e;
+            margin: 0 0 18px 0;
+        }}
+        .example-section-header svg {{
+            width: 22px;
+            height: 22px;
+        }}
+        .difficulty-beginner {{ color: #22c55e; }}
+        .difficulty-intermediate {{ color: #f59e0b; }}
+        .difficulty-complex {{ color: #ef4444; }}
+        .example-card {{
+            background: #fafafa;
+            border: 1px solid #e0e0e0;
+            border-radius: 10px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }}
+        .example-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 14px 18px;
+            cursor: pointer;
+            transition: background 0.2s;
+        }}
+        .example-header:hover {{
+            background: #f0f0f0;
+        }}
+        .example-title {{
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }}
+        .example-content {{
+            display: none;
+            padding: 18px;
+            background: white;
+            border-top: 1px solid #e0e0e0;
+        }}
+        .example-card.open .example-content {{
+            display: block;
+        }}
+        .example-prompt {{
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            border-left: 4px solid #0066cc;
+            padding: 16px 18px;
+            margin-bottom: 16px;
+            border-radius: 0 8px 8px 0;
+        }}
+        .example-prompt-label {{
+            display: block;
+            font-size: 11px;
+            font-weight: 600;
+            color: #0066cc;
+            margin-bottom: 6px;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .example-prompt-text {{
+            font-size: 14px;
+            color: #1e3a5f;
+            line-height: 1.5;
+            font-style: italic;
+        }}
+        .tools-section {{
+            margin-top: 4px;
+        }}
+        .tools-label {{
+            font-size: 12px;
+            font-weight: 600;
+            color: #666;
+            margin-bottom: 8px;
+        }}
+        .tools-triggered {{
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }}
+        .tool-tag {{
+            background: #f3f4f6;
+            padding: 5px 12px;
+            border-radius: 16px;
+            font-size: 12px;
+            font-family: 'SF Mono', Monaco, monospace;
+            color: #4b5563;
+            border: 1px solid #e5e7eb;
+        }}
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Structurizr Workspaces</h1>
-        <p>{} workspace{} available</p>
+        <div class="header-content">
+            <button class="mcp-btn" onclick="openMcpModal()">
+                <i data-lucide="cpu"></i>
+                MCP
+            </button>
+            <h1>Structurizr Workspaces</h1>
+            <p>{} workspace{} available</p>
+        </div>
     </div>
     <div class="container">
         {}
     </div>
+
+    <!-- MCP Documentation Modal -->
+    <div class="mcp-modal" id="mcp-modal" onclick="if(event.target===this)closeMcpModal()">
+        <div class="mcp-modal-content">
+            <div class="mcp-modal-header">
+                <h2><i data-lucide="cpu"></i> MCP Integration</h2>
+                <button class="mcp-close-btn" onclick="closeMcpModal()">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="mcp-tabs">
+                <button class="mcp-tab active" data-tab="installation" onclick="switchMcpTab('installation')">Installation</button>
+                <button class="mcp-tab" data-tab="documentation" onclick="switchMcpTab('documentation')">Documentation</button>
+                <button class="mcp-tab" data-tab="examples" onclick="switchMcpTab('examples')">Examples</button>
+            </div>
+            <div class="mcp-tab-content" id="mcp-tab-content">
+                <!-- Content rendered by JavaScript -->
+            </div>
+        </div>
+    </div>
+
     <script>
+    // Hot-reload WebSocket
     (function() {{
         const wsProtocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${{wsProtocol}}//${{location.host}}/ws/reload`;
@@ -1210,6 +1919,722 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
 
         connect();
     }})();
+
+    // MCP Modal State
+    let selectedIde = 'claude-code';
+
+    // IDE Configurations with multiple installation methods
+    const ideConfigs = {{
+        'claude-code': {{
+            name: 'Claude Code',
+            icon: 'terminal',
+            methods: [
+                {{
+                    name: 'CLI Command',
+                    icon: 'terminal',
+                    recommended: true,
+                    description: 'Add MCP server using the claude command',
+                    type: 'command',
+                    commands: [
+                        {{ label: 'Add server (user scope)', code: 'claude mcp add structurizr --transport sse http://localhost:8585/mcp/sse --scope user' }},
+                        {{ label: 'Add server (project scope)', code: 'claude mcp add structurizr --transport sse http://localhost:8585/mcp/sse --scope project' }},
+                        {{ label: 'List configured servers', code: 'claude mcp list' }},
+                        {{ label: 'Remove server', code: 'claude mcp remove structurizr' }}
+                    ]
+                }},
+                {{
+                    name: 'JSON Config',
+                    icon: 'file-json',
+                    description: 'Manual configuration via JSON file',
+                    type: 'config',
+                    path: '~/.claude.json or .mcp.json (project)',
+                    config: `{{
+  "mcpServers": {{
+    "structurizr": {{
+      "type": "sse",
+      "url": "http://localhost:8585/mcp/sse"
+    }}
+  }}
+}}`
+                }}
+            ]
+        }},
+        'claude-desktop': {{
+            name: 'Claude Desktop',
+            icon: 'monitor',
+            methods: [
+                {{
+                    name: 'JSON Config',
+                    icon: 'file-json',
+                    recommended: true,
+                    description: 'Add to Claude Desktop configuration file',
+                    type: 'config',
+                    path: '~/Library/Application Support/Claude/claude_desktop_config.json',
+                    pathWindows: '%APPDATA%\\\\Claude\\\\claude_desktop_config.json',
+                    config: `{{
+  "mcpServers": {{
+    "structurizr": {{
+      "command": "structurizr",
+      "args": ["mcp-serve", "--workspaces-dir", "./workspaces"]
+    }}
+  }}
+}}`
+                }}
+            ]
+        }},
+        'cursor': {{
+            name: 'Cursor',
+            icon: 'mouse-pointer-2',
+            methods: [
+                {{
+                    name: 'Command Palette',
+                    icon: 'command',
+                    recommended: true,
+                    description: 'Add via Cursor Command Palette',
+                    type: 'steps',
+                    steps: [
+                        'Open Command Palette: Cmd/Ctrl + Shift + P',
+                        'Search for "MCP: Add Server"',
+                        'Select "HTTP (server-sent events)"',
+                        'Enter URL: http://localhost:8585/mcp/sse',
+                        'Enter name: structurizr'
+                    ]
+                }},
+                {{
+                    name: 'Settings UI',
+                    icon: 'settings',
+                    description: 'Configure via Cursor Settings',
+                    type: 'steps',
+                    steps: [
+                        'Open File → Preferences → Cursor Settings',
+                        'Select "MCP" option',
+                        'Click "Add MCP Server"',
+                        'Configure server details'
+                    ]
+                }},
+                {{
+                    name: 'JSON Config',
+                    icon: 'file-json',
+                    description: 'Manual configuration via JSON file',
+                    type: 'config',
+                    path: '~/.cursor/mcp.json (global) or .cursor/mcp.json (project)',
+                    config: `{{
+  "mcpServers": {{
+    "structurizr": {{
+      "type": "sse",
+      "url": "http://localhost:8585/mcp/sse"
+    }}
+  }}
+}}`
+                }}
+            ]
+        }},
+        'windsurf': {{
+            name: 'Windsurf',
+            icon: 'wind',
+            methods: [
+                {{
+                    name: 'Command Palette',
+                    icon: 'command',
+                    recommended: true,
+                    description: 'Add via Windsurf Command Palette',
+                    type: 'steps',
+                    steps: [
+                        'Open Command Palette: Cmd/Ctrl + Shift + P',
+                        'Search for "MCP: Add Server"',
+                        'Select "HTTP (server-sent events)"',
+                        'Enter URL: http://localhost:8585/mcp/sse'
+                    ]
+                }},
+                {{
+                    name: 'Settings UI',
+                    icon: 'settings',
+                    description: 'Configure via Windsurf Settings',
+                    type: 'steps',
+                    steps: [
+                        'Open Settings: Cmd/Ctrl + ,',
+                        'Scroll to "Plugins (MCP servers)" under Cascade',
+                        'Click "Add Server" button',
+                        'Click "Add custom server +"',
+                        'Configure server details'
+                    ]
+                }},
+                {{
+                    name: 'JSON Config',
+                    icon: 'file-json',
+                    description: 'Manual configuration via JSON file',
+                    type: 'config',
+                    path: '~/.codeium/windsurf/mcp_config.json',
+                    pathWindows: '%USERPROFILE%\\\\.codeium\\\\windsurf\\\\mcp_config.json',
+                    config: `{{
+  "mcpServers": {{
+    "structurizr": {{
+      "type": "sse",
+      "url": "http://localhost:8585/mcp/sse"
+    }}
+  }}
+}}`
+                }}
+            ]
+        }},
+        'vscode': {{
+            name: 'VS Code',
+            icon: 'code',
+            methods: [
+                {{
+                    name: 'Command Palette',
+                    icon: 'command',
+                    recommended: true,
+                    description: 'Add via VS Code Command Palette',
+                    type: 'steps',
+                    steps: [
+                        'Open Command Palette: Cmd/Ctrl + Shift + P',
+                        'Search for "MCP: Add Server"',
+                        'Select "HTTP (HTTP or Server-Sent events)"',
+                        'Enter URL: http://localhost:8585/mcp/sse',
+                        'Choose scope: Workspace (recommended) or User'
+                    ]
+                }},
+                {{
+                    name: 'Browse Servers',
+                    icon: 'search',
+                    description: 'Browse available MCP servers',
+                    type: 'steps',
+                    steps: [
+                        'Open Extensions view: Cmd/Ctrl + Shift + X',
+                        'Enter @mcp in search field',
+                        'Or run "MCP: Browse Servers" from Command Palette'
+                    ]
+                }},
+                {{
+                    name: 'JSON Config',
+                    icon: 'file-json',
+                    description: 'Manual configuration via JSON file',
+                    type: 'config',
+                    path: '.vscode/mcp.json (workspace)',
+                    config: `{{
+  "servers": {{
+    "structurizr": {{
+      "type": "sse",
+      "url": "http://localhost:8585/mcp/sse"
+    }}
+  }}
+}}`
+                }}
+            ]
+        }},
+        'zed': {{
+            name: 'Zed',
+            icon: 'zap',
+            methods: [
+                {{
+                    name: 'Settings JSON',
+                    icon: 'file-json',
+                    recommended: true,
+                    description: 'Configure via Zed settings file',
+                    type: 'config',
+                    path: '~/.config/zed/settings.json',
+                    note: 'Zed currently supports stdio-based MCP servers. SSE support may be limited.',
+                    config: `{{
+  "context_servers": {{
+    "structurizr": {{
+      "command": {{
+        "path": "structurizr",
+        "args": ["mcp-serve", "--workspaces-dir", "./workspaces"]
+      }}
+    }}
+  }}
+}}`
+                }}
+            ]
+        }},
+        'cline': {{
+            name: 'Cline',
+            icon: 'terminal-square',
+            methods: [
+                {{
+                    name: 'Chat Command',
+                    icon: 'message-circle',
+                    recommended: true,
+                    description: 'Ask Cline to add the tool via chat',
+                    type: 'chat',
+                    prompt: 'Add a tool that connects to structurizr-rs for architecture diagrams at http://localhost:8585/mcp/sse'
+                }},
+                {{
+                    name: 'Settings UI',
+                    icon: 'settings',
+                    description: 'Configure via Cline settings panel',
+                    type: 'steps',
+                    steps: [
+                        'Click "MCP Servers" icon in Cline navigation bar',
+                        'Select the "Configure" tab',
+                        'Click "Advanced MCP Settings" link',
+                        'Add server configuration'
+                    ]
+                }},
+                {{
+                    name: 'JSON Config',
+                    icon: 'file-json',
+                    description: 'Manual configuration via Cline settings',
+                    type: 'config',
+                    path: 'VS Code Settings > Cline > MCP Servers',
+                    config: `{{
+  "mcpServers": {{
+    "structurizr": {{
+      "type": "sse",
+      "url": "http://localhost:8585/mcp/sse"
+    }}
+  }}
+}}`
+                }}
+            ]
+        }},
+        'jetbrains': {{
+            name: 'JetBrains',
+            icon: 'box',
+            methods: [
+                {{
+                    name: 'Settings UI',
+                    icon: 'settings',
+                    recommended: true,
+                    description: 'Configure via JetBrains IDE settings',
+                    type: 'steps',
+                    steps: [
+                        'Open Settings: Cmd/Ctrl + ,',
+                        'Navigate to Tools > AI Assistant > Model Context Protocol (MCP)',
+                        'Click "+" to add new server',
+                        'Set Name: structurizr',
+                        'Set Type: SSE',
+                        'Set URL: http://localhost:8585/mcp/sse',
+                        'Click Apply'
+                    ],
+                    note: 'Requires IntelliJ IDEA 2025.1+ with AI Assistant plugin'
+                }},
+                {{
+                    name: 'Import from Claude',
+                    icon: 'download',
+                    description: 'Import existing Claude Desktop config',
+                    type: 'steps',
+                    steps: [
+                        'Open Settings: Cmd/Ctrl + ,',
+                        'Navigate to Tools > AI Assistant > MCP',
+                        'Click "Import from Claude"',
+                        'Select servers to import',
+                        'Click Apply'
+                    ]
+                }}
+            ]
+        }}
+    }};
+
+    let selectedMethod = 0;
+
+    // MCP Tools Data
+    const mcpTools = {{
+        workspace: {{
+            name: 'Workspace Management',
+            icon: 'folder',
+            tools: [
+                {{ name: 'workspace_list', desc: 'List all available workspaces with metadata', params: [{{ name: 'recursive', type: 'boolean', required: false }}] }},
+                {{ name: 'workspace_load', desc: 'Load a workspace and get detailed statistics', params: [{{ name: 'workspace_id', type: 'string', required: true }}] }},
+                {{ name: 'workspace_validate', desc: 'Validate workspace for errors and warnings', params: [{{ name: 'workspace_id', type: 'string', required: true }}] }},
+                {{ name: 'workspace_export_json', desc: 'Export workspace to Structurizr JSON format', params: [{{ name: 'workspace_id', type: 'string', required: true }}] }},
+                {{ name: 'workspace_get_model', desc: 'Get model elements (people, systems, containers)', params: [{{ name: 'workspace_id', type: 'string', required: true }}] }},
+                {{ name: 'workspace_get_views', desc: 'List all views defined in a workspace', params: [{{ name: 'workspace_id', type: 'string', required: true }}] }},
+                {{ name: 'workspace_search', desc: 'Search for elements by name or description', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'query', type: 'string', required: true }}] }}
+            ]
+        }},
+        model: {{
+            name: 'Model Manipulation',
+            icon: 'boxes',
+            tools: [
+                {{ name: 'model_add_person', desc: 'Add a new person to the workspace model', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'name', type: 'string', required: true }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'external', type: 'boolean', required: false }}] }},
+                {{ name: 'model_add_system', desc: 'Add a new software system to the workspace', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'name', type: 'string', required: true }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'external', type: 'boolean', required: false }}] }},
+                {{ name: 'model_add_container', desc: 'Add a container to an existing software system', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'system_name', type: 'string', required: true }}, {{ name: 'name', type: 'string', required: true }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'technology', type: 'string', required: false }}] }},
+                {{ name: 'model_add_component', desc: 'Add a component to an existing container', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'system_name', type: 'string', required: true }}, {{ name: 'container_name', type: 'string', required: true }}, {{ name: 'name', type: 'string', required: true }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'technology', type: 'string', required: false }}] }},
+                {{ name: 'model_add_relationship', desc: 'Add a relationship between two elements', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'source_name', type: 'string', required: true }}, {{ name: 'destination_name', type: 'string', required: true }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'technology', type: 'string', required: false }}] }},
+                {{ name: 'model_update_element', desc: 'Update properties of an existing element', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'element_name', type: 'string', required: true }}, {{ name: 'new_name', type: 'string', required: false }}, {{ name: 'new_description', type: 'string', required: false }}, {{ name: 'new_technology', type: 'string', required: false }}] }},
+                {{ name: 'model_remove_element', desc: 'Remove an element from the workspace model', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'element_name', type: 'string', required: true }}, {{ name: 'cascade_relationships', type: 'boolean', required: false }}] }}
+            ]
+        }},
+        persistence: {{
+            name: 'Persistence',
+            icon: 'save',
+            tools: [
+                {{ name: 'workspace_save_json', desc: 'Save workspace to Structurizr-compatible JSON', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'filename', type: 'string', required: false }}] }},
+                {{ name: 'workspace_save_dsl', desc: 'Save workspace to Structurizr DSL format', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'filename', type: 'string', required: false }}] }},
+                {{ name: 'workspace_discard_changes', desc: 'Discard pending modifications and revert', params: [{{ name: 'workspace_id', type: 'string', required: true }}] }}
+            ]
+        }},
+        export: {{
+            name: 'Render & Export',
+            icon: 'download',
+            tools: [
+                {{ name: 'render_svg', desc: 'Render a view to SVG format', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}] }},
+                {{ name: 'export_plantuml', desc: 'Export a view to PlantUML C4 format', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}] }},
+                {{ name: 'export_mermaid', desc: 'Export a view to Mermaid format', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}] }},
+                {{ name: 'export_d2', desc: 'Export a view to D2 format', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}] }},
+                {{ name: 'export_dot', desc: 'Export a view to DOT/Graphviz format', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}] }}
+            ]
+        }},
+        views: {{
+            name: 'View Management',
+            icon: 'layout',
+            tools: [
+                {{ name: 'view_create_system_landscape', desc: 'Create a system landscape view', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'title', type: 'string', required: false }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'auto_layout', type: 'boolean', required: false }}] }},
+                {{ name: 'view_create_system_context', desc: 'Create a system context view', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'system_name', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'title', type: 'string', required: false }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'auto_layout', type: 'boolean', required: false }}] }},
+                {{ name: 'view_create_container', desc: 'Create a container view', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'system_name', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'title', type: 'string', required: false }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'auto_layout', type: 'boolean', required: false }}] }},
+                {{ name: 'view_create_component', desc: 'Create a component view', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'system_name', type: 'string', required: true }}, {{ name: 'container_name', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'title', type: 'string', required: false }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'auto_layout', type: 'boolean', required: false }}] }},
+                {{ name: 'view_create_dynamic', desc: 'Create a dynamic view showing interactions', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'title', type: 'string', required: false }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'scope_element', type: 'string', required: false }}, {{ name: 'auto_layout', type: 'boolean', required: false }}] }},
+                {{ name: 'view_create_deployment', desc: 'Create a deployment view', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'environment', type: 'string', required: true }}, {{ name: 'title', type: 'string', required: false }}, {{ name: 'description', type: 'string', required: false }}, {{ name: 'system_name', type: 'string', required: false }}, {{ name: 'auto_layout', type: 'boolean', required: false }}] }},
+                {{ name: 'view_add_element', desc: 'Add an element to a view', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'element_name', type: 'string', required: true }}] }},
+                {{ name: 'view_add_all_elements', desc: 'Add all elements to a view (include *)', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}] }},
+                {{ name: 'view_remove_element', desc: 'Remove an element from a view', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'element_name', type: 'string', required: true }}] }},
+                {{ name: 'view_set_auto_layout', desc: 'Configure auto-layout for a view', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'view_key', type: 'string', required: true }}, {{ name: 'enabled', type: 'boolean', required: true }}, {{ name: 'direction', type: 'string', required: false }}] }}
+            ]
+        }},
+        docs: {{
+            name: 'Documentation',
+            icon: 'file-text',
+            tools: [
+                {{ name: 'docs_add_section', desc: 'Add a documentation section to workspace', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'title', type: 'string', required: true }}, {{ name: 'content', type: 'string', required: true }}, {{ name: 'order', type: 'number', required: false }}] }},
+                {{ name: 'docs_update_section', desc: 'Update an existing documentation section', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'section_title', type: 'string', required: true }}, {{ name: 'new_title', type: 'string', required: false }}, {{ name: 'new_content', type: 'string', required: false }}] }},
+                {{ name: 'docs_remove_section', desc: 'Remove a documentation section', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'section_title', type: 'string', required: true }}] }},
+                {{ name: 'docs_list_sections', desc: 'List all documentation sections', params: [{{ name: 'workspace_id', type: 'string', required: true }}] }}
+            ]
+        }},
+        adrs: {{
+            name: 'Architecture Decision Records',
+            icon: 'clipboard-list',
+            tools: [
+                {{ name: 'adr_create', desc: 'Create a new Architecture Decision Record', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'adr_id', type: 'string', required: true }}, {{ name: 'title', type: 'string', required: true }}, {{ name: 'content', type: 'string', required: true }}, {{ name: 'status', type: 'string', required: false }}, {{ name: 'date', type: 'string', required: false }}] }},
+                {{ name: 'adr_update', desc: 'Update an existing ADR', params: [{{ name: 'workspace_id', type: 'string', required: true }}, {{ name: 'adr_id', type: 'string', required: true }}, {{ name: 'new_title', type: 'string', required: false }}, {{ name: 'new_content', type: 'string', required: false }}, {{ name: 'new_status', type: 'string', required: false }}] }},
+                {{ name: 'adr_list', desc: 'List all ADRs in a workspace', params: [{{ name: 'workspace_id', type: 'string', required: true }}] }}
+            ]
+        }}
+    }};
+
+    // Examples Data
+    const examples = {{
+        beginner: [
+            {{ title: 'List all workspaces', prompt: 'Show me all available architecture workspaces', tools: ['workspace_list'] }},
+            {{ title: 'Load and explore a workspace', prompt: 'Load the horizon workspace and show me what views are available', tools: ['workspace_load', 'workspace_get_views'] }},
+            {{ title: 'Render a diagram', prompt: 'Render the SystemLandscape view from the horizon workspace as SVG', tools: ['render_svg'] }},
+            {{ title: 'Search for elements', prompt: 'Find all elements related to "database" in my workspace', tools: ['workspace_search'] }}
+        ],
+        intermediate: [
+            {{ title: 'Add a new microservice', prompt: 'Add a new "Payment Service" container to the "Backend" system with description "Handles payment processing" and technology "Node.js"', tools: ['model_add_container'] }},
+            {{ title: 'Create relationships', prompt: 'Add a relationship from the Web App to the Payment Service that says "Processes payments via" using REST/HTTP', tools: ['model_add_relationship'] }},
+            {{ title: 'Export for documentation', prompt: 'Export the container diagram to PlantUML format so I can include it in our docs', tools: ['export_plantuml'] }},
+            {{ title: 'Create a new view', prompt: 'Create a container view for the Backend system showing all its internal containers', tools: ['view_create_container', 'view_add_all_elements'] }},
+            {{ title: 'Add architecture documentation', prompt: 'Add a documentation section titled "Security Architecture" with content about our authentication approach', tools: ['docs_add_section'] }}
+        ],
+        complex: [
+            {{ title: 'Document a new feature end-to-end', prompt: 'I need to add a new mobile app feature. Add a "Mobile User" person, a "Mobile App" system, connect it to our existing Backend API, create a context diagram for it, and document the architecture decision to use React Native.', tools: ['model_add_person', 'model_add_system', 'model_add_relationship', 'view_create_system_context', 'adr_create'] }},
+            {{ title: 'Refactor architecture documentation', prompt: 'Our "Legacy System" is being renamed to "Core Platform". Update the element name, update all related documentation, and save the changes to DSL.', tools: ['model_update_element', 'docs_update_section', 'workspace_save_dsl'] }},
+            {{ title: 'Create deployment documentation', prompt: 'Create a deployment view for our Production environment showing how our services are deployed to AWS, including the load balancer, web servers, and database cluster.', tools: ['view_create_deployment', 'view_add_element', 'view_set_auto_layout'] }},
+            {{ title: 'Validate and export for review', prompt: 'Validate my workspace for any issues, then export the system landscape view to multiple formats (SVG, PlantUML, Mermaid) for our architecture review meeting.', tools: ['workspace_validate', 'render_svg', 'export_plantuml', 'export_mermaid'] }}
+        ]
+    }};
+
+    // Modal Functions
+    function openMcpModal() {{
+        document.getElementById('mcp-modal').classList.add('open');
+        renderInstallationTab();
+        lucide.createIcons();
+    }}
+
+    function closeMcpModal() {{
+        document.getElementById('mcp-modal').classList.remove('open');
+    }}
+
+    function switchMcpTab(tabName) {{
+        document.querySelectorAll('.mcp-tab').forEach(t => t.classList.remove('active'));
+        document.querySelector(`.mcp-tab[data-tab="${{tabName}}"]`).classList.add('active');
+
+        switch(tabName) {{
+            case 'installation': renderInstallationTab(); break;
+            case 'documentation': renderDocumentationTab(); break;
+            case 'examples': renderExamplesTab(); break;
+        }}
+        lucide.createIcons();
+    }}
+
+    function selectIde(ideId) {{
+        selectedIde = ideId;
+        selectedMethod = 0; // Reset to first method when changing IDE
+        renderInstallationTab();
+        lucide.createIcons();
+    }}
+
+    function selectMethod(methodIndex) {{
+        selectedMethod = methodIndex;
+        renderInstallationTab();
+        lucide.createIcons();
+    }}
+
+    function copyCommand(code, btnId) {{
+        navigator.clipboard.writeText(code).then(() => {{
+            const btn = document.getElementById(btnId);
+            btn.innerHTML = '<i data-lucide="check"></i> Copied';
+            lucide.createIcons();
+            setTimeout(() => {{
+                btn.innerHTML = '<i data-lucide="copy"></i> Copy';
+                lucide.createIcons();
+            }}, 2000);
+        }});
+    }}
+
+    function copyConfig(config) {{
+        navigator.clipboard.writeText(config).then(() => {{
+            const btn = document.querySelector('.copy-btn');
+            btn.innerHTML = '<i data-lucide="check"></i> Copied!';
+            lucide.createIcons();
+            setTimeout(() => {{
+                btn.innerHTML = '<i data-lucide="copy"></i> Copy';
+                lucide.createIcons();
+            }}, 2000);
+        }});
+    }}
+
+    function escapeHtml(str) {{
+        return str.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }}
+
+    function renderMethodContent(method) {{
+        let html = '';
+
+        if (method.description) {{
+            html += `<p class="method-description">${{method.description}}</p>`;
+        }}
+
+        switch (method.type) {{
+            case 'command':
+                html += '<div class="command-list">';
+                method.commands.forEach((cmd, idx) => {{
+                    const btnId = `cmd-copy-${{idx}}`;
+                    html += `
+                        <div class="command-item">
+                            <div class="command-label">
+                                <span>${{cmd.label}}</span>
+                                <button class="command-copy-btn" id="${{btnId}}" onclick="copyCommand(\`${{cmd.code.replace(/`/g, '\\`')}}\`, '${{btnId}}')">
+                                    <i data-lucide="copy"></i> Copy
+                                </button>
+                            </div>
+                            <pre class="command-code">${{escapeHtml(cmd.code)}}</pre>
+                        </div>
+                    `;
+                }});
+                html += '</div>';
+                break;
+
+            case 'config':
+                if (method.path) {{
+                    html += `<p class="config-path"><strong>Config file:</strong> <code>${{method.path}}</code></p>`;
+                }}
+                html += `
+                    <div class="config-block">
+                        <div class="config-header">
+                            <span>mcp-config.json</span>
+                            <button class="copy-btn" onclick="copyConfig(\`${{method.config.replace(/`/g, '\\`')}}\`)">
+                                <i data-lucide="copy"></i> Copy
+                            </button>
+                        </div>
+                        <pre class="config-code">${{escapeHtml(method.config)}}</pre>
+                    </div>
+                `;
+                break;
+
+            case 'steps':
+                html += '<div class="steps-list"><ol>';
+                method.steps.forEach(step => {{
+                    html += `<li>${{step}}</li>`;
+                }});
+                html += '</ol></div>';
+                if (method.note) {{
+                    html += `<div class="steps-note">${{method.note}}</div>`;
+                }}
+                break;
+
+            case 'chat':
+                html += `
+                    <div class="chat-command">
+                        <p class="chat-command-label">Type this in your chat:</p>
+                        <div class="chat-prompt" style="padding-left: 32px;">${{method.command}}</div>
+                    </div>
+                `;
+                if (method.note) {{
+                    html += `<div class="steps-note" style="margin-top: 16px;">${{method.note}}</div>`;
+                }}
+                break;
+        }}
+
+        return html;
+    }}
+
+    function renderInstallationTab() {{
+        const ideButtons = Object.entries(ideConfigs).map(([id, config]) => `
+            <button class="ide-btn ${{id === selectedIde ? 'active' : ''}}" onclick="selectIde('${{id}}')">
+                <i data-lucide="${{config.icon}}"></i>
+                ${{config.name}}
+            </button>
+        `).join('');
+
+        const currentConfig = ideConfigs[selectedIde];
+        const methods = currentConfig.methods;
+        const currentMethod = methods[selectedMethod] || methods[0];
+
+        const methodTabs = methods.map((method, idx) => `
+            <button class="method-tab ${{idx === selectedMethod ? 'active' : ''}}" onclick="selectMethod(${{idx}})">
+                <i data-lucide="${{method.icon}}"></i>
+                ${{method.name}}
+                ${{method.recommended ? '<span class="recommended-badge">Recommended</span>' : ''}}
+            </button>
+        `).join('');
+
+        const methodContent = renderMethodContent(currentMethod);
+
+        document.getElementById('mcp-tab-content').innerHTML = `
+            <div class="installation-content">
+                <h3 style="margin: 0 0 16px 0; color: #1a1a2e;">Select Your AI Tool</h3>
+                <div class="ide-selector">
+                    ${{ideButtons}}
+                </div>
+
+                <div class="config-section">
+                    <h4 style="margin-bottom: 16px;">Setup for ${{currentConfig.name}}</h4>
+                    <div class="method-tabs">
+                        ${{methodTabs}}
+                    </div>
+                    <div class="method-content">
+                        ${{methodContent}}
+                    </div>
+                </div>
+
+                <div class="info-box">
+                    <h4><i data-lucide="info"></i> MCP Endpoint</h4>
+                    <p>
+                        The SSE endpoint is available at: <code>http://localhost:8585/mcp/sse</code>
+                    </p>
+                    <p style="margin-top: 8px; font-size: 13px; color: #666;">
+                        Make sure structurizr-rs is running with <code>cargo run -- serve</code> before using MCP.
+                    </p>
+                </div>
+            </div>
+        `;
+    }}
+
+    function renderDocumentationTab() {{
+        let html = '<div class="documentation-content">';
+
+        for (const [category, data] of Object.entries(mcpTools)) {{
+            html += `
+                <div class="tool-category">
+                    <h3 class="tool-category-header">
+                        <i data-lucide="${{data.icon}}"></i>
+                        ${{data.name}}
+                        <span class="tool-count">${{data.tools.length}} tools</span>
+                    </h3>
+                    <div class="accordion">
+            `;
+
+            for (const tool of data.tools) {{
+                const paramsHtml = tool.params.length > 0 ? `
+                    <div class="tool-params">
+                        <h5>Parameters</h5>
+                        <ul class="param-list">
+                            ${{tool.params.map(p => `
+                                <li>
+                                    <span class="param-name">${{p.name}}</span>
+                                    <span class="param-type">(${{p.type}})</span>
+                                    <span class="${{p.required ? 'param-required' : 'param-optional'}}">
+                                        ${{p.required ? 'required' : 'optional'}}
+                                    </span>
+                                </li>
+                            `).join('')}}
+                        </ul>
+                    </div>
+                ` : '<p style="color: #666; font-size: 13px; margin-top: 8px;">No parameters required.</p>';
+
+                html += `
+                    <div class="accordion-item">
+                        <div class="accordion-header" onclick="this.parentElement.classList.toggle('open')">
+                            <span class="accordion-title">${{tool.name}}</span>
+                            <i data-lucide="chevron-down" class="accordion-chevron"></i>
+                        </div>
+                        <div class="accordion-content">
+                            <p class="tool-description">${{tool.desc}}</p>
+                            ${{paramsHtml}}
+                        </div>
+                    </div>
+                `;
+            }}
+
+            html += '</div></div>';
+        }}
+
+        html += '</div>';
+        document.getElementById('mcp-tab-content').innerHTML = html;
+    }}
+
+    function renderExamplesTab() {{
+        const levels = {{
+            beginner: {{ label: 'Beginner', icon: 'circle', colorClass: 'difficulty-beginner' }},
+            intermediate: {{ label: 'Intermediate', icon: 'circle-dot', colorClass: 'difficulty-intermediate' }},
+            complex: {{ label: 'Complex', icon: 'target', colorClass: 'difficulty-complex' }}
+        }};
+
+        let html = '<div class="examples-content">';
+
+        for (const [level, levelExamples] of Object.entries(examples)) {{
+            const levelInfo = levels[level];
+            html += `
+                <div class="example-section">
+                    <h3 class="example-section-header ${{levelInfo.colorClass}}">
+                        <i data-lucide="${{levelInfo.icon}}"></i>
+                        ${{levelInfo.label}} Examples
+                    </h3>
+            `;
+
+            for (const example of levelExamples) {{
+                html += `
+                    <div class="example-card">
+                        <div class="example-header" onclick="this.parentElement.classList.toggle('open')">
+                            <span class="example-title">${{example.title}}</span>
+                            <i data-lucide="chevron-down" class="accordion-chevron"></i>
+                        </div>
+                        <div class="example-content">
+                            <div class="example-prompt">
+                                <span class="example-prompt-label">Natural Language Prompt</span>
+                                <div class="example-prompt-text">"${{example.prompt}}"</div>
+                            </div>
+                            <div class="tools-section">
+                                <div class="tools-label">Tools Triggered:</div>
+                                <div class="tools-triggered">
+                                    ${{example.tools.map(t => `<span class="tool-tag">${{t}}</span>`).join('')}}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+            }}
+
+            html += '</div>';
+        }}
+
+        html += '</div>';
+        document.getElementById('mcp-tab-content').innerHTML = html;
+    }}
+
+    // Close modal on Escape key
+    document.addEventListener('keydown', (e) => {{
+        if (e.key === 'Escape') closeMcpModal();
+    }});
+
+    // Initialize Lucide icons
+    document.addEventListener('DOMContentLoaded', () => {{
+        lucide.createIcons();
+    }});
     </script>
 </body>
 </html>"##,
