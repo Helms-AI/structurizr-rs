@@ -1,0 +1,29 @@
+# Plugin manifest for C Memory Explorer
+# This demonstrates manual memory management in WASM
+
+[plugin]
+name = "c-memory-explorer"
+version = "1.0.0"
+description = "Educational plugin demonstrating C's manual memory management and pointer arithmetic in WASM"
+wasm = "plugin.wasm"
+author = "structurizr-rs contributors"
+homepage = "https://github.com/structurizr/structurizr-rs"
+
+[capabilities]
+# Read-only access to workspace
+read_workspace = true
+
+# No modification needed
+modify_workspace = false
+
+# No filesystem access
+filesystem = false
+
+# No network access
+network = false
+
+# Memory limit: 8MB (C typically uses less memory)
+max_memory = 8388608
+
+# Execution timeout: 1 second
+max_time = 1000
