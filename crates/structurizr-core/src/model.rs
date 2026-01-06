@@ -376,6 +376,53 @@ impl InfrastructureNode {
     }
 }
 
+/// A health check for a container or software system instance.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HealthCheck {
+    pub name: String,
+    pub url: String,
+    /// Polling interval in seconds (default: 60)
+    #[serde(default = "default_health_check_interval")]
+    pub interval: u32,
+    /// Timeout in milliseconds (default: 0 means no timeout)
+    #[serde(default)]
+    pub timeout: u32,
+    /// Optional HTTP headers for the health check request
+    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
+    pub headers: HashMap<String, String>,
+}
+
+fn default_health_check_interval() -> u32 {
+    60
+}
+
+impl HealthCheck {
+    pub fn new(name: impl Into<String>, url: impl Into<String>) -> Self {
+        Self {
+            name: name.into(),
+            url: url.into(),
+            interval: 60,
+            timeout: 0,
+            headers: HashMap::new(),
+        }
+    }
+
+    pub fn with_interval(mut self, interval: u32) -> Self {
+        self.interval = interval;
+        self
+    }
+
+    pub fn with_timeout(mut self, timeout: u32) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
+    pub fn with_header(mut self, key: impl Into<String>, value: impl Into<String>) -> Self {
+        self.headers.insert(key.into(), value.into());
+        self
+    }
+}
+
 /// An instance of a container deployed to a deployment node.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ContainerInstance {
@@ -387,6 +434,8 @@ pub struct ContainerInstance {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub properties: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub health_checks: Vec<HealthCheck>,
 }
 
 /// An instance of a software system deployed to a deployment node.
@@ -400,6 +449,8 @@ pub struct SoftwareSystemInstance {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub properties: HashMap<String, String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub health_checks: Vec<HealthCheck>,
 }
 
 /// A relationship between two model elements.
@@ -455,6 +506,50 @@ impl Relationship {
     }
 }
 
+/// A custom element type for modeling non-standard architectural elements.
+/// This allows for flexible modeling beyond the standard C4 model types.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomElement {
+    #[serde(flatten)]
+    pub properties: ElementProperties,
+    /// The metadata type of this custom element (e.g., "Database", "Queue", etc.)
+    pub metadata: String,
+    #[serde(default)]
+    pub location: Location,
+}
+
+impl CustomElement {
+    pub fn new(name: impl Into<String>, metadata: impl Into<String>) -> Self {
+        let mut props = ElementProperties::new(name);
+        let metadata_str = metadata.into();
+        props.tags.push("Element".to_string());
+        props.tags.push(format!("Custom:{}", metadata_str));
+        Self {
+            properties: props,
+            metadata: metadata_str,
+            location: Location::default(),
+        }
+    }
+
+    pub fn with_description(mut self, description: impl Into<String>) -> Self {
+        self.properties.description = Some(description.into());
+        self
+    }
+
+    pub fn external(mut self) -> Self {
+        self.location = Location::External;
+        self
+    }
+
+    pub fn id(&self) -> ElementId {
+        self.properties.id
+    }
+
+    pub fn name(&self) -> &str {
+        &self.properties.name
+    }
+}
+
 /// A group for organizing elements.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Group {
@@ -480,6 +575,8 @@ pub struct Model {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub software_systems: Vec<SoftwareSystem>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub custom_elements: Vec<CustomElement>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub deployment_nodes: Vec<DeploymentNode>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub relationships: Vec<Relationship>,
@@ -503,6 +600,13 @@ impl Model {
         let system = SoftwareSystem::new(name).with_description(description);
         let id = system.id();
         self.software_systems.push(system);
+        id
+    }
+
+    pub fn add_custom_element(&mut self, name: impl Into<String>, metadata: impl Into<String>, description: impl Into<String>) -> ElementId {
+        let element = CustomElement::new(name, metadata).with_description(description);
+        let id = element.id();
+        self.custom_elements.push(element);
         id
     }
 

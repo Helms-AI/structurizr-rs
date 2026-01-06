@@ -1,6 +1,11 @@
 //! Parser for the Structurizr DSL.
 //!
 //! Parses tokens into an AST and then converts to a Workspace.
+//!
+//! # Scripting Support
+//!
+//! When the `scripting` feature is enabled, `!script` directives are executed
+//! after the workspace is built. Scripts can modify the workspace programmatically.
 
 use std::collections::HashMap;
 
@@ -9,6 +14,9 @@ use structurizr_core::prelude::*;
 use crate::ast::*;
 use crate::error::{Error, ParseError, Result};
 use crate::lexer::{Lexer, Token, TokenKind};
+
+#[cfg(feature = "scripting")]
+use structurizr_scripting::{ScriptEngine, ScriptLanguage, ScriptConfig};
 
 /// Parse a DSL string into a Workspace.
 pub fn parse(input: &str) -> Result<Workspace> {
@@ -19,7 +27,7 @@ pub fn parse(input: &str) -> Result<Workspace> {
 pub fn parse_with_base_path(input: &str, base_path: Option<&std::path::Path>) -> Result<Workspace> {
     let mut lexer = Lexer::new(input);
     let tokens = lexer.tokenize()?;
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::with_source(tokens, input.to_string());
     let mut ast = parser.parse_workspace()?;
 
     // Process !include directives
@@ -27,15 +35,101 @@ pub fn parse_with_base_path(input: &str, base_path: Option<&std::path::Path>) ->
         ast = process_includes(ast, base)?;
     }
 
-    let workspace = build_workspace(ast)?;
+    // Extract script directives before building
+    let scripts: Vec<_> = ast.directives.iter()
+        .filter_map(|d| match d {
+            Directive::Script(s) => Some(s.clone()),
+            _ => None,
+        })
+        .collect();
+
+    // Mutable when scripting feature is enabled (scripts can modify workspace)
+    #[allow(unused_mut)]
+    let mut workspace = build_workspace(ast)?;
+
+    // Execute scripts when scripting feature is enabled
+    #[cfg(feature = "scripting")]
+    {
+        execute_scripts(&mut workspace, &scripts, base_path)?;
+    }
+
+    // Warn about scripts when feature is not enabled (but don't fail)
+    #[cfg(not(feature = "scripting"))]
+    if !scripts.is_empty() {
+        eprintln!("Warning: !script directives found but scripting feature is not enabled");
+        eprintln!("Scripts will be skipped. Enable 'scripting' feature to execute scripts.");
+    }
+
     Ok(workspace)
+}
+
+/// Execute script directives against a workspace.
+#[cfg(feature = "scripting")]
+fn execute_scripts(
+    workspace: &mut Workspace,
+    scripts: &[ScriptDirective],
+    base_path: Option<&std::path::Path>,
+) -> Result<()> {
+    if scripts.is_empty() {
+        return Ok(());
+    }
+
+    // Create a script engine with the base path for resolving script files
+    let config = ScriptConfig::new()
+        .with_base_path(base_path.map(|p| p.to_path_buf()).unwrap_or_default());
+    let engine = ScriptEngine::new(config)
+        .map_err(|e| Error::Parse(ParseError {
+            message: format!("Failed to create script engine: {}", e),
+            location: None,
+        }))?;
+
+    for script in scripts {
+        if let Some(ref content) = script.content {
+            // Inline script
+            let lang = script.language.as_deref().unwrap_or("lua");
+            let language = match lang.to_lowercase().as_str() {
+                "lua" => ScriptLanguage::Lua,
+                "groovy" => ScriptLanguage::Groovy,
+                "kotlin" => ScriptLanguage::Kotlin,
+                _ => {
+                    return Err(Error::Parse(ParseError {
+                        message: format!("Unsupported script language: {}", lang),
+                        location: None,
+                    }));
+                }
+            };
+            engine.execute(workspace, content, language)
+                .map_err(|e| Error::Parse(ParseError {
+                    message: format!("Script execution error: {}", e),
+                    location: None,
+                }))?;
+        } else if let Some(ref file_path) = script.file_path {
+            // External script file
+            let path = std::path::Path::new(file_path);
+            let full_path = if path.is_absolute() {
+                path.to_path_buf()
+            } else if let Some(base) = base_path {
+                base.join(path)
+            } else {
+                path.to_path_buf()
+            };
+
+            engine.execute_file(workspace, &full_path, None)
+                .map_err(|e| Error::Parse(ParseError {
+                    message: format!("Script file execution error ({}): {}", file_path, e),
+                    location: None,
+                }))?;
+        }
+    }
+
+    Ok(())
 }
 
 /// Parse a DSL string into an AST (for testing/debugging).
 pub fn parse_to_ast(input: &str) -> Result<WorkspaceNode> {
     let mut lexer = Lexer::new(input);
     let tokens = lexer.tokenize()?;
-    let mut parser = Parser::new(tokens);
+    let mut parser = Parser::with_source(tokens, input.to_string());
     parser.parse_workspace()
 }
 
@@ -43,6 +137,9 @@ pub fn parse_to_ast(input: &str) -> Result<WorkspaceNode> {
 pub struct Parser {
     tokens: Vec<Token>,
     position: usize,
+    /// Original source text (reserved for future raw script extraction)
+    #[allow(dead_code)]
+    source: String,
 }
 
 impl Parser {
@@ -50,6 +147,16 @@ impl Parser {
         Self {
             tokens,
             position: 0,
+            source: String::new(),
+        }
+    }
+
+    /// Create a parser with source text for script extraction.
+    pub fn with_source(tokens: Vec<Token>, source: String) -> Self {
+        Self {
+            tokens,
+            position: 0,
+            source,
         }
     }
 
@@ -196,6 +303,96 @@ impl Parser {
         }
     }
 
+    /// Expects an identifier or a string (for !ref which can use either)
+    fn expect_identifier_or_string(&mut self) -> Result<String> {
+        self.skip_newlines_and_comments();
+        match self.current_kind().cloned() {
+            Some(TokenKind::Identifier(s)) => {
+                self.advance();
+                Ok(s)
+            }
+            Some(TokenKind::String(s)) => {
+                self.advance();
+                Ok(s)
+            }
+            Some(kind) => {
+                let loc = self.current().map(|t| t.location);
+                Err(Error::Parse(ParseError {
+                    message: format!("Expected identifier or string, found {:?}", kind),
+                    location: loc,
+                }))
+            }
+            None => Err(Error::Parse(ParseError {
+                message: "Expected identifier or string, found end of input".to_string(),
+                location: None,
+            })),
+        }
+    }
+
+    /// Expects an identifier or a keyword that can be used as a configuration value
+    /// (e.g., "softwaresystem", "landscape", "none", "public", "private")
+    fn expect_identifier_or_keyword(&mut self) -> Result<String> {
+        self.skip_newlines_and_comments();
+        match self.current_kind().cloned() {
+            Some(TokenKind::Identifier(s)) => {
+                self.advance();
+                Ok(s)
+            }
+            // Keywords that can be used as configuration values
+            Some(TokenKind::SoftwareSystem) => {
+                self.advance();
+                Ok("softwaresystem".to_string())
+            }
+            Some(TokenKind::SystemLandscape) => {
+                self.advance();
+                Ok("landscape".to_string())
+            }
+            Some(kind) => {
+                let loc = self.current().map(|t| t.location);
+                Err(Error::Parse(ParseError {
+                    message: format!("Expected identifier or keyword, found {:?}", kind),
+                    location: loc,
+                }))
+            }
+            None => Err(Error::Parse(ParseError {
+                message: "Expected identifier or keyword, found end of input".to_string(),
+                location: None,
+            })),
+        }
+    }
+
+    /// Skip a block (including nested blocks) - used for unimplemented features
+    fn skip_block(&mut self) -> Result<()> {
+        self.skip_newlines_and_comments();
+        if !self.check(&TokenKind::OpenBrace) {
+            return Ok(());
+        }
+        self.advance(); // consume {
+        let mut depth = 1;
+        while depth > 0 {
+            match self.current_kind() {
+                Some(TokenKind::OpenBrace) => {
+                    depth += 1;
+                    self.advance();
+                }
+                Some(TokenKind::CloseBrace) => {
+                    depth -= 1;
+                    self.advance();
+                }
+                Some(TokenKind::Eof) | None => {
+                    return Err(Error::Parse(ParseError {
+                        message: "Unexpected end of input while skipping block".to_string(),
+                        location: self.current().map(|t| t.location),
+                    }));
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn check(&self, expected: &TokenKind) -> bool {
         match self.current_kind() {
             Some(kind) => std::mem::discriminant(kind) == std::mem::discriminant(expected),
@@ -240,6 +437,7 @@ impl Parser {
             views: None,
             properties: HashMap::new(),
             directives: Vec::new(),
+            configuration: None,
         };
 
         // Parse workspace contents
@@ -301,6 +499,37 @@ impl Parser {
                     let path = self.expect_string()?;
                     workspace.directives.push(Directive::Adrs(path));
                 }
+                Some(TokenKind::DirectiveRef) => {
+                    self.advance();
+                    let identifier = self.expect_identifier_or_string()?;
+                    workspace.directives.push(Directive::Ref(identifier));
+                }
+                Some(TokenKind::DirectiveExtend) => {
+                    self.advance();
+                    let path = self.expect_string()?;
+                    workspace.directives.push(Directive::Extend(path));
+                }
+                Some(TokenKind::DirectivePlugin) => {
+                    // !plugin <classname> - stored but not executed (requires JVM)
+                    self.advance();
+                    let class_name = self.expect_identifier_or_string()?;
+                    workspace.directives.push(Directive::Plugin(class_name));
+                    // Skip any block if present
+                    if self.check(&TokenKind::OpenBrace) {
+                        self.skip_block()?;
+                    }
+                }
+                Some(TokenKind::DirectiveScript) => {
+                    // !script groovy { ... } - inline script with language
+                    // !script "path/to/script.groovy" - external script file
+                    self.advance();
+                    let script = self.parse_script_directive()?;
+                    workspace.directives.push(Directive::Script(script));
+                }
+                Some(TokenKind::Configuration) => {
+                    self.advance();
+                    workspace.configuration = Some(self.parse_configuration()?);
+                }
                 Some(kind) => {
                     return Err(Error::Parse(ParseError {
                         message: format!("Unexpected token in workspace: {:?}", kind),
@@ -353,6 +582,22 @@ impl Parser {
                     let group = self.parse_group()?;
                     model.groups.push(group);
                 }
+                Some(TokenKind::Enterprise) => {
+                    self.advance();
+                    let enterprise = self.parse_enterprise()?;
+                    model.enterprise = Some(enterprise);
+                }
+                Some(TokenKind::CustomElement) => {
+                    self.advance();
+                    let element = self.parse_element(ElementKind::CustomElement, None)?;
+                    model.elements.push(element);
+                }
+                Some(TokenKind::DirectiveRef) => {
+                    self.advance();
+                    // !ref in model context - just skip the identifier for now
+                    let _identifier = self.expect_identifier_or_string()?;
+                    // In full implementation, this would resolve and bring the element into scope
+                }
                 Some(TokenKind::Identifier(id)) => {
                     // Could be: identifier = element, or identifier -> target
                     let id = id.clone();
@@ -378,6 +623,11 @@ impl Parser {
                             Some(TokenKind::DeploymentNode) => {
                                 self.advance();
                                 let element = self.parse_element(ElementKind::DeploymentNode, Some(id))?;
+                                model.elements.push(element);
+                            }
+                            Some(TokenKind::CustomElement) => {
+                                self.advance();
+                                let element = self.parse_element(ElementKind::CustomElement, Some(id))?;
                                 model.elements.push(element);
                             }
                             _ => {
@@ -425,14 +675,22 @@ impl Parser {
         } else {
             self.expect_string()?
         };
-        let description = self.maybe_string();
 
-        // Technology is the 3rd string for Container/Component
-        // For DeploymentNode, it's also the 3rd string (followed by tags and instances)
-        let technology = if matches!(kind, ElementKind::Container | ElementKind::Component | ElementKind::DeploymentNode) {
-            self.maybe_string()
+        // For customElement: name, metadata (as technology), description
+        // For others: name, description, technology (optional)
+        let (description, technology) = if kind == ElementKind::CustomElement {
+            let metadata = self.expect_string()?; // metadata is required for customElement
+            let desc = self.maybe_string(); // description is optional
+            (desc, Some(metadata))
         } else {
-            None
+            let desc = self.maybe_string();
+            // Technology is the 3rd string for Container/Component/DeploymentNode
+            let tech = if matches!(kind, ElementKind::Container | ElementKind::Component | ElementKind::DeploymentNode) {
+                self.maybe_string()
+            } else {
+                None
+            };
+            (desc, tech)
         };
 
         // For DeploymentNode: parse inline tags (4th) and instances (5th)
@@ -458,6 +716,7 @@ impl Parser {
             children: Vec::new(),
             relationships: Vec::new(),
             instances,
+            health_checks: Vec::new(),
         };
 
         // Check for optional block
@@ -511,6 +770,12 @@ impl Parser {
                 Some(TokenKind::Properties) => {
                     self.advance();
                     element.properties.extend(self.parse_properties_block()?);
+                }
+                // Health check for container/software system instances
+                Some(TokenKind::HealthCheck) if matches!(element.kind, ElementKind::ContainerInstance | ElementKind::SoftwareSystemInstance) => {
+                    self.advance();
+                    let health_check = self.parse_health_check()?;
+                    element.health_checks.push(health_check);
                 }
                 // Child elements
                 Some(TokenKind::Container) if element.kind == ElementKind::SoftwareSystem => {
@@ -608,6 +873,26 @@ impl Parser {
         }
 
         Ok(())
+    }
+
+    /// Parse a health check definition.
+    /// Syntax: healthCheck <name> <url> [interval] [timeout]
+    fn parse_health_check(&mut self) -> Result<HealthCheckNode> {
+        self.skip_newlines_and_comments();
+
+        let name = self.expect_string()?;
+        let url = self.expect_string()?;
+
+        // Optional interval (in seconds) and timeout (in milliseconds)
+        let interval = self.maybe_string_or_number().and_then(|s| s.parse::<u32>().ok());
+        let timeout = self.maybe_string_or_number().and_then(|s| s.parse::<u32>().ok());
+
+        Ok(HealthCheckNode {
+            name,
+            url,
+            interval,
+            timeout,
+        })
     }
 
     fn parse_relationship(&mut self, source: String) -> Result<RelationshipNode> {
@@ -725,6 +1010,71 @@ impl Parser {
         }
 
         Ok(group)
+    }
+
+    /// Parse an enterprise block - elements defined inside are marked as internal
+    fn parse_enterprise(&mut self) -> Result<EnterpriseNode> {
+        self.skip_newlines_and_comments();
+        let name = self.expect_string()?;
+
+        self.skip_newlines_and_comments();
+        self.expect(TokenKind::OpenBrace)?;
+
+        let mut elements = Vec::new();
+        let mut groups = Vec::new();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind().cloned() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::Person) => {
+                    self.advance();
+                    let element = self.parse_element(ElementKind::Person, None)?;
+                    elements.push(element);
+                }
+                Some(TokenKind::SoftwareSystem) => {
+                    self.advance();
+                    let element = self.parse_element(ElementKind::SoftwareSystem, None)?;
+                    elements.push(element);
+                }
+                Some(TokenKind::Group) => {
+                    self.advance();
+                    let group = self.parse_group()?;
+                    groups.push(group);
+                }
+                Some(TokenKind::Identifier(id)) => {
+                    let id = id.clone();
+                    self.advance();
+                    self.skip_newlines_and_comments();
+
+                    if self.check(&TokenKind::Equals) {
+                        self.advance();
+                        self.skip_newlines_and_comments();
+
+                        match self.current_kind() {
+                            Some(TokenKind::Person) => {
+                                self.advance();
+                                let element = self.parse_element(ElementKind::Person, Some(id))?;
+                                elements.push(element);
+                            }
+                            Some(TokenKind::SoftwareSystem) => {
+                                self.advance();
+                                let element = self.parse_element(ElementKind::SoftwareSystem, Some(id))?;
+                                elements.push(element);
+                            }
+                            _ => break,
+                        }
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        Ok(EnterpriseNode { name, elements, groups })
     }
 
     fn parse_deployment_environment(&mut self) -> Result<DeploymentEnvironmentNode> {
@@ -852,6 +1202,21 @@ impl Parser {
                     let view = self.parse_deployment_view()?;
                     views.deployment.push(view);
                 }
+                Some(TokenKind::Filtered) => {
+                    self.advance();
+                    let view = self.parse_filtered_view()?;
+                    views.filtered.push(view);
+                }
+                Some(TokenKind::Custom) => {
+                    self.advance();
+                    let view = self.parse_custom_view()?;
+                    views.custom.push(view);
+                }
+                Some(TokenKind::Image) => {
+                    self.advance();
+                    let view = self.parse_image_view()?;
+                    views.image.push(view);
+                }
                 Some(TokenKind::Styles) => {
                     self.advance();
                     views.styles = Some(self.parse_styles()?);
@@ -866,6 +1231,19 @@ impl Parser {
                     while let Some(url) = self.maybe_string() {
                         views.themes.push(url);
                     }
+                }
+                Some(TokenKind::Branding) => {
+                    self.advance();
+                    views.branding = Some(self.parse_branding()?);
+                }
+                Some(TokenKind::Terminology) => {
+                    self.advance();
+                    views.terminology = Some(self.parse_terminology()?);
+                }
+                Some(TokenKind::Properties) => {
+                    // Skip properties block in views
+                    self.advance();
+                    self.skip_block()?;
                 }
                 Some(kind) => {
                     return Err(Error::Parse(ParseError {
@@ -894,6 +1272,8 @@ impl Parser {
             auto_layout: None,
             properties: HashMap::new(),
             background: None,
+            animations: Vec::new(),
+            default: false,
         };
 
         self.skip_newlines_and_comments();
@@ -937,9 +1317,27 @@ impl Parser {
                         self.advance();
                         props.auto_layout = Some(self.parse_auto_layout()?);
                     }
+                    Some(TokenKind::Animation) => {
+                        self.advance();
+                        let step = self.parse_animation_step()?;
+                        props.animations.push(step);
+                    }
                     Some(TokenKind::Properties) => {
                         self.advance();
                         props.properties.extend(self.parse_properties_block()?);
+                    }
+                    Some(TokenKind::Title) => {
+                        self.advance();
+                        props.title = Some(self.expect_string()?);
+                    }
+                    Some(TokenKind::Description) => {
+                        self.advance();
+                        props.description = Some(self.expect_string()?);
+                    }
+                    Some(TokenKind::Default) => {
+                        // default keyword - marks this as the default view of its type
+                        self.advance();
+                        props.default = true;
                     }
                     Some(TokenKind::Identifier(ref id)) => {
                         match id.to_lowercase().as_str() {
@@ -956,6 +1354,36 @@ impl Parser {
         }
 
         Ok(props)
+    }
+
+    /// Parse an animation step: animation { element1, element2, ... }
+    fn parse_animation_step(&mut self) -> Result<AnimationStepNode> {
+        self.skip_newlines_and_comments();
+        self.expect(TokenKind::OpenBrace)?;
+
+        let mut elements = Vec::new();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind().cloned() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::Identifier(id)) => {
+                    self.advance();
+                    elements.push(id);
+                    // Skip optional comma
+                    if self.check(&TokenKind::Comma) {
+                        self.advance();
+                    }
+                }
+                _ => break,
+            }
+        }
+
+        Ok(AnimationStepNode { elements })
     }
 
     fn parse_auto_layout(&mut self) -> Result<AutoLayoutNode> {
@@ -1069,6 +1497,8 @@ impl Parser {
             auto_layout: None,
             properties: HashMap::new(),
             background: None,
+            animations: Vec::new(),
+            default: false,
         };
 
         let mut content = Vec::new();
@@ -1240,6 +1670,122 @@ impl Parser {
             scope,
             environment,
             properties,
+        })
+    }
+
+    /// Parse a filtered view: filtered <baseViewKey> <include|exclude> "tag1,tag2" [key] [description] { ... }
+    fn parse_filtered_view(&mut self) -> Result<FilteredViewNode> {
+        self.skip_newlines_and_comments();
+
+        // Base view key
+        let base_view = self.expect_identifier_or_string()?;
+
+        // Mode: include or exclude
+        self.skip_newlines_and_comments();
+        let mode = if let Some(TokenKind::Include) = self.current_kind() {
+            self.advance();
+            crate::ast::FilterMode::Include
+        } else if let Some(TokenKind::Exclude) = self.current_kind() {
+            self.advance();
+            crate::ast::FilterMode::Exclude
+        } else {
+            crate::ast::FilterMode::Include // Default
+        };
+
+        // Tags (comma-separated string)
+        let tags_str = self.maybe_string().unwrap_or_default();
+        let tags: Vec<String> = tags_str
+            .split(',')
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty())
+            .collect();
+
+        // Optional key and description
+        let properties = self.parse_view_properties()?;
+
+        Ok(FilteredViewNode {
+            base_view,
+            mode,
+            tags,
+            properties,
+        })
+    }
+
+    /// Parse a custom view: custom [key] [title] [description] { ... }
+    fn parse_custom_view(&mut self) -> Result<CustomViewNode> {
+        let properties = self.parse_view_properties()?;
+        Ok(CustomViewNode { properties })
+    }
+
+    /// Parse an image view: image <element|*> [key] [description] { <type> <url> title "title" }
+    fn parse_image_view(&mut self) -> Result<ImageViewNode> {
+        self.skip_newlines_and_comments();
+
+        // Element identifier or * for workspace-level
+        let element = if self.check(&TokenKind::Star) {
+            self.advance();
+            None
+        } else if let Some(TokenKind::Identifier(id)) = self.current_kind() {
+            let id = id.clone();
+            self.advance();
+            Some(id)
+        } else {
+            self.maybe_string()
+        };
+
+        // Parse key and description (strings before the block)
+        let key = self.maybe_string();
+        let description = self.maybe_string();
+
+        let mut properties = ViewPropertiesNode::default();
+        properties.key = key;
+        properties.description = description;
+
+        // Parse the image view body for content type and URL
+        let mut content_type: Option<String> = None;
+        let mut content: Option<String> = None;
+
+        // Check if there's a block to parse
+        self.skip_newlines_and_comments();
+        if self.check(&TokenKind::OpenBrace) {
+            self.advance();
+
+            loop {
+                self.skip_newlines_and_comments();
+
+                match self.current_kind().cloned() {
+                    Some(TokenKind::CloseBrace) => {
+                        self.advance();
+                        break;
+                    }
+                    Some(TokenKind::Title) => {
+                        self.advance();
+                        properties.title = self.maybe_string();
+                    }
+                    Some(TokenKind::Properties) => {
+                        self.advance();
+                        properties.properties.extend(self.parse_properties_block()?);
+                    }
+                    Some(TokenKind::Identifier(id)) => {
+                        // This could be the content type (plantuml, mermaid, image)
+                        content_type = Some(id.clone());
+                        self.advance();
+                        // Next should be the URL or content
+                        content = self.maybe_string();
+                    }
+                    _ => {
+                        // Skip unknown tokens
+                        self.advance();
+                    }
+                }
+            }
+        }
+
+        Ok(ImageViewNode {
+            element,
+            properties,
+            content_type,
+            content,
         })
     }
 
@@ -1498,6 +2044,355 @@ impl Parser {
         }
 
         Ok(perspectives)
+    }
+
+    /// Parse a configuration block: configuration { scope ... visibility ... users { ... } }
+    fn parse_configuration(&mut self) -> Result<ConfigurationNode> {
+        self.skip_newlines_and_comments();
+        self.expect(TokenKind::OpenBrace)?;
+
+        let mut config = ConfigurationNode::default();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind().cloned() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::Identifier(ref id)) if id.to_lowercase() == "scope" => {
+                    self.advance();
+                    let scope = self.expect_identifier_or_keyword()?;
+                    config.scope = Some(scope);
+                }
+                Some(TokenKind::Identifier(ref id)) if id.to_lowercase() == "visibility" => {
+                    self.advance();
+                    let vis = self.expect_identifier_or_keyword()?;
+                    config.visibility = Some(vis);
+                }
+                Some(TokenKind::Identifier(ref id)) if id.to_lowercase() == "users" => {
+                    self.advance();
+                    config.users = self.parse_users_block()?;
+                }
+                Some(TokenKind::Properties) => {
+                    // Skip properties block in configuration
+                    self.advance();
+                    self.skip_block()?;
+                }
+                _ => break,
+            }
+        }
+
+        Ok(config)
+    }
+
+    /// Parse a users block: users { username readwrite/readonly ... }
+    fn parse_users_block(&mut self) -> Result<Vec<UserNode>> {
+        self.skip_newlines_and_comments();
+        self.expect(TokenKind::OpenBrace)?;
+
+        let mut users = Vec::new();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::Identifier(_)) | Some(TokenKind::String(_)) => {
+                    let username = self.expect_identifier_or_string()?;
+                    let role = self.expect_identifier()?;
+                    users.push(UserNode { username, role });
+                }
+                _ => break,
+            }
+        }
+
+        Ok(users)
+    }
+
+    /// Parse a script directive: !script <lang> { ... } or !script "path/to/file"
+    fn parse_script_directive(&mut self) -> Result<ScriptDirective> {
+        self.skip_newlines_and_comments();
+
+        // Check if it's an inline script with language identifier or a file path
+        match self.current_kind().cloned() {
+            Some(TokenKind::String(path)) => {
+                // External script file: !script "path/to/script.groovy"
+                self.advance();
+                Ok(ScriptDirective {
+                    language: None,
+                    content: None,
+                    file_path: Some(path),
+                })
+            }
+            Some(TokenKind::Identifier(lang)) => {
+                // Inline script with language: !script groovy { ... }
+                self.advance();
+                self.skip_newlines_and_comments();
+
+                // Expect a block
+                if !self.check(&TokenKind::OpenBrace) {
+                    return Err(Error::Parse(ParseError {
+                        message: format!("Expected '{{' after script language '{}'", lang),
+                        location: self.current().map(|t| t.location),
+                    }));
+                }
+
+                let content = self.parse_script_block()?;
+
+                Ok(ScriptDirective {
+                    language: Some(lang),
+                    content: Some(content),
+                    file_path: None,
+                })
+            }
+            Some(TokenKind::OpenBrace) => {
+                // Inline script without explicit language (default to Lua)
+                let content = self.parse_script_block()?;
+
+                Ok(ScriptDirective {
+                    language: Some("lua".to_string()),
+                    content: Some(content),
+                    file_path: None,
+                })
+            }
+            other => Err(Error::Parse(ParseError {
+                message: format!("Expected script language or file path, got {:?}", other),
+                location: self.current().map(|t| t.location),
+            })),
+        }
+    }
+
+    /// Parse a script block and extract raw content between braces.
+    fn parse_script_block(&mut self) -> Result<String> {
+        self.expect(TokenKind::OpenBrace)?;
+
+        // Track position after opening brace
+        let start_pos = self.position;
+        let mut brace_depth = 1;
+
+        // Find the matching close brace
+        while let Some(kind) = self.current_kind().cloned() {
+            match kind {
+                TokenKind::OpenBrace => {
+                    brace_depth += 1;
+                    self.advance();
+                }
+                TokenKind::CloseBrace => {
+                    brace_depth -= 1;
+                    if brace_depth == 0 {
+                        break;
+                    }
+                    self.advance();
+                }
+                _ => {
+                    self.advance();
+                }
+            }
+        }
+
+        let end_pos = self.position;
+        self.advance(); // consume closing brace
+
+        // Reconstruct the script content from tokens
+        let mut content = String::new();
+        let mut prev_line = 0;
+        let mut prev_col = 0;
+
+        for i in start_pos..end_pos {
+            if let Some(token) = self.tokens.get(i) {
+                // Add newlines/spaces based on line/column differences
+                if prev_line > 0 {
+                    if token.location.line > prev_line {
+                        for _ in 0..(token.location.line - prev_line) {
+                            content.push('\n');
+                        }
+                        prev_col = 0;
+                    }
+                    if token.location.column > prev_col {
+                        for _ in 0..(token.location.column - prev_col - 1) {
+                            content.push(' ');
+                        }
+                    }
+                }
+
+                // Add the token text
+                let text = self.token_to_text(&token.kind);
+                content.push_str(&text);
+                prev_line = token.location.line;
+                prev_col = token.location.column + token.len;
+            }
+        }
+
+        Ok(content.trim().to_string())
+    }
+
+    /// Convert a token kind back to its text representation.
+    fn token_to_text(&self, kind: &TokenKind) -> String {
+        match kind {
+            TokenKind::String(s) => format!("\"{}\"", s),
+            TokenKind::Number(n) => n.to_string(),
+            TokenKind::Identifier(id) => id.clone(),
+            TokenKind::OpenBrace => "{".to_string(),
+            TokenKind::CloseBrace => "}".to_string(),
+            TokenKind::Arrow => "->".to_string(),
+            TokenKind::Equals => "=".to_string(),
+            TokenKind::Colon => ":".to_string(),
+            TokenKind::Comma => ",".to_string(),
+            TokenKind::OpenParen => "(".to_string(),
+            TokenKind::CloseParen => ")".to_string(),
+            TokenKind::Newline => "\n".to_string(),
+            TokenKind::Comment => "".to_string(), // Skip comments
+            TokenKind::Star => "*".to_string(),
+            // DSL keywords - convert back to text for scripts
+            TokenKind::Workspace => "workspace".to_string(),
+            TokenKind::Model => "model".to_string(),
+            TokenKind::Views => "views".to_string(),
+            TokenKind::Person => "person".to_string(),
+            TokenKind::SoftwareSystem => "softwareSystem".to_string(),
+            TokenKind::Container => "container".to_string(),
+            TokenKind::Component => "component".to_string(),
+            TokenKind::Group => "group".to_string(),
+            TokenKind::DeploymentNode => "deploymentNode".to_string(),
+            TokenKind::DeploymentEnvironment => "deploymentEnvironment".to_string(),
+            TokenKind::InfrastructureNode => "infrastructureNode".to_string(),
+            TokenKind::ContainerInstance => "containerInstance".to_string(),
+            TokenKind::SoftwareSystemInstance => "softwareSystemInstance".to_string(),
+            TokenKind::SystemLandscape => "systemLandscape".to_string(),
+            TokenKind::SystemContext => "systemContext".to_string(),
+            TokenKind::Dynamic => "dynamic".to_string(),
+            TokenKind::Deployment => "deployment".to_string(),
+            TokenKind::Filtered => "filtered".to_string(),
+            TokenKind::Custom => "custom".to_string(),
+            TokenKind::Styles => "styles".to_string(),
+            TokenKind::Element => "element".to_string(),
+            TokenKind::Relationship => "relationship".to_string(),
+            TokenKind::Theme => "theme".to_string(),
+            TokenKind::Themes => "themes".to_string(),
+            TokenKind::Include => "include".to_string(),
+            TokenKind::Exclude => "exclude".to_string(),
+            TokenKind::AutoLayout => "autoLayout".to_string(),
+            TokenKind::Animation => "animation".to_string(),
+            TokenKind::Properties => "properties".to_string(),
+            TokenKind::Perspectives => "perspectives".to_string(),
+            TokenKind::Tags => "tags".to_string(),
+            TokenKind::Technology => "technology".to_string(),
+            TokenKind::Description => "description".to_string(),
+            TokenKind::Url => "url".to_string(),
+            TokenKind::Extends => "extends".to_string(),
+            TokenKind::Instances => "instances".to_string(),
+            TokenKind::Enterprise => "enterprise".to_string(),
+            TokenKind::CustomElement => "customElement".to_string(),
+            TokenKind::Configuration => "configuration".to_string(),
+            TokenKind::Branding => "branding".to_string(),
+            TokenKind::Terminology => "terminology".to_string(),
+            TokenKind::Default => "default".to_string(),
+            TokenKind::Image => "image".to_string(),
+            TokenKind::HealthCheck => "healthCheck".to_string(),
+            // Directive keywords (as text in scripts)
+            TokenKind::DirectiveConst => "const".to_string(),
+            TokenKind::DirectiveIdentifiers => "identifiers".to_string(),
+            TokenKind::DirectiveImpliedRelationships => "impliedRelationships".to_string(),
+            TokenKind::DirectiveInclude => "include".to_string(),
+            TokenKind::DirectiveDocs => "docs".to_string(),
+            TokenKind::DirectiveAdrs => "adrs".to_string(),
+            TokenKind::DirectiveRef => "ref".to_string(),
+            TokenKind::DirectiveExtend => "extend".to_string(),
+            TokenKind::DirectivePlugin => "plugin".to_string(),
+            TokenKind::DirectiveScript => "script".to_string(),
+            // Fallback for any other tokens
+            _ => String::new(),
+        }
+    }
+
+    /// Parse a branding block: branding { logo ... font ... }
+    fn parse_branding(&mut self) -> Result<BrandingNode> {
+        self.skip_newlines_and_comments();
+        self.expect(TokenKind::OpenBrace)?;
+
+        let mut branding = BrandingNode::default();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind().cloned() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::Logo) => {
+                    self.advance();
+                    branding.logo = Some(self.expect_string()?);
+                }
+                Some(TokenKind::Font) => {
+                    self.advance();
+                    let name = self.expect_string()?;
+                    let url = self.maybe_string();
+                    branding.font = Some(FontNode { name, url });
+                }
+                _ => break,
+            }
+        }
+
+        Ok(branding)
+    }
+
+    /// Parse a terminology block: terminology { person "Custom" ... }
+    fn parse_terminology(&mut self) -> Result<TerminologyNode> {
+        self.skip_newlines_and_comments();
+        self.expect(TokenKind::OpenBrace)?;
+
+        let mut terminology = TerminologyNode::default();
+
+        loop {
+            self.skip_newlines_and_comments();
+
+            match self.current_kind().cloned() {
+                Some(TokenKind::CloseBrace) => {
+                    self.advance();
+                    break;
+                }
+                Some(TokenKind::Enterprise) => {
+                    self.advance();
+                    terminology.enterprise = Some(self.expect_string()?);
+                }
+                Some(TokenKind::Person) => {
+                    self.advance();
+                    terminology.person = Some(self.expect_string()?);
+                }
+                Some(TokenKind::SoftwareSystem) => {
+                    self.advance();
+                    terminology.software_system = Some(self.expect_string()?);
+                }
+                Some(TokenKind::Container) => {
+                    self.advance();
+                    terminology.container = Some(self.expect_string()?);
+                }
+                Some(TokenKind::Component) => {
+                    self.advance();
+                    terminology.component = Some(self.expect_string()?);
+                }
+                Some(TokenKind::DeploymentNode) => {
+                    self.advance();
+                    terminology.deployment_node = Some(self.expect_string()?);
+                }
+                Some(TokenKind::InfrastructureNode) => {
+                    self.advance();
+                    terminology.infrastructure_node = Some(self.expect_string()?);
+                }
+                Some(TokenKind::Relationship) => {
+                    self.advance();
+                    terminology.relationship = Some(self.expect_string()?);
+                }
+                _ => break,
+            }
+        }
+
+        Ok(terminology)
     }
 }
 
@@ -1885,7 +2780,42 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
 
     workspace.properties = ast.properties;
 
-    // Step 5: Store !docs and !adrs paths in workspace properties
+    // Step 5: Process workspace configuration block if present
+    if let Some(config_node) = ast.configuration {
+        let mut ws_config = WorkspaceConfiguration::default();
+
+        // Parse scope
+        if let Some(scope_str) = config_node.scope {
+            ws_config.scope = match scope_str.to_lowercase().as_str() {
+                "landscape" => Some(WorkspaceScope::Landscape),
+                "softwaresystem" => Some(WorkspaceScope::SoftwareSystem),
+                "none" => Some(WorkspaceScope::None),
+                _ => None,
+            };
+        }
+
+        // Parse visibility
+        if let Some(vis_str) = config_node.visibility {
+            ws_config.visibility = match vis_str.to_lowercase().as_str() {
+                "public" => Some(WorkspaceVisibility::Public),
+                "private" => Some(WorkspaceVisibility::Private),
+                _ => None,
+            };
+        }
+
+        // Parse users
+        for user_node in config_node.users {
+            let role = match user_node.role.to_lowercase().as_str() {
+                "readwrite" | "read-write" | "rw" => UserRole::ReadWrite,
+                _ => UserRole::ReadOnly,
+            };
+            ws_config.users.push(WorkspaceUser::new(user_node.username, role));
+        }
+
+        workspace.workspace_configuration = Some(ws_config);
+    }
+
+    // Step 6: Store !docs and !adrs paths in workspace properties
     for directive in &ast.directives {
         match directive {
             Directive::Docs(path) => {
@@ -1905,6 +2835,22 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
     if let Some(model_node) = ast.model {
         for element in &model_node.elements {
             build_element(&mut workspace, element, &mut identifiers)?;
+        }
+
+        // Process enterprise elements (marked as internal)
+        if let Some(enterprise) = &model_node.enterprise {
+            // Set enterprise name on the workspace
+            workspace.set_property("structurizr.enterprise", &enterprise.name);
+
+            // Build elements defined inside enterprise (these are internal)
+            for element in &enterprise.elements {
+                build_element(&mut workspace, element, &mut identifiers)?;
+            }
+
+            // Build groups inside enterprise
+            for group in &enterprise.groups {
+                build_group(&mut workspace, group, &mut identifiers)?;
+            }
         }
 
         // Build groups after all elements exist
@@ -1960,6 +2906,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
             if let Some(background) = view.properties.background {
                 v.properties = v.properties.with_background(background);
             }
+            if view.properties.default {
+                v.properties = v.properties.with_default(true);
+            }
             // Resolve include/exclude to populate elements
             v.properties.elements = resolve_view_elements(
                 workspace.model(),
@@ -1986,6 +2935,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 }
                 if let Some(background) = view.properties.background {
                     v.properties = v.properties.with_background(background);
+                }
+                if view.properties.default {
+                    v.properties = v.properties.with_default(true);
                 }
                 // Resolve include/exclude to populate elements
                 v.properties.elements = resolve_view_elements(
@@ -2015,6 +2967,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 if let Some(background) = view.properties.background {
                     v.properties = v.properties.with_background(background);
                 }
+                if view.properties.default {
+                    v.properties = v.properties.with_default(true);
+                }
                 // Resolve include/exclude to populate elements
                 v.properties.elements = resolve_view_elements(
                     workspace.model(),
@@ -2043,6 +2998,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
                 }
                 if let Some(background) = view.properties.background {
                     v.properties = v.properties.with_background(background);
+                }
+                if view.properties.default {
+                    v.properties = v.properties.with_default(true);
                 }
                 // Resolve include/exclude to populate elements
                 v.properties.elements = resolve_view_elements(
@@ -2090,6 +3048,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
             if let Some(background) = view.properties.background {
                 v.properties = v.properties.with_background(background);
             }
+            if view.properties.default {
+                v.properties = v.properties.with_default(true);
+            }
 
             // Convert content from AST nodes to core types with proper ordering
             v.steps = flatten_dynamic_content(&view.content, &identifiers);
@@ -2132,6 +3093,9 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
             }
             if let Some(background) = view.properties.background {
                 v.properties = v.properties.with_background(background);
+            }
+            if view.properties.default {
+                v.properties = v.properties.with_default(true);
             }
 
             workspace.views_mut().add_deployment_view(v);
@@ -2194,6 +3158,61 @@ fn build_workspace(mut ast: WorkspaceNode) -> Result<Workspace> {
         for theme in views_node.themes {
             workspace.styles_mut().add_theme(theme);
         }
+
+        // Process branding
+        if let Some(branding_node) = views_node.branding {
+            let mut branding = structurizr_core::style::Branding::default();
+            branding.logo = branding_node.logo;
+            if let Some(font_node) = branding_node.font {
+                branding.font = Some(structurizr_core::style::Font {
+                    name: font_node.name,
+                    url: font_node.url,
+                });
+            }
+            if let Some(ref mut config) = workspace.configuration {
+                config.branding = Some(branding);
+            }
+        }
+
+        // Process terminology
+        if let Some(terminology_node) = views_node.terminology {
+            let mut terminology = structurizr_core::style::Terminology::default();
+            terminology.enterprise = terminology_node.enterprise;
+            terminology.person = terminology_node.person;
+            terminology.software_system = terminology_node.software_system;
+            terminology.container = terminology_node.container;
+            terminology.component = terminology_node.component;
+            terminology.deployment_node = terminology_node.deployment_node;
+            terminology.infrastructure_node = terminology_node.infrastructure_node;
+            terminology.relationship = terminology_node.relationship;
+            if let Some(ref mut config) = workspace.configuration {
+                config.terminology = Some(terminology);
+            }
+        }
+
+        // Process image views
+        for view in views_node.image {
+            // Resolve element identifier to element ID
+            let element_id = view.element.and_then(|elem_ident| {
+                identifiers.get(&elem_ident).map(|id| id.to_string())
+            });
+
+            let mut v = ImageView {
+                properties: ViewProperties::new(
+                    view.properties.key.unwrap_or_else(|| "Image".to_string()),
+                ),
+                element_id,
+                content: view.content,
+                content_type: view.content_type,
+            };
+            if let Some(title) = view.properties.title {
+                v.properties = v.properties.with_title(title);
+            }
+            if let Some(description) = view.properties.description {
+                v.properties = v.properties.with_description(description);
+            }
+            workspace.views_mut().image_views.push(v);
+        }
     }
 
     Ok(workspace)
@@ -2238,6 +3257,17 @@ fn build_element(
             let node = build_deployment_node(element, identifiers)?;
             let id = node.id();
             workspace.model_mut().deployment_nodes.push(node);
+            id
+        }
+        ElementKind::CustomElement => {
+            // For customElement, the technology field holds the metadata type
+            let metadata = element.technology.clone().unwrap_or_else(|| "Custom".to_string());
+            let mut custom = CustomElement::new(&element.name, metadata);
+            if let Some(ref desc) = element.description {
+                custom = custom.with_description(desc);
+            }
+            let id = custom.id();
+            workspace.model_mut().custom_elements.push(custom);
             id
         }
         _ => {
@@ -2386,12 +3416,24 @@ fn build_deployment_node(
                     // Create a placeholder ID based on the name
                     ElementId::from_name(&child.name)
                 });
+                // Convert health check nodes to health checks
+                let health_checks: Vec<HealthCheck> = child.health_checks.iter().map(|hc| {
+                    let mut check = HealthCheck::new(&hc.name, &hc.url);
+                    if let Some(interval) = hc.interval {
+                        check = check.with_interval(interval);
+                    }
+                    if let Some(timeout) = hc.timeout {
+                        check = check.with_timeout(timeout);
+                    }
+                    check
+                }).collect();
                 let instance = ContainerInstance {
                     id: ElementId::from_name(&format!("{}Instance", child.name)),
                     container_id,
                     instance_id: 1,
                     tags: child.tags.clone(),
                     properties: child.properties.clone(),
+                    health_checks,
                 };
                 if let Some(ref id) = child.identifier {
                     identifiers.insert(id.clone(), instance.id);
@@ -2403,12 +3445,24 @@ fn build_deployment_node(
                 let system_id = identifiers.get(&child.name).copied().unwrap_or_else(|| {
                     ElementId::from_name(&child.name)
                 });
+                // Convert health check nodes to health checks
+                let health_checks: Vec<HealthCheck> = child.health_checks.iter().map(|hc| {
+                    let mut check = HealthCheck::new(&hc.name, &hc.url);
+                    if let Some(interval) = hc.interval {
+                        check = check.with_interval(interval);
+                    }
+                    if let Some(timeout) = hc.timeout {
+                        check = check.with_timeout(timeout);
+                    }
+                    check
+                }).collect();
                 let instance = SoftwareSystemInstance {
                     id: ElementId::from_name(&format!("{}Instance", child.name)),
                     software_system_id: system_id,
                     instance_id: 1,
                     tags: child.tags.clone(),
                     properties: child.properties.clone(),
+                    health_checks,
                 };
                 if let Some(ref id) = child.identifier {
                     identifiers.insert(id.clone(), instance.id);
@@ -2452,15 +3506,10 @@ fn build_element_relationships(
     element: &ElementNode,
     identifiers: &HashMap<String, ElementId>,
 ) -> Result<()> {
-    // Get this element's ID
-    let source_id = if let Some(ref id) = element.identifier {
-        identifiers.get(id).copied()
-    } else {
-        None
-    };
-
-    if let Some(source_id) = source_id {
-        for rel in &element.relationships {
+    // Process relationships defined inside this element
+    // The relationship's source is stored in rel.source, not the element's identifier
+    for rel in &element.relationships {
+        if let Some(&source_id) = identifiers.get(&rel.source) {
             if let Some(&dest_id) = identifiers.get(&rel.destination) {
                 workspace.model_mut().add_relationship_with_metadata(
                     source_id,
@@ -2845,5 +3894,64 @@ workspace "Test" {
         let workspace = parse(dsl).unwrap();
         assert_eq!(workspace.model().relationships.len(), 1);
         assert_eq!(workspace.model().relationships[0].technology, Some("HTTPS".to_string()));
+    }
+
+    #[test]
+    fn test_script_directive_inline() {
+        let dsl = r#"
+workspace "Test" {
+    !script lua {
+        workspace:setName("Modified")
+    }
+    model {
+    }
+}
+"#;
+        let ast = parse_to_ast(dsl).unwrap();
+        // Check that script directive was parsed
+        let has_script = ast.directives.iter().any(|d| matches!(d, Directive::Script(_)));
+        assert!(has_script, "Should have parsed script directive");
+
+        if let Some(Directive::Script(script)) = ast.directives.iter().find(|d| matches!(d, Directive::Script(_))) {
+            assert_eq!(script.language, Some("lua".to_string()));
+            assert!(script.content.is_some());
+            assert!(script.file_path.is_none());
+        }
+    }
+
+    #[test]
+    fn test_script_directive_file() {
+        let dsl = r#"
+workspace "Test" {
+    !script "scripts/modify.lua"
+    model {
+    }
+}
+"#;
+        let ast = parse_to_ast(dsl).unwrap();
+        // Check that script directive was parsed
+        let has_script = ast.directives.iter().any(|d| matches!(d, Directive::Script(_)));
+        assert!(has_script, "Should have parsed script directive");
+
+        if let Some(Directive::Script(script)) = ast.directives.iter().find(|d| matches!(d, Directive::Script(_))) {
+            assert!(script.language.is_none());
+            assert!(script.content.is_none());
+            assert_eq!(script.file_path, Some("scripts/modify.lua".to_string()));
+        }
+    }
+
+    #[test]
+    fn test_plugin_directive() {
+        let dsl = r#"
+workspace "Test" {
+    !plugin com.example.MyPlugin
+    model {
+    }
+}
+"#;
+        let ast = parse_to_ast(dsl).unwrap();
+        // Check that plugin directive was parsed
+        let has_plugin = ast.directives.iter().any(|d| matches!(d, Directive::Plugin(_)));
+        assert!(has_plugin, "Should have parsed plugin directive");
     }
 }

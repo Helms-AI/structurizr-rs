@@ -1,0 +1,27 @@
+[package]
+name = "structurizr-scripting"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+description = "Scripting and plugin support for structurizr-rs"
+
+[features]
+default = []
+wasm = ["wasmtime", "toml"]
+
+[dependencies]
+structurizr-core.workspace = true
+thiserror.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+
+# Lua scripting runtime
+mlua.workspace = true
+
+# For script file reading
+regex-lite.workspace = true
+
+# WASM plugin runtime (optional)
+wasmtime = { workspace = true, optional = true }
+toml = { workspace = true, optional = true }

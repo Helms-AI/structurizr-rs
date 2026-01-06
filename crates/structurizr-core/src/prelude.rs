@@ -7,8 +7,8 @@
 
 pub use crate::error::Error;
 pub use crate::model::{
-    Component, Container, ContainerInstance, DeploymentNode, ElementId, ElementProperties,
-    ElementRef, Group, InfrastructureNode, InteractionStyle, Location, Model, Person,
+    Component, Container, ContainerInstance, CustomElement, DeploymentNode, ElementId, ElementProperties,
+    ElementRef, Group, HealthCheck, InfrastructureNode, InteractionStyle, Location, Model, Person,
     Relationship, SoftwareSystem, SoftwareSystemInstance,
 };
 pub use crate::style::{Border, ElementStyle, IconPosition, LineStyle, RelationshipStyle, Routing, Shape, Styles};
@@ -18,4 +18,6 @@ pub use crate::view::{
     ImageView, RelationshipView, SystemContextView, SystemLandscapeView, Vertex, ViewProperties,
     Views,
 };
-pub use crate::workspace::Workspace;
+pub use crate::workspace::{
+    UserRole, Workspace, WorkspaceConfiguration, WorkspaceScope, WorkspaceUser, WorkspaceVisibility,
+};

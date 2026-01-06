@@ -6,6 +6,7 @@ members = [
     "crates/structurizr-render",
     "crates/structurizr-export",
     "crates/structurizr-web",
+    "crates/structurizr-scripting",
 ]
 
 [workspace.package]
@@ -66,12 +67,22 @@ regex-lite = "0.1"
 # Markdown parsing (GitHub Flavored Markdown)
 comrak = "0.31"
 
+# Lua scripting runtime (vendored to avoid system dependency)
+mlua = { version = "0.10", features = ["lua54", "serialize", "send", "vendored"] }
+
+# WASM runtime for plugins
+wasmtime = "27"
+
+# TOML parsing for plugin manifests
+toml = "0.8"
+
 # Internal crates
 structurizr-core = { path = "crates/structurizr-core" }
 structurizr-dsl = { path = "crates/structurizr-dsl" }
 structurizr-render = { path = "crates/structurizr-render" }
 structurizr-export = { path = "crates/structurizr-export" }
 structurizr-web = { path = "crates/structurizr-web" }
+structurizr-scripting = { path = "crates/structurizr-scripting" }
 
 [package]
 name = "structurizr-rs"
@@ -84,6 +95,11 @@ description.workspace = true
 [[bin]]
 name = "structurizr"
 path = "src/main.rs"
+
+[features]
+default = ["scripting"]
+# Enable script execution in DSL files (!script lua/groovy directives)
+scripting = ["structurizr-dsl/scripting"]
 
 [dependencies]
 structurizr-core.workspace = true

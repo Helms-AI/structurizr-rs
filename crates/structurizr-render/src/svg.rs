@@ -3112,6 +3112,7 @@ mod tests {
         // Create image view without content
         let mut image_view = ImageView {
             properties: structurizr_core::view::ViewProperties::new("image"),
+            element_id: None,
             content: None,
             content_type: None,
         };
@@ -3133,6 +3134,7 @@ mod tests {
         // Create image view with base64 content
         let image_view = ImageView {
             properties: structurizr_core::view::ViewProperties::new("image"),
+            element_id: None,
             content: Some("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==".to_string()),
             content_type: Some("image/png".to_string()),
         };

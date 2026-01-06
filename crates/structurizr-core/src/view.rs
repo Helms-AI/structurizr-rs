@@ -285,6 +285,9 @@ pub struct ViewProperties {
     /// Layout state for drag-and-drop positioning and history.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub layout_state: Option<LayoutState>,
+    /// Whether this is the default view of its type.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub default: bool,
 }
 
 impl ViewProperties {
@@ -299,7 +302,13 @@ impl ViewProperties {
             properties: HashMap::new(),
             background: None,
             layout_state: None,
+            default: false,
         }
+    }
+
+    pub fn with_default(mut self, is_default: bool) -> Self {
+        self.default = is_default;
+        self
     }
 
     pub fn with_title(mut self, title: impl Into<String>) -> Self {
@@ -521,6 +530,9 @@ impl CustomView {
 pub struct ImageView {
     #[serde(flatten)]
     pub properties: ViewProperties,
+    /// The element this image is associated with (element ID), or None for workspace-level
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub element_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]

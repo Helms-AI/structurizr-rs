@@ -35,6 +35,26 @@ pub struct WorkspaceNode {
     pub views: Option<ViewsNode>,
     pub properties: HashMap<String, String>,
     pub directives: Vec<Directive>,
+    /// Workspace-level configuration (scope, visibility, users)
+    pub configuration: Option<ConfigurationNode>,
+}
+
+/// Workspace-level configuration block.
+#[derive(Debug, Clone, Default)]
+pub struct ConfigurationNode {
+    /// Scope: landscape, softwaresystem, or none
+    pub scope: Option<String>,
+    /// Visibility: private or public
+    pub visibility: Option<String>,
+    /// Users with access to the workspace
+    pub users: Vec<UserNode>,
+}
+
+/// A user with access to the workspace.
+#[derive(Debug, Clone)]
+pub struct UserNode {
+    pub username: String,
+    pub role: String, // "ReadOnly" or "ReadWrite"
 }
 
 /// A directive like !identifiers, !impliedRelationships, !const, etc.
@@ -46,6 +66,25 @@ pub enum Directive {
     Include(String),
     Docs(String),
     Adrs(String),
+    /// Reference an existing element to bring it into scope or add to a group
+    Ref(String),
+    /// Extend a workspace from a URL or file
+    Extend(String),
+    /// Execute a script (inline or from file)
+    Script(ScriptDirective),
+    /// Load a plugin (not fully supported - requires JVM)
+    Plugin(String),
+}
+
+/// Script directive - inline or file-based script
+#[derive(Debug, Clone)]
+pub struct ScriptDirective {
+    /// Script language (lua, groovy, kotlin)
+    pub language: Option<String>,
+    /// Inline script content (if block provided)
+    pub content: Option<String>,
+    /// External script file path
+    pub file_path: Option<String>,
 }
 
 /// Identifier scoping mode.
@@ -63,6 +102,17 @@ pub struct ModelNode {
     pub relationships: Vec<RelationshipNode>,
     pub groups: Vec<GroupNode>,
     pub deployment_environments: Vec<DeploymentEnvironmentNode>,
+    /// Enterprise name - elements defined within enterprise block are marked as internal
+    pub enterprise: Option<EnterpriseNode>,
+}
+
+/// Enterprise block - defines the organizational boundary.
+/// Elements defined within an enterprise block are marked as internal.
+#[derive(Debug, Clone)]
+pub struct EnterpriseNode {
+    pub name: String,
+    pub elements: Vec<ElementNode>,
+    pub groups: Vec<GroupNode>,
 }
 
 /// An element definition (person, softwareSystem, container, component).
@@ -79,6 +129,19 @@ pub struct ElementNode {
     pub relationships: Vec<RelationshipNode>,
     /// Number of instances (for DeploymentNode). Can be a number or range like "2-10".
     pub instances: Option<String>,
+    /// Health checks (for ContainerInstance and SoftwareSystemInstance).
+    pub health_checks: Vec<HealthCheckNode>,
+}
+
+/// A health check definition for container/software system instances.
+#[derive(Debug, Clone)]
+pub struct HealthCheckNode {
+    pub name: String,
+    pub url: String,
+    /// Polling interval in seconds (default: 60)
+    pub interval: Option<u32>,
+    /// Timeout in milliseconds (default: 0)
+    pub timeout: Option<u32>,
 }
 
 /// Type of element.
@@ -92,6 +155,8 @@ pub enum ElementKind {
     InfrastructureNode,
     ContainerInstance,
     SoftwareSystemInstance,
+    /// Custom element for user-defined types
+    CustomElement,
 }
 
 /// A relationship definition.
@@ -132,8 +197,42 @@ pub struct ViewsNode {
     pub deployment: Vec<DeploymentViewNode>,
     pub filtered: Vec<FilteredViewNode>,
     pub custom: Vec<CustomViewNode>,
+    pub image: Vec<ImageViewNode>,
     pub styles: Option<StylesNode>,
     pub themes: Vec<String>,
+    /// Branding configuration (logo, font)
+    pub branding: Option<BrandingNode>,
+    /// Terminology customization for element types
+    pub terminology: Option<TerminologyNode>,
+}
+
+/// Branding configuration for the workspace.
+#[derive(Debug, Clone, Default)]
+pub struct BrandingNode {
+    /// Path or URL to a logo image
+    pub logo: Option<String>,
+    /// Custom font configuration
+    pub font: Option<FontNode>,
+}
+
+/// Font configuration.
+#[derive(Debug, Clone)]
+pub struct FontNode {
+    pub name: String,
+    pub url: Option<String>,
+}
+
+/// Terminology customization for element types.
+#[derive(Debug, Clone, Default)]
+pub struct TerminologyNode {
+    pub enterprise: Option<String>,
+    pub person: Option<String>,
+    pub software_system: Option<String>,
+    pub container: Option<String>,
+    pub component: Option<String>,
+    pub deployment_node: Option<String>,
+    pub infrastructure_node: Option<String>,
+    pub relationship: Option<String>,
 }
 
 /// Base view properties shared by all view types.
@@ -148,6 +247,17 @@ pub struct ViewPropertiesNode {
     pub properties: HashMap<String, String>,
     /// Background color for the view (e.g., "#1a1a1a" for dark mode).
     pub background: Option<String>,
+    /// Animation steps for the view
+    pub animations: Vec<AnimationStepNode>,
+    /// Whether this is the default view of its type.
+    pub default: bool,
+}
+
+/// An animation step that groups elements/relationships to show together.
+#[derive(Debug, Clone)]
+pub struct AnimationStepNode {
+    /// Element identifiers to include in this animation step
+    pub elements: Vec<String>,
 }
 
 /// Include or exclude directive in a view.
@@ -265,6 +375,18 @@ pub enum FilterMode {
 #[derive(Debug, Clone)]
 pub struct CustomViewNode {
     pub properties: ViewPropertiesNode,
+}
+
+/// Image view for embedding external diagrams or images.
+#[derive(Debug, Clone)]
+pub struct ImageViewNode {
+    /// The element this image is associated with (or "*" for workspace-level)
+    pub element: Option<String>,
+    pub properties: ViewPropertiesNode,
+    /// Content type (e.g., "plantuml", "mermaid", "image")
+    pub content_type: Option<String>,
+    /// URL or path to the content
+    pub content: Option<String>,
 }
 
 /// Styles block.

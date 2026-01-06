@@ -199,3 +199,31 @@ workspace {
     assert_eq!(view.properties.key, "Payment System-Context");
     assert_eq!(view.properties.title, Some("Context for Payment System".to_string()));
 }
+
+/// Test that script directives are parsed (execution requires 'scripting' feature)
+#[test]
+fn test_script_directive_parses() {
+    let dsl = r##"
+workspace "Test" {
+    !script lua {
+        -- This script would modify the workspace
+        workspace:setName("Modified by Script")
+    }
+    model {
+        user = person "User"
+    }
+}
+"##;
+
+    // Without scripting feature, scripts are parsed but not executed
+    // The workspace name should remain "Test"
+    let workspace = parse(dsl).unwrap();
+
+    // Verify parsing succeeded and model is intact
+    assert_eq!(workspace.model().people.len(), 1);
+
+    // When scripting feature is NOT enabled, name stays as "Test"
+    // When scripting IS enabled, name would be "Modified by Script"
+    #[cfg(not(feature = "scripting"))]
+    assert_eq!(workspace.name, "Test");
+}

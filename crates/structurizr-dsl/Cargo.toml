@@ -5,12 +5,19 @@ edition.workspace = true
 license.workspace = true
 description = "Structurizr DSL parser for architecture definitions"
 
+[features]
+default = []
+scripting = ["structurizr-scripting"]
+
 [dependencies]
 structurizr-core.workspace = true
 pest.workspace = true
 pest_derive.workspace = true
 thiserror.workspace = true
 serde.workspace = true
+
+# Optional scripting support
+structurizr-scripting = { workspace = true, optional = true }
 
 [dev-dependencies]
 pretty_assertions.workspace = true

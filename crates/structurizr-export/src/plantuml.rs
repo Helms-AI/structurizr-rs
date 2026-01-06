@@ -56,6 +56,14 @@ impl PlantUmlExporter {
             }
         }
 
+        // Add candidate custom elements
+        for custom in &model.custom_elements {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&custom.id()) { continue; }
+            }
+            candidate_ids.insert(custom.id());
+        }
+
         // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
         let connected_ids: HashSet<ElementId> = model.relationships
             .iter()
@@ -104,6 +112,23 @@ impl PlantUmlExporter {
                 sanitize_id(&id),
                 system.name(),
                 system.properties.description.as_deref().unwrap_or("")
+            ));
+        }
+
+        output.push('\n');
+
+        // Add custom elements
+        for custom in &model.custom_elements {
+            if !candidate_ids.contains(&custom.id()) { continue; }
+            if !connected_ids.contains(&custom.id()) { continue; }
+            let id = custom.properties.id.to_string();
+            element_ids.insert(id.clone());
+            // Use System_Ext to represent custom elements as external components
+            output.push_str(&format!(
+                "System_Ext({}, \"{}\", \"{}\")\n",
+                sanitize_id(&id),
+                custom.properties.name,
+                custom.properties.description.as_deref().unwrap_or("")
             ));
         }
 
@@ -169,6 +194,14 @@ impl PlantUmlExporter {
             }
         }
 
+        // Add candidate custom elements (for system context view)
+        for custom in &model.custom_elements {
+            if let Some(ref allowed) = allowed_ids {
+                if !allowed.contains(&custom.id()) { continue; }
+            }
+            candidate_ids.insert(custom.id());
+        }
+
         // Step 2: Build connected_ids from relationships where BOTH endpoints are candidates
         let connected_ids: HashSet<ElementId> = model.relationships
             .iter()
@@ -231,6 +264,23 @@ impl PlantUmlExporter {
                     system.properties.description.as_deref().unwrap_or("")
                 ));
             }
+        }
+
+        output.push('\n');
+
+        // Add custom elements (for system context view)
+        for custom in &model.custom_elements {
+            if !candidate_ids.contains(&custom.id()) { continue; }
+            if !connected_ids.contains(&custom.id()) { continue; }
+            let id = custom.properties.id.to_string();
+            element_ids.insert(id.clone());
+            // Use System_Ext to represent custom elements as external components
+            output.push_str(&format!(
+                "System_Ext({}, \"{}\", \"{}\")\n",
+                sanitize_id(&id),
+                custom.properties.name,
+                custom.properties.description.as_deref().unwrap_or("")
+            ));
         }
 
         output.push('\n');
@@ -772,6 +822,13 @@ fn find_element_name(model: &structurizr_core::model::Model, id: &str) -> String
                     return component.name().to_string();
                 }
             }
+        }
+    }
+
+    // Check custom elements
+    for custom in &model.custom_elements {
+        if custom.id().to_string() == id {
+            return custom.properties.name.clone();
         }
     }
 

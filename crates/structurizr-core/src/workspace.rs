@@ -119,6 +119,68 @@ impl Documentation {
     }
 }
 
+/// Scope of the workspace - determines what level of architecture is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum WorkspaceScope {
+    /// Landscape scope - shows all software systems.
+    Landscape,
+    /// Software system scope - focuses on a single software system.
+    SoftwareSystem,
+    /// No specific scope.
+    None,
+}
+
+/// Visibility of the workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum WorkspaceVisibility {
+    /// Private - only accessible to authorized users.
+    #[default]
+    Private,
+    /// Public - accessible to anyone.
+    Public,
+}
+
+/// Role a user has in the workspace.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "PascalCase")]
+pub enum UserRole {
+    /// Read-only access.
+    ReadOnly,
+    /// Read-write access.
+    ReadWrite,
+}
+
+/// A user with access to the workspace.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkspaceUser {
+    pub username: String,
+    pub role: UserRole,
+}
+
+impl WorkspaceUser {
+    pub fn new(username: impl Into<String>, role: UserRole) -> Self {
+        Self {
+            username: username.into(),
+            role,
+        }
+    }
+}
+
+/// Workspace-level configuration (scope, visibility, users).
+/// This is separate from ViewConfiguration which handles styles/branding.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WorkspaceConfiguration {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scope: Option<WorkspaceScope>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub visibility: Option<WorkspaceVisibility>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub users: Vec<WorkspaceUser>,
+}
+
 /// Metadata about a workspace.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct WorkspaceMetadata {
@@ -166,8 +228,12 @@ pub struct Workspace {
     pub views: Views,
     #[serde(default)]
     pub documentation: Documentation,
+    /// View configuration (styles, branding, terminology) - serialized in JSON.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub configuration: Option<ViewConfiguration>,
+    /// Workspace-level configuration (scope, visibility, users) - used for cloud deployment.
+    #[serde(default, rename = "workspaceConfiguration", skip_serializing_if = "Option::is_none")]
+    pub workspace_configuration: Option<WorkspaceConfiguration>,
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub properties: HashMap<String, String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -190,6 +256,7 @@ impl Workspace {
             views: Views::new(),
             documentation: Documentation::new(),
             configuration: Some(ViewConfiguration::default()),
+            workspace_configuration: None,
             properties: HashMap::new(),
             perspectives: Vec::new(),
         }

@@ -45,6 +45,18 @@ pub enum TokenKind {
     Url,
     Extends,
     Instances,
+    // Additional keywords for compatibility
+    Enterprise,
+    CustomElement,
+    Configuration,
+    Branding,
+    Logo,
+    Font,
+    Terminology,
+    Default,
+    Title,
+    Image,
+    HealthCheck,
 
     // Directives (start with !)
     DirectiveIdentifiers,
@@ -58,6 +70,9 @@ pub enum TokenKind {
     DirectiveElements,
     DirectiveRelationships,
     DirectiveRef,
+    DirectiveExtend,
+    DirectivePlugin,
+    DirectiveScript,
 
     // Symbols
     OpenBrace,
@@ -249,6 +264,22 @@ impl<'a> Lexer<'a> {
         s
     }
 
+    /// Read the rest of an identifier (without requiring a first character)
+    fn read_identifier_rest(&mut self) -> String {
+        let mut s = String::new();
+
+        while let Some(c) = self.peek() {
+            if c.is_alphanumeric() || c == '_' || c == '-' || c == '.' {
+                s.push(c);
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        s
+    }
+
     fn read_number(&mut self, first: char) -> i64 {
         let mut s = String::new();
         s.push(first);
@@ -305,6 +336,18 @@ impl<'a> Lexer<'a> {
             "url" => TokenKind::Url,
             "extends" => TokenKind::Extends,
             "instances" => TokenKind::Instances,
+            // Additional keywords for compatibility
+            "enterprise" => TokenKind::Enterprise,
+            "customelement" => TokenKind::CustomElement,
+            "configuration" => TokenKind::Configuration,
+            "branding" => TokenKind::Branding,
+            "logo" => TokenKind::Logo,
+            "font" => TokenKind::Font,
+            "terminology" => TokenKind::Terminology,
+            "default" => TokenKind::Default,
+            "title" => TokenKind::Title,
+            "image" => TokenKind::Image,
+            "healthcheck" => TokenKind::HealthCheck,
             _ => TokenKind::Identifier(s.to_string()),
         }
     }
@@ -324,7 +367,7 @@ impl<'a> Lexer<'a> {
         match s.to_lowercase().as_str() {
             "identifiers" => TokenKind::DirectiveIdentifiers,
             "impliedrelationships" => TokenKind::DirectiveImpliedRelationships,
-            "const" => TokenKind::DirectiveConst,
+            "const" | "constant" => TokenKind::DirectiveConst,
             "include" => TokenKind::DirectiveInclude,
             "docs" => TokenKind::DirectiveDocs,
             "adrs" => TokenKind::DirectiveAdrs,
@@ -333,6 +376,9 @@ impl<'a> Lexer<'a> {
             "elements" => TokenKind::DirectiveElements,
             "relationships" => TokenKind::DirectiveRelationships,
             "ref" => TokenKind::DirectiveRef,
+            "extend" => TokenKind::DirectiveExtend,
+            "plugin" => TokenKind::DirectivePlugin,
+            "script" => TokenKind::DirectiveScript,
             _ => TokenKind::Identifier(format!("!{}", s)),
         }
     }
@@ -363,16 +409,20 @@ impl<'a> Lexer<'a> {
                     self.advance();
                     Ok(Token::new(TokenKind::Arrow, location, 2))
                 } else if self.peek() == Some('-') {
-                    // Could be extended arrow like --->
+                    // Could be extended arrow like ---> or multiple dashes
+                    let mut dash_count = 1; // Already consumed first dash
                     while self.peek() == Some('-') {
                         self.advance();
+                        dash_count += 1;
                     }
                     if self.peek() == Some('>') {
                         self.advance();
-                        Ok(Token::new(TokenKind::Arrow, location, 3))
+                        Ok(Token::new(TokenKind::Arrow, location, dash_count + 1))
                     } else {
-                        // Treat as identifier
-                        let s = self.read_identifier('-');
+                        // Treat as identifier, including all the dashes we consumed
+                        let prefix: String = std::iter::repeat('-').take(dash_count).collect();
+                        let rest = self.read_identifier_rest();
+                        let s = prefix + &rest;
                         let len = s.len();
                         Ok(Token::new(TokenKind::Identifier(s), location, len))
                     }
