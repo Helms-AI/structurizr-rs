@@ -1,0 +1,23 @@
+[package]
+name = "rust-hello-arch"
+version = "1.0.0"
+edition = "2021"
+authors = ["structurizr-rs contributors"]
+description = "Educational WASM plugin demonstrating Rust's zero-cost abstractions"
+
+# Exclude from parent workspace
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# No dependencies - we're using no_std for minimal size
+
+[profile.release]
+# Optimize for small binary size
+opt-level = "s"        # Size optimization
+lto = true             # Link-time optimization
+strip = true           # Strip debug symbols
+codegen-units = 1      # Single codegen unit for better optimization
+panic = "abort"        # Don't include unwinding code

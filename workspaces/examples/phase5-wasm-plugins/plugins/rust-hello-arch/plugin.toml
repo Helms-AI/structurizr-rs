@@ -1,0 +1,29 @@
+# Plugin manifest for Rust Hello Architecture
+# This demonstrates the plugin manifest structure
+
+[plugin]
+name = "rust-hello-arch"
+version = "1.0.0"
+description = "Educational plugin demonstrating Rust's WASM capabilities: ownership, no_std, and zero-cost abstractions"
+wasm = "plugin.wasm"
+author = "structurizr-rs contributors"
+homepage = "https://github.com/structurizr/structurizr-rs"
+
+[capabilities]
+# Read-only access to workspace (can get workspace name)
+read_workspace = true
+
+# We don't need to modify the workspace
+modify_workspace = false
+
+# No filesystem access needed
+filesystem = false
+
+# No network access needed
+network = false
+
+# Memory limit: 16MB (more than enough for this simple plugin)
+max_memory = 16777216
+
+# Execution timeout: 1 second (should complete instantly)
+max_time = 1000
