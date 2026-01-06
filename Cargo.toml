@@ -108,10 +108,10 @@ scripting = ["structurizr-dsl/scripting"]
 mcp = ["dep:structurizr-mcp", "structurizr-web/mcp-proxy"]
 # Enable WebSocket transport for MCP server
 mcp-websocket = ["mcp", "structurizr-mcp/websocket"]
-# Enable HTTP/SSE transport for MCP server
-mcp-sse = ["mcp", "structurizr-mcp/sse"]
+# Enable Streamable HTTP transport for MCP server
+mcp-http = ["mcp", "structurizr-mcp/http"]
 # Enable all MCP transports
-mcp-all = ["mcp", "mcp-websocket", "mcp-sse"]
+mcp-all = ["mcp", "mcp-websocket", "mcp-http"]
 
 [dependencies]
 structurizr-core.workspace = true

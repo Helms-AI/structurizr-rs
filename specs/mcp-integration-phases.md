@@ -19,12 +19,12 @@ This document specifies the remaining work for the MCP (Model Context Protocol) 
 - `crates/structurizr-mcp/src/server.rs` - Multi-transport support
 - `crates/structurizr-web/src/mcp_proxy.rs` - MCP proxy module (NEW)
 - `crates/structurizr-web/src/server.rs` - Proxy route integration
-- `Cargo.toml` - Feature flags for mcp-websocket, mcp-sse, mcp-all
+- `Cargo.toml` - Feature flags for mcp-websocket, mcp-http, mcp-all
 
 **Endpoints**:
 - `GET /mcp/health` - Health check endpoint
 - `GET /mcp/ws` - WebSocket proxy endpoint
-- `GET /mcp/sse` - SSE proxy endpoint
+- `ANY /mcp` - Streamable HTTP proxy endpoint (GET for SSE, POST for JSON-RPC, DELETE for session)
 
 ---
 
@@ -372,7 +372,7 @@ pub async fn auth_middleware<B>(
 // In server.rs
 let protected_routes = Router::new()
     .route("/mcp/ws", get(mcp_ws_handler))
-    .route("/mcp/sse", get(mcp_sse_handler))
+    .route("/mcp", any(mcp_http_handler))  // Streamable HTTP (GET/POST/DELETE)
     .route("/ws/collab", get(collaboration_ws_handler))
     .layer(middleware::from_fn_with_state(auth_config.clone(), auth_middleware));
 

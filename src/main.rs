@@ -100,11 +100,11 @@ enum Commands {
         #[arg(long, default_value = "workspaces")]
         workspaces_dir: PathBuf,
 
-        /// Transport type (stdio, websocket, sse)
+        /// Transport type (stdio, websocket, http)
         #[arg(long, default_value = "stdio")]
         transport: String,
 
-        /// Port for websocket/sse transport
+        /// Port for websocket/http transport
         #[arg(short, long, default_value = "8586")]
         port: u16,
     },
@@ -390,12 +390,11 @@ async fn main() -> anyhow::Result<()> {
                     println!("Connect via ws://localhost:{}", port);
                     server.run_websocket(addr).await?;
                 }
-                #[cfg(feature = "mcp-sse")]
-                "sse" | "http" => {
+                #[cfg(feature = "mcp-http")]
+                "http" => {
                     let addr = std::net::SocketAddr::from(([0, 0, 0, 0], port));
-                    println!("MCP server starting on HTTP/SSE transport");
+                    println!("MCP server starting on Streamable HTTP transport");
                     println!("Endpoint: http://localhost:{}/mcp", port);
-                    println!("SSE stream: http://localhost:{}/mcp/sse", port);
                     server.run_http(addr).await?;
                 }
                 #[cfg(not(feature = "mcp-websocket"))]
@@ -404,17 +403,17 @@ async fn main() -> anyhow::Result<()> {
                     eprintln!("  cargo build --features mcp-websocket");
                     std::process::exit(1);
                 }
-                #[cfg(not(feature = "mcp-sse"))]
-                "sse" | "http" => {
-                    eprintln!("HTTP/SSE transport not enabled. Rebuild with:");
-                    eprintln!("  cargo build --features mcp-sse");
+                #[cfg(not(feature = "mcp-http"))]
+                "http" => {
+                    eprintln!("HTTP transport not enabled. Rebuild with:");
+                    eprintln!("  cargo build --features mcp-http");
                     std::process::exit(1);
                 }
                 _ => {
                     eprintln!("Unknown transport '{}'. Available transports:", transport);
                     eprintln!("  stdio     - Standard input/output (default)");
                     eprintln!("  websocket - WebSocket server (requires websocket feature)");
-                    eprintln!("  sse       - HTTP/SSE server (requires sse feature)");
+                    eprintln!("  http      - Streamable HTTP server (requires http feature)");
                     std::process::exit(1);
                 }
             }

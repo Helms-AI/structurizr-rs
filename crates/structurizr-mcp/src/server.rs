@@ -3797,7 +3797,7 @@ impl rmcp::ServerHandler for StructurizrMcpServer {
 }
 
 impl StructurizrMcpServer {
-    #[cfg(feature = "sse")]
+    #[cfg(feature = "http")]
     fn get_tool_list(&self) -> Vec<serde_json::Value> {
         // Get all tools from the tool router
         self.tool_router.map.values().map(|route| {
@@ -3809,22 +3809,269 @@ impl StructurizrMcpServer {
         }).collect()
     }
 
-    #[cfg(feature = "sse")]
-    async fn call_tool(&self, tool_name: &str, _params: serde_json::Value) -> Result<serde_json::Value, String> {
+    #[cfg(feature = "http")]
+    async fn call_tool(&self, tool_name: &str, params: serde_json::Value) -> Result<serde_json::Value, String> {
         use std::borrow::Cow;
 
         // Verify the tool exists in the router
         let _tool_route = self.tool_router.map.get(&Cow::Borrowed(tool_name))
             .ok_or_else(|| format!("Unknown tool: {}", tool_name))?;
 
-        // TODO: Full integration would invoke the tool through rmcp context
-        // For now, return a placeholder indicating the tool exists
-        Ok(serde_json::json!({
-            "content": [{
-                "type": "text",
-                "text": format!("Tool '{}' found but SSE call routing needs full integration with rmcp context", tool_name)
-            }]
-        }))
+        // Helper to convert CallToolResult to JSON
+        // Content and CallToolResult implement Serialize, so we serialize directly
+        fn result_to_json(result: std::result::Result<CallToolResult, RmcpError>) -> Result<serde_json::Value, String> {
+            match result {
+                Ok(call_result) => {
+                    // Serialize the CallToolResult content directly
+                    // The Content type from rmcp implements Serialize with proper MCP format
+                    let content: Vec<serde_json::Value> = call_result.content.into_iter()
+                        .filter_map(|c| serde_json::to_value(c).ok())
+                        .collect();
+
+                    Ok(serde_json::json!({
+                        "content": content,
+                        "isError": call_result.is_error.unwrap_or(false)
+                    }))
+                }
+                Err(e) => {
+                    Ok(serde_json::json!({
+                        "content": [{
+                            "type": "text",
+                            "text": format!("Tool error: {:?}", e)
+                        }],
+                        "isError": true
+                    }))
+                }
+            }
+        }
+
+        // Dispatch to the appropriate tool method
+        match tool_name {
+            // ================================================================
+            // Workspace Information Tools
+            // ================================================================
+            "workspace_list" => {
+                result_to_json(self.workspace_list().await)
+            }
+            "workspace_load" => {
+                let p: WorkspaceIdParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_load(Parameters(p)).await)
+            }
+            "workspace_validate" => {
+                let p: WorkspaceIdParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_validate(Parameters(p)).await)
+            }
+            "workspace_export_json" => {
+                let p: WorkspaceIdParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_export_json(Parameters(p)).await)
+            }
+            "workspace_get_model" => {
+                let p: WorkspaceIdParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_get_model(Parameters(p)).await)
+            }
+            "workspace_get_views" => {
+                let p: WorkspaceIdParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_get_views(Parameters(p)).await)
+            }
+            "workspace_search" => {
+                let p: WorkspaceSearchParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_search(Parameters(p)).await)
+            }
+            "workspace_discard_changes" => {
+                let p: WorkspaceIdParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_discard_changes(Parameters(p)).await)
+            }
+            "workspace_save_json" => {
+                let p: SaveWorkspaceParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_save_json(Parameters(p)).await)
+            }
+            "workspace_save_dsl" => {
+                let p: SaveDslParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.workspace_save_dsl(Parameters(p)).await)
+            }
+
+            // ================================================================
+            // Render and Export Tools
+            // ================================================================
+            "render_svg" => {
+                let p: RenderViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.render_svg(Parameters(p)).await)
+            }
+            "export_plantuml" => {
+                let p: RenderViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.export_plantuml(Parameters(p)).await)
+            }
+            "export_mermaid" => {
+                let p: RenderViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.export_mermaid(Parameters(p)).await)
+            }
+            "export_d2" => {
+                let p: RenderViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.export_d2(Parameters(p)).await)
+            }
+            "export_dot" => {
+                let p: RenderViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.export_dot(Parameters(p)).await)
+            }
+
+            // ================================================================
+            // Model Manipulation Tools
+            // ================================================================
+            "model_add_person" => {
+                let p: AddPersonParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.model_add_person(Parameters(p)).await)
+            }
+            "model_add_system" => {
+                let p: AddSoftwareSystemParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.model_add_system(Parameters(p)).await)
+            }
+            "model_add_container" => {
+                let p: AddContainerParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.model_add_container(Parameters(p)).await)
+            }
+            "model_add_component" => {
+                let p: AddComponentParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.model_add_component(Parameters(p)).await)
+            }
+            "model_add_relationship" => {
+                let p: AddRelationshipParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.model_add_relationship(Parameters(p)).await)
+            }
+            "model_update_element" => {
+                let p: UpdateElementParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.model_update_element(Parameters(p)).await)
+            }
+            "model_remove_element" => {
+                let p: RemoveElementParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.model_remove_element(Parameters(p)).await)
+            }
+            "model_list_pending_changes" => {
+                let p: ListModifiedElementsParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.model_list_pending_changes(Parameters(p)).await)
+            }
+
+            // ================================================================
+            // View Creation and Management Tools
+            // ================================================================
+            "view_create_system_landscape" => {
+                let p: CreateSystemLandscapeViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_create_system_landscape(Parameters(p)).await)
+            }
+            "view_create_system_context" => {
+                let p: CreateSystemContextViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_create_system_context(Parameters(p)).await)
+            }
+            "view_create_container" => {
+                let p: CreateContainerViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_create_container(Parameters(p)).await)
+            }
+            "view_create_component" => {
+                let p: CreateComponentViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_create_component(Parameters(p)).await)
+            }
+            "view_create_dynamic" => {
+                let p: CreateDynamicViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_create_dynamic(Parameters(p)).await)
+            }
+            "view_create_deployment" => {
+                let p: CreateDeploymentViewParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_create_deployment(Parameters(p)).await)
+            }
+            "view_add_element" => {
+                let p: ViewAddElementParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_add_element(Parameters(p)).await)
+            }
+            "view_add_all_elements" => {
+                let p: ViewAddAllElementsParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_add_all_elements(Parameters(p)).await)
+            }
+            "view_remove_element" => {
+                let p: ViewRemoveElementParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_remove_element(Parameters(p)).await)
+            }
+            "view_set_auto_layout" => {
+                let p: ViewSetAutoLayoutParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.view_set_auto_layout(Parameters(p)).await)
+            }
+
+            // ================================================================
+            // Documentation Tools
+            // ================================================================
+            "docs_add_section" => {
+                let p: DocsAddSectionParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.docs_add_section(Parameters(p)).await)
+            }
+            "docs_update_section" => {
+                let p: DocsUpdateSectionParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.docs_update_section(Parameters(p)).await)
+            }
+            "docs_remove_section" => {
+                let p: DocsRemoveSectionParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.docs_remove_section(Parameters(p)).await)
+            }
+            "docs_list_sections" => {
+                let p: DocsListSectionsParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.docs_list_sections(Parameters(p)).await)
+            }
+
+            // ================================================================
+            // ADR (Architecture Decision Record) Tools
+            // ================================================================
+            "adr_create" => {
+                let p: AdrCreateParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.adr_create(Parameters(p)).await)
+            }
+            "adr_update" => {
+                let p: AdrUpdateParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.adr_update(Parameters(p)).await)
+            }
+            "adr_list" => {
+                let p: AdrListParam = serde_json::from_value(params)
+                    .map_err(|e| format!("Invalid params: {}", e))?;
+                result_to_json(self.adr_list(Parameters(p)).await)
+            }
+
+            // Unknown tool - should not happen if tool_router check passed
+            _ => Err(format!("Tool '{}' not implemented in HTTP dispatch", tool_name))
+        }
     }
 
     /// Run the server with stdio transport
@@ -3951,26 +4198,33 @@ impl StructurizrMcpServer {
         }
     }
 
-    /// Run the server with HTTP/SSE transport (Streamable HTTP)
-    #[cfg(feature = "sse")]
+    /// Run the server with Streamable HTTP transport
+    ///
+    /// This implements the MCP Streamable HTTP transport protocol, which uses:
+    /// - POST requests for JSON-RPC messages
+    /// - DELETE requests for session termination
+    #[cfg(feature = "http")]
     pub async fn run_http(self, addr: std::net::SocketAddr) -> crate::error::Result<()> {
-        use axum::{routing::{get, post}, Router};
+        use axum::{
+            routing::{any, get},
+            Router,
+        };
         use tower_http::cors::CorsLayer;
 
-        info!("Starting MCP server on HTTP at {}", addr);
+        info!("Starting MCP server on Streamable HTTP at {}", addr);
         self.initialize().await?;
 
         // Shared state for HTTP handlers
         let shared_state = Arc::new(self);
 
+        // Build router with Streamable HTTP endpoint
         let app = Router::new()
-            .route("/mcp", post(handle_mcp_post))
-            .route("/mcp/sse", get(handle_mcp_sse))
+            .route("/mcp", any(handle_streamable_http))
             .route("/health", get(|| async { "OK" }))
             .layer(CorsLayer::permissive())
             .with_state(shared_state);
 
-        info!("MCP HTTP server listening on http://{}", addr);
+        info!("MCP Streamable HTTP server listening on http://{}/mcp", addr);
 
         let listener = tokio::net::TcpListener::bind(addr).await.map_err(|e| {
             crate::error::McpError::InternalError(format!("Failed to bind HTTP: {}", e))
@@ -3984,247 +4238,146 @@ impl StructurizrMcpServer {
     }
 }
 
-// Session management structures for future SSE enhancements
-// These will be used for multi-client session tracking and request correlation
-#[cfg(feature = "sse")]
-#[derive(Clone)]
-#[allow(dead_code)]
-struct SseSession {
-    id: String,
-    tx: tokio::sync::mpsc::UnboundedSender<Result<axum::response::sse::Event, axum::Error>>,
-}
-
-#[cfg(feature = "sse")]
-#[allow(dead_code)]
-struct SseState {
-    sessions: Arc<RwLock<HashMap<String, SseSession>>>,
-    request_handlers: Arc<RwLock<HashMap<String, tokio::sync::oneshot::Sender<serde_json::Value>>>>,
-}
-
-#[cfg(feature = "sse")]
-#[allow(dead_code)]
-impl SseState {
-    fn new() -> Self {
-        Self {
-            sessions: Arc::new(RwLock::new(HashMap::new())),
-            request_handlers: Arc::new(RwLock::new(HashMap::new())),
-        }
-    }
-}
-
-#[cfg(feature = "sse")]
-async fn handle_mcp_post(
+/// Handle Streamable HTTP requests (POST for JSON-RPC, DELETE for session termination)
+#[cfg(feature = "http")]
+async fn handle_streamable_http(
     axum::extract::State(server): axum::extract::State<Arc<StructurizrMcpServer>>,
-    jar: axum_extra::extract::CookieJar,
-    axum::Json(request): axum::Json<serde_json::Value>,
+    request: axum::http::Request<axum::body::Body>,
 ) -> impl axum::response::IntoResponse {
-    use axum_extra::extract::cookie::Cookie;
-
-    debug!("Received MCP POST: {:?}", request);
-
-    // Extract session ID from cookie
-    let session_id = jar.get("mcp_session_id")
-        .map(|c: &axum_extra::extract::cookie::Cookie| c.value().to_string())
-        .unwrap_or_else(|| {
-            // Generate new session if not present
-            uuid::Uuid::new_v4().to_string()
-        });
-
-    // Extract request ID - preserve the original value type (can be string, number, or null)
-    let request_id = request.get("id")
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-
-    // Extract method
-    let method = request.get("method")
-        .and_then(|m| m.as_str())
-        .unwrap_or("");
-
-    // Process the request based on method
-    let response = match method {
-        "initialize" => {
-            // MCP protocol initialization - return server capabilities
-            info!("Handling MCP initialize request");
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "protocolVersion": "2024-11-05",
-                    "capabilities": {
-                        "tools": {
-                            "listChanged": false
-                        },
-                        "resources": {
-                            "subscribe": false,
-                            "listChanged": false
-                        },
-                        "prompts": {
-                            "listChanged": false
-                        }
-                    },
-                    "serverInfo": {
-                        "name": "structurizr-mcp",
-                        "version": env!("CARGO_PKG_VERSION")
-                    }
-                }
-            })
-        }
-        "notifications/initialized" | "initialized" => {
-            // Client acknowledges initialization - no response needed for notifications
-            // But if it has an ID, respond with success
-            if !request_id.is_null() {
-                serde_json::json!({
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "result": {}
-                })
-            } else {
-                // Notification - return empty but don't error
-                serde_json::json!({})
-            }
-        }
-        "tools/list" => {
-            // Return tool list from the tool router
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "tools": server.get_tool_list()
-                }
-            })
-        }
-        "tools/call" => {
-            // Extract tool name and parameters from MCP protocol
-            let params = request.get("params").cloned().unwrap_or(serde_json::json!({}));
-            let tool_name = params.get("name")
-                .and_then(|n| n.as_str())
-                .unwrap_or("");
-            let tool_args = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
-
-            // Call the tool through the router
-            match server.call_tool(tool_name, tool_args).await {
-                Ok(result) => {
-                    serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "result": result
-                    })
-                }
-                Err(e) => {
-                    serde_json::json!({
-                        "jsonrpc": "2.0",
-                        "id": request_id,
-                        "error": {
-                            "code": -32603,
-                            "message": format!("Tool execution failed: {}", e)
-                        }
-                    })
-                }
-            }
-        }
-        "resources/list" => {
-            // Return empty resources list for now
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "resources": []
-                }
-            })
-        }
-        "prompts/list" => {
-            // Return empty prompts list for now
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "result": {
-                    "prompts": []
-                }
-            })
-        }
-        _ => {
-            // Unknown method - log it for debugging
-            debug!("Unknown MCP method: {}", method);
-            serde_json::json!({
-                "jsonrpc": "2.0",
-                "id": request_id,
-                "error": {
-                    "code": -32601,
-                    "message": format!("Method not found: {}", method)
-                }
-            })
-        }
+    use axum::{
+        http::{Method, StatusCode},
+        response::IntoResponse,
     };
 
-    // Set session cookie if new
-    let mut jar = jar;
-    if !jar.get("mcp_session_id").is_some() {
-        jar = jar.add(Cookie::build(("mcp_session_id", session_id))
-            .http_only(true)
-            .same_site(axum_extra::extract::cookie::SameSite::Lax)
-            .path("/")
-            .build());
+    let method = request.method().clone();
+
+    match method {
+        Method::POST => {
+            // JSON-RPC request handling
+            let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        format!("Failed to read request body: {}", e),
+                    )
+                        .into_response();
+                }
+            };
+
+            let request_json: serde_json::Value = match serde_json::from_slice(&body_bytes) {
+                Ok(json) => json,
+                Err(e) => {
+                    return (
+                        StatusCode::BAD_REQUEST,
+                        axum::Json(serde_json::json!({
+                            "jsonrpc": "2.0",
+                            "error": {
+                                "code": -32700,
+                                "message": format!("Parse error: {}", e)
+                            },
+                            "id": null
+                        })),
+                    )
+                        .into_response();
+                }
+            };
+
+            debug!("Streamable HTTP POST: {:?}", request_json);
+
+            let request_id = request_json.get("id").cloned().unwrap_or(serde_json::Value::Null);
+            let method_name = request_json
+                .get("method")
+                .and_then(|m| m.as_str())
+                .unwrap_or("");
+
+            let response = match method_name {
+                "initialize" => {
+                    info!("Handling MCP initialize request");
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {
+                                "tools": { "listChanged": false },
+                                "resources": { "subscribe": false, "listChanged": false },
+                                "prompts": { "listChanged": false }
+                            },
+                            "serverInfo": {
+                                "name": "structurizr-mcp",
+                                "version": env!("CARGO_PKG_VERSION")
+                            }
+                        }
+                    })
+                }
+                "notifications/initialized" | "initialized" => {
+                    if !request_id.is_null() {
+                        serde_json::json!({ "jsonrpc": "2.0", "id": request_id, "result": {} })
+                    } else {
+                        serde_json::json!({})
+                    }
+                }
+                "tools/list" => {
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": { "tools": server.get_tool_list() }
+                    })
+                }
+                "tools/call" => {
+                    let params = request_json.get("params").cloned().unwrap_or(serde_json::json!({}));
+                    let tool_name = params.get("name").and_then(|n| n.as_str()).unwrap_or("");
+                    let tool_args = params.get("arguments").cloned().unwrap_or(serde_json::json!({}));
+
+                    match server.call_tool(tool_name, tool_args).await {
+                        Ok(result) => {
+                            serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "result": result
+                            })
+                        }
+                        Err(e) => {
+                            serde_json::json!({
+                                "jsonrpc": "2.0",
+                                "id": request_id,
+                                "error": { "code": -32603, "message": format!("Tool error: {}", e) }
+                            })
+                        }
+                    }
+                }
+                "resources/list" => {
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": { "resources": [] }
+                    })
+                }
+                "prompts/list" => {
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "result": { "prompts": [] }
+                    })
+                }
+                _ => {
+                    debug!("Unknown MCP method: {}", method_name);
+                    serde_json::json!({
+                        "jsonrpc": "2.0",
+                        "id": request_id,
+                        "error": { "code": -32601, "message": format!("Method not found: {}", method_name) }
+                    })
+                }
+            };
+
+            axum::Json(response).into_response()
+        }
+        Method::DELETE => {
+            // Session termination
+            info!("Streamable HTTP: Session termination requested");
+            (StatusCode::OK, "Session terminated").into_response()
+        }
+        _ => (StatusCode::METHOD_NOT_ALLOWED, "Method not allowed").into_response(),
     }
-
-    (jar, axum::Json(response))
-}
-
-#[cfg(feature = "sse")]
-async fn handle_mcp_sse(
-    axum::extract::State(_server): axum::extract::State<Arc<StructurizrMcpServer>>,
-    axum::extract::Host(host): axum::extract::Host,
-    jar: axum_extra::extract::CookieJar,
-) -> impl axum::response::IntoResponse {
-    use axum::response::sse::{Event, KeepAlive, Sse};
-    use axum_extra::extract::cookie::Cookie;
-    use futures_util::stream::{self, StreamExt};
-    use std::time::Duration;
-
-    // Extract or create session ID
-    let session_id = jar.get("mcp_session_id")
-        .map(|c: &axum_extra::extract::cookie::Cookie| c.value().to_string())
-        .unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
-
-    info!("SSE connection established for session: {}", session_id);
-
-    // Build the POST endpoint URL - MCP protocol requires sending this to the client
-    let endpoint_url = format!("http://{}/mcp", host);
-
-    // Create the initial endpoint event
-    let initial_event = Event::default()
-        .event("endpoint")
-        .data(endpoint_url);
-
-    // Create a stream that sends the initial event, then stays open forever
-    // The keep-alive will send periodic pings to maintain the connection
-    let initial_stream = stream::once(async move {
-        Ok::<_, axum::Error>(initial_event)
-    });
-
-    // Create an infinite pending stream that never yields but keeps the connection alive
-    let pending_stream = stream::pending::<Result<Event, axum::Error>>();
-
-    // Chain them together: initial event followed by infinite pending
-    let combined_stream = initial_stream.chain(pending_stream);
-
-    // Set session cookie
-    let mut jar = jar;
-    if !jar.get("mcp_session_id").is_some() {
-        jar = jar.add(Cookie::build(("mcp_session_id", session_id.clone()))
-            .http_only(true)
-            .same_site(axum_extra::extract::cookie::SameSite::Lax)
-            .path("/")
-            .build());
-    }
-
-    // Return SSE stream with cookie jar and keep-alive
-    // The keep-alive will send periodic comments to maintain the connection
-    (
-        jar,
-        Sse::new(combined_stream).keep_alive(
-            KeepAlive::new()
-                .interval(Duration::from_secs(15))
-                .text(":"),  // SSE comment format for keep-alive
-        ),
-    )
 }

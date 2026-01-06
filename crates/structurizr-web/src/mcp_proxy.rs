@@ -124,16 +124,16 @@ impl McpProxyState {
     async fn check_health(&self) -> bool {
         let port = *self.actual_port.read().await;
         let url = match self.config.server.transport.as_str() {
-            "sse" | "http" => format!("http://127.0.0.1:{}/health", port),
+            "http" => format!("http://127.0.0.1:{}/health", port),
             _ => {
-                // For WebSocket, try to connect
+                // For WebSocket and stdio, try TCP connect
                 return tokio::net::TcpStream::connect(SocketAddr::from(([127, 0, 0, 1], port)))
                     .await
                     .is_ok();
             }
         };
 
-        // For HTTP/SSE, check the health endpoint
+        // For HTTP, check the health endpoint
         if let Ok(response) = reqwest::get(&url).await {
             response.status().is_success()
         } else {
@@ -167,10 +167,10 @@ impl McpProxyState {
         format!("ws://127.0.0.1:{}", port)
     }
 
-    /// Get the SSE URL for the MCP server
-    pub async fn sse_url(&self) -> String {
+    /// Get the HTTP URL for the MCP server
+    pub async fn http_url(&self) -> String {
         let port = *self.actual_port.read().await;
-        format!("http://127.0.0.1:{}/mcp/sse", port)
+        format!("http://127.0.0.1:{}/mcp", port)
     }
 }
 
@@ -285,14 +285,16 @@ async fn proxy_websocket(
     Ok(())
 }
 
-/// SSE proxy handler
-pub async fn sse_proxy_handler(
+/// Streamable HTTP proxy handler
+///
+/// Proxies HTTP requests to the MCP server's Streamable HTTP endpoint.
+/// - POST → JSON-RPC request proxy
+/// - DELETE → Session termination proxy
+pub async fn http_proxy_handler(
     Extension(proxy): Extension<Arc<McpProxyState>>,
-    axum::extract::Host(host): axum::extract::Host,
+    request: axum::http::Request<axum::body::Body>,
 ) -> Response {
-    use axum::response::sse::{Event, KeepAlive, Sse};
-    use futures_util::stream::StreamExt;
-    use std::time::Duration;
+    use axum::http::Method;
 
     // Ensure MCP server is running
     if let Err(e) = proxy.ensure_running().await {
@@ -300,137 +302,60 @@ pub async fn sse_proxy_handler(
         return (StatusCode::SERVICE_UNAVAILABLE, "MCP server unavailable").into_response();
     }
 
-    let sse_url = proxy.sse_url().await;
-
-    // Build the proxy endpoint URL using the original client's host
-    // This ensures clients POST back to the proxy, not the internal MCP server
-    let proxy_endpoint = format!("http://{}/mcp", host);
-
-    // Connect to MCP server's SSE endpoint
+    let method = request.method().clone();
+    let http_url = proxy.http_url().await;
     let client = reqwest::Client::new();
 
-    match client.get(&sse_url).send().await {
-        Ok(response) => {
-            // Check if response is successful
-            if !response.status().is_success() {
-                error!("MCP SSE endpoint returned error: {}", response.status());
-                return (StatusCode::BAD_GATEWAY, "MCP SSE endpoint error").into_response();
-            }
+    match method {
+        Method::POST => {
+            // JSON-RPC request proxy
+            let body_bytes = match axum::body::to_bytes(request.into_body(), usize::MAX).await {
+                Ok(bytes) => bytes,
+                Err(e) => {
+                    error!("Failed to read request body: {}", e);
+                    return (StatusCode::BAD_REQUEST, "Invalid request body").into_response();
+                }
+            };
 
-            // Create event stream from response
-            let stream = response.bytes_stream()
-                .map(move |chunk_result| {
-                    let proxy_endpoint = proxy_endpoint.clone();
-                    match chunk_result {
-                        Ok(bytes) => {
-                            // Parse SSE events from bytes - handle multi-line format
-                            let text = String::from_utf8_lossy(&bytes);
-
-                            // Parse SSE fields from the chunk
-                            let mut event_type: Option<String> = None;
-                            let mut data: Option<String> = None;
-                            let mut id: Option<String> = None;
-
-                            for line in text.lines() {
-                                if line.starts_with("event:") {
-                                    event_type = Some(line.trim_start_matches("event:").trim().to_string());
-                                } else if line.starts_with("data:") {
-                                    data = Some(line.trim_start_matches("data:").trim().to_string());
-                                } else if line.starts_with("id:") {
-                                    id = Some(line.trim_start_matches("id:").trim().to_string());
-                                } else if line.trim() == ":" {
-                                    // Keep-alive comment - ignore
-                                }
-                            }
-
-                            // Build the event with parsed fields
-                            let mut event = Event::default();
-                            if let Some(ref et) = event_type {
-                                event = event.event(et.clone());
-                            }
-
-                            // Rewrite endpoint URLs to point to the proxy
-                            if let Some(d) = data {
-                                let rewritten_data = if event_type.as_deref() == Some("endpoint") {
-                                    // Replace the internal endpoint URL with the proxy URL
-                                    proxy_endpoint.clone()
-                                } else {
-                                    d
-                                };
-                                event = event.data(rewritten_data);
-                            }
-
-                            if let Some(i) = id {
-                                event = event.id(i);
-                            }
-
-                            Ok::<_, axum::Error>(event)
-                        }
+            match client
+                .post(&http_url)
+                .header("Content-Type", "application/json")
+                .body(body_bytes.to_vec())
+                .send()
+                .await
+            {
+                Ok(response) => {
+                    let status = StatusCode::from_u16(response.status().as_u16())
+                        .unwrap_or(StatusCode::OK);
+                    match response.json::<serde_json::Value>().await {
+                        Ok(json) => (status, Json(json)).into_response(),
                         Err(e) => {
-                            error!("Error reading SSE stream: {}", e);
-                            Ok(Event::default()
-                                .event("error")
-                                .data(format!("Stream error: {}", e)))
+                            error!("Failed to parse MCP response: {}", e);
+                            (StatusCode::BAD_GATEWAY, "Invalid MCP response").into_response()
                         }
-                    }
-                });
-
-            // Return SSE response with keep-alive
-            Sse::new(stream)
-                .keep_alive(
-                    KeepAlive::new()
-                        .interval(Duration::from_secs(30))
-                        .text(":")
-                )
-                .into_response()
-        }
-        Err(e) => {
-            error!("Failed to connect to MCP SSE endpoint: {}", e);
-            (StatusCode::BAD_GATEWAY, "Failed to connect to MCP server").into_response()
-        }
-    }
-}
-
-/// POST proxy handler for MCP requests
-pub async fn post_proxy_handler(
-    Extension(proxy): Extension<Arc<McpProxyState>>,
-    Json(request): Json<serde_json::Value>,
-) -> Response {
-    use axum::Json;
-
-    // Ensure MCP server is running
-    if let Err(e) = proxy.ensure_running().await {
-        error!("Failed to ensure MCP server is running: {}", e);
-        return (StatusCode::SERVICE_UNAVAILABLE, "MCP server unavailable").into_response();
-    }
-
-    let port = *proxy.actual_port.read().await;
-    let post_url = format!("http://127.0.0.1:{}/mcp", if port != 0 { port } else { proxy.config.server.port });
-
-    // Forward POST to MCP server
-    let client = reqwest::Client::new();
-    match client.post(&post_url)
-        .json(&request)
-        .send()
-        .await {
-        Ok(response) => {
-            if response.status().is_success() {
-                match response.json::<serde_json::Value>().await {
-                    Ok(json) => Json(json).into_response(),
-                    Err(e) => {
-                        error!("Failed to parse MCP response: {}", e);
-                        (StatusCode::BAD_GATEWAY, "Invalid MCP response").into_response()
                     }
                 }
-            } else {
-                error!("MCP server returned error: {}", response.status());
-                (StatusCode::BAD_GATEWAY, "MCP server error").into_response()
+                Err(e) => {
+                    error!("Failed to forward request to MCP server: {}", e);
+                    (StatusCode::BAD_GATEWAY, "Failed to connect to MCP server").into_response()
+                }
             }
         }
-        Err(e) => {
-            error!("Failed to forward request to MCP server: {}", e);
-            (StatusCode::BAD_GATEWAY, "Failed to connect to MCP server").into_response()
+        Method::DELETE => {
+            // Session termination proxy
+            match client.delete(&http_url).send().await {
+                Ok(response) => {
+                    let status = StatusCode::from_u16(response.status().as_u16())
+                        .unwrap_or(StatusCode::OK);
+                    (status, "Session terminated").into_response()
+                }
+                Err(e) => {
+                    error!("Failed to send DELETE to MCP server: {}", e);
+                    (StatusCode::BAD_GATEWAY, "Failed to terminate session").into_response()
+                }
+            }
         }
+        _ => (StatusCode::METHOD_NOT_ALLOWED, "Method not allowed").into_response(),
     }
 }
 

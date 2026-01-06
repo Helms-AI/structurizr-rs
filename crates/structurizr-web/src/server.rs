@@ -55,11 +55,12 @@ impl Server {
         // Add MCP proxy routes if enabled
         #[cfg(feature = "mcp-proxy")]
         if let Some(proxy) = mcp_proxy {
+            use axum::routing::any;
             app = app
                 .route("/mcp/health", get(crate::mcp_proxy::mcp_health))
-                .route("/mcp", post(crate::mcp_proxy::post_proxy_handler))
+                // Streamable HTTP endpoint - handles GET (SSE), POST (JSON-RPC), DELETE (session termination)
+                .route("/mcp", any(crate::mcp_proxy::http_proxy_handler))
                 .route("/mcp/ws", get(crate::mcp_proxy::websocket_proxy_handler))
-                .route("/mcp/sse", get(crate::mcp_proxy::sse_proxy_handler))
                 // OAuth metadata endpoints - return proper JSON 404 to prevent OAuth flow
                 .route("/.well-known/oauth-authorization-server", get(crate::mcp_proxy::oauth_metadata_handler))
                 .route("/.well-known/oauth-protected-resource", get(crate::mcp_proxy::oauth_protected_resource_handler))

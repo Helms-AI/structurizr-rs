@@ -1936,8 +1936,9 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     description: 'Add MCP server using the claude command',
                     type: 'command',
                     commands: [
-                        {{ label: 'Add server (user scope)', code: 'claude mcp add structurizr --transport sse http://localhost:8585/mcp/sse --scope user' }},
-                        {{ label: 'Add server (project scope)', code: 'claude mcp add structurizr --transport sse http://localhost:8585/mcp/sse --scope project' }},
+                        {{ label: 'Add server - HTTP (user scope)', code: 'claude mcp add structurizr --transport http http://localhost:8585/mcp --scope user' }},
+                        {{ label: 'Add server - HTTP (project scope)', code: 'claude mcp add structurizr --transport http http://localhost:8585/mcp --scope project' }},
+                        {{ label: 'Add server - WebSocket (user scope)', code: 'claude mcp add structurizr --transport websocket ws://localhost:8585/mcp/ws --scope user' }},
                         {{ label: 'List configured servers', code: 'claude mcp list' }},
                         {{ label: 'Remove server', code: 'claude mcp remove structurizr' }}
                     ]
@@ -1951,8 +1952,8 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     config: `{{
   "mcpServers": {{
     "structurizr": {{
-      "type": "sse",
-      "url": "http://localhost:8585/mcp/sse"
+      "type": "http",
+      "url": "http://localhost:8585/mcp"
     }}
   }}
 }}`
@@ -1995,8 +1996,9 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     steps: [
                         'Open Command Palette: Cmd/Ctrl + Shift + P',
                         'Search for "MCP: Add Server"',
-                        'Select "HTTP (server-sent events)"',
-                        'Enter URL: http://localhost:8585/mcp/sse',
+                        'Select "HTTP (Streamable)" or "WebSocket"',
+                        'For HTTP: Enter URL http://localhost:8585/mcp',
+                        'For WebSocket: Enter URL ws://localhost:8585/mcp/ws',
                         'Enter name: structurizr'
                     ]
                 }},
@@ -2021,8 +2023,8 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     config: `{{
   "mcpServers": {{
     "structurizr": {{
-      "type": "sse",
-      "url": "http://localhost:8585/mcp/sse"
+      "type": "http",
+      "url": "http://localhost:8585/mcp"
     }}
   }}
 }}`
@@ -2042,8 +2044,9 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     steps: [
                         'Open Command Palette: Cmd/Ctrl + Shift + P',
                         'Search for "MCP: Add Server"',
-                        'Select "HTTP (server-sent events)"',
-                        'Enter URL: http://localhost:8585/mcp/sse'
+                        'Select "HTTP (Streamable)" or "WebSocket"',
+                        'For HTTP: Enter URL http://localhost:8585/mcp',
+                        'For WebSocket: Enter URL ws://localhost:8585/mcp/ws'
                     ]
                 }},
                 {{
@@ -2069,8 +2072,8 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     config: `{{
   "mcpServers": {{
     "structurizr": {{
-      "type": "sse",
-      "url": "http://localhost:8585/mcp/sse"
+      "type": "http",
+      "url": "http://localhost:8585/mcp"
     }}
   }}
 }}`
@@ -2090,8 +2093,9 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     steps: [
                         'Open Command Palette: Cmd/Ctrl + Shift + P',
                         'Search for "MCP: Add Server"',
-                        'Select "HTTP (HTTP or Server-Sent events)"',
-                        'Enter URL: http://localhost:8585/mcp/sse',
+                        'Select "HTTP (Streamable)" or "WebSocket"',
+                        'For HTTP: Enter URL http://localhost:8585/mcp',
+                        'For WebSocket: Enter URL ws://localhost:8585/mcp/ws',
                         'Choose scope: Workspace (recommended) or User'
                     ]
                 }},
@@ -2115,8 +2119,8 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     config: `{{
   "servers": {{
     "structurizr": {{
-      "type": "sse",
-      "url": "http://localhost:8585/mcp/sse"
+      "type": "http",
+      "url": "http://localhost:8585/mcp"
     }}
   }}
 }}`
@@ -2134,7 +2138,7 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     description: 'Configure via Zed settings file',
                     type: 'config',
                     path: '~/.config/zed/settings.json',
-                    note: 'Zed currently supports stdio-based MCP servers. SSE support may be limited.',
+                    note: 'Zed currently supports stdio-based MCP servers. HTTP/WebSocket may require plugins.',
                     config: `{{
   "context_servers": {{
     "structurizr": {{
@@ -2158,7 +2162,7 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     recommended: true,
                     description: 'Ask Cline to add the tool via chat',
                     type: 'chat',
-                    prompt: 'Add a tool that connects to structurizr-rs for architecture diagrams at http://localhost:8585/mcp/sse'
+                    prompt: 'Add a tool that connects to structurizr-rs for architecture diagrams at http://localhost:8585/mcp (HTTP) or ws://localhost:8585/mcp/ws (WebSocket)'
                 }},
                 {{
                     name: 'Settings UI',
@@ -2181,8 +2185,8 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                     config: `{{
   "mcpServers": {{
     "structurizr": {{
-      "type": "sse",
-      "url": "http://localhost:8585/mcp/sse"
+      "type": "http",
+      "url": "http://localhost:8585/mcp"
     }}
   }}
 }}`
@@ -2204,8 +2208,9 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                         'Navigate to Tools > AI Assistant > Model Context Protocol (MCP)',
                         'Click "+" to add new server',
                         'Set Name: structurizr',
-                        'Set Type: SSE',
-                        'Set URL: http://localhost:8585/mcp/sse',
+                        'Set Type: HTTP or WebSocket',
+                        'For HTTP: Set URL http://localhost:8585/mcp',
+                        'For WebSocket: Set URL ws://localhost:8585/mcp/ws',
                         'Click Apply'
                     ],
                     note: 'Requires IntelliJ IDEA 2025.1+ with AI Assistant plugin'
@@ -2512,9 +2517,10 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
                 </div>
 
                 <div class="info-box">
-                    <h4><i data-lucide="info"></i> MCP Endpoint</h4>
+                    <h4><i data-lucide="info"></i> MCP Endpoints</h4>
                     <p>
-                        The SSE endpoint is available at: <code>http://localhost:8585/mcp/sse</code>
+                        <strong>HTTP (Streamable):</strong> <code>http://localhost:8585/mcp</code><br>
+                        <strong>WebSocket:</strong> <code>ws://localhost:8585/mcp/ws</code>
                     </p>
                     <p style="margin-top: 8px; font-size: 13px; color: #666;">
                         Make sure structurizr-rs is running with <code>cargo run -- serve</code> before using MCP.

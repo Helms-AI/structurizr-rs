@@ -2,7 +2,23 @@
 
 ## Overview
 
-structurizr-rs includes a Model Context Protocol (MCP) server that enables AI assistants like Claude to interact with C4 architecture diagrams through natural language. This integration exposes workspace management, diagram rendering, and export capabilities via a standardized RPC interface using the official Rust MCP SDK (rmcp).
+structurizr-rs includes a Model Context Protocol (MCP) server that enables AI assistants like Claude to interact with C4 architecture diagrams through natural language. This integration exposes workspace management, diagram rendering, and export capabilities via a standardized RPC interface using the official Rust MCP SDK (rmcp v0.12).
+
+## Quick Start
+
+```bash
+# Build with all MCP transports
+cargo build --features mcp-all
+
+# Start MCP server with stdio (for Claude Desktop, Claude Code)
+structurizr mcp-serve --workspaces-dir ./workspaces
+
+# Start MCP server with WebSocket transport
+structurizr mcp-serve --workspaces-dir ./workspaces --transport websocket --port 8586
+
+# Start MCP server with Streamable HTTP transport
+structurizr mcp-serve --workspaces-dir ./workspaces --transport http --port 8586
+```
 
 ## Features
 
@@ -17,7 +33,7 @@ structurizr-rs includes a Model Context Protocol (MCP) server that enables AI as
 - **SVG Rendering**: Render any view to high-quality SVG diagrams
 - **Multi-Format Export**: Export views to PlantUML, Mermaid, D2, DOT/Graphviz, and JSON
 - **Search**: Find elements by name or description
-- **Multiple Transports**: stdio, WebSocket, and HTTP/SSE for flexible integration
+- **Multiple Transports**: stdio, WebSocket, and Streamable HTTP for flexible integration
 - **Web Proxy Integration**: Access MCP via `/mcp/*` endpoints on the web server
 
 ### Available Tools (40 total)
@@ -98,12 +114,126 @@ structurizr-rs includes a Model Context Protocol (MCP) server that enables AI as
 | `workspace_save_dsl` | Save modified workspace to Structurizr DSL format |
 | `workspace_discard_changes` | Discard pending modifications and revert to original |
 
+## Transport Options
+
+structurizr-rs MCP server supports three transport mechanisms for connecting AI assistants:
+
+### Transport Comparison
+
+| Feature | stdio | WebSocket | Streamable HTTP |
+|---------|-------|-----------|-----------------|
+| **Best For** | Claude Desktop, Claude Code, Cursor | Real-time apps, custom integrations | Web clients, REST-style APIs |
+| **Connection** | Process stdin/stdout | Persistent bidirectional | Request/response + SSE |
+| **Default Port** | N/A (process-based) | 8586 | 8586 |
+| **Build Feature** | `mcp` (default) | `mcp-websocket` | `mcp-http` |
+| **Cargo Flag** | `--features mcp` | `--features mcp-websocket` | `--features mcp-http` |
+| **Bidirectional** | ✅ Yes | ✅ Yes | ✅ Yes (via SSE) |
+| **Multiple Clients** | ❌ One per process | ✅ Yes | ✅ Yes |
+| **Firewall Friendly** | ✅ N/A | ⚠️ Requires WS | ✅ HTTP only |
+
+### stdio Transport (Default)
+
+The stdio transport uses standard input/output streams for communication. This is the primary transport for AI coding assistants that spawn MCP servers as child processes.
+
+**Best for**: Claude Desktop, Claude Code, Cursor, and other tools that manage MCP server lifecycle.
+
+```bash
+# Build with stdio support (included in base mcp feature)
+cargo build --features mcp
+
+# Start server
+structurizr mcp-serve --workspaces-dir ./workspaces --transport stdio
+```
+
+**Characteristics**:
+- No network configuration needed
+- AI tool manages process lifecycle
+- One client per server instance
+- Lowest latency for local usage
+
+### WebSocket Transport
+
+The WebSocket transport provides a persistent, bidirectional connection over TCP. Ideal for real-time applications and custom integrations.
+
+**Best for**: Custom applications, browser-based tools, real-time collaboration.
+
+```bash
+# Build with WebSocket support
+cargo build --features mcp-websocket
+
+# Start server on default port (8586)
+structurizr mcp-serve --workspaces-dir ./workspaces --transport websocket
+
+# Start server on custom port
+structurizr mcp-serve --workspaces-dir ./workspaces --transport websocket --port 9000
+```
+
+**Connection URL**: `ws://localhost:8586` (or your custom port)
+
+**Characteristics**:
+- Full-duplex communication
+- Supports multiple concurrent clients
+- Server-initiated notifications
+- Requires WebSocket-capable client
+
+### Streamable HTTP Transport
+
+The Streamable HTTP transport uses standard HTTP for JSON-RPC requests with Server-Sent Events (SSE) for server notifications. This is the modern replacement for the deprecated SSE transport.
+
+**Best for**: REST-style integrations, web applications, environments with WebSocket restrictions.
+
+```bash
+# Build with HTTP support
+cargo build --features mcp-http
+
+# Start server on default port (8586)
+structurizr mcp-serve --workspaces-dir ./workspaces --transport http
+
+# Start server on custom port
+structurizr mcp-serve --workspaces-dir ./workspaces --transport http --port 9000
+```
+
+**Endpoint**: `http://localhost:8586/mcp`
+
+**HTTP Methods**:
+| Method | Purpose | Content-Type |
+|--------|---------|--------------|
+| `POST` | JSON-RPC requests | `application/json` |
+| `GET` | SSE notifications stream | `text/event-stream` |
+| `DELETE` | Session termination | N/A |
+
+**Characteristics**:
+- Works through HTTP proxies and firewalls
+- No persistent connection required for requests
+- SSE provides server-to-client notifications
+- Compatible with standard HTTP clients
+
+### Build All Transports
+
+To build with all transport options:
+
+```bash
+cargo build --features mcp-all
+```
+
+This enables `mcp`, `mcp-websocket`, and `mcp-http` features.
+
 ## Installation
 
 The MCP server is included as an optional feature. Build with:
 
 ```bash
+# Basic MCP support (stdio transport only)
 cargo build --features mcp
+
+# With WebSocket transport
+cargo build --features mcp-websocket
+
+# With HTTP transport
+cargo build --features mcp-http
+
+# All transports
+cargo build --features mcp-all
 ```
 
 ## Configuration
@@ -142,7 +272,7 @@ auto_start = true
 
 [mcp.server]
 port = 8586
-transport = "websocket"  # stdio | websocket | sse
+transport = "websocket"  # stdio | websocket | http
 health_check_interval_ms = 30000
 
 [mcp.workspace_scope]
@@ -182,35 +312,73 @@ Patterns support:
 
 ## Usage
 
-### Starting the MCP Server
+### CLI Reference
+
+The `mcp-serve` command starts the MCP server with configurable options:
+
+```
+structurizr mcp-serve [OPTIONS]
+```
+
+**Options**:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--workspaces-dir <PATH>` | `workspaces` | Directory containing workspace folders |
+| `--transport <TYPE>` | `stdio` | Transport type: `stdio`, `websocket`, or `http` |
+| `--port <PORT>` | `8586` | Port for WebSocket/HTTP transports (ignored for stdio) |
+
+**Examples**:
 
 ```bash
-# Start with stdio transport (for Claude Desktop, Cursor, Claude Code, etc.)
+# stdio transport (default, for AI tools)
 structurizr mcp-serve --workspaces-dir ./workspaces
 
-# Start with WebSocket transport
-structurizr mcp-serve --workspaces-dir ./workspaces --transport websocket --port 8586
+# WebSocket transport on custom port
+structurizr mcp-serve --workspaces-dir ./workspaces --transport websocket --port 9000
 
-# Start with HTTP/SSE transport
-structurizr mcp-serve --workspaces-dir ./workspaces --transport sse --port 8586
+# Streamable HTTP transport
+structurizr mcp-serve --workspaces-dir ./workspaces --transport http --port 8586
+
+# With verbose logging
+RUST_LOG=debug structurizr mcp-serve --workspaces-dir ./workspaces
 ```
 
 ### Using the Web Proxy
 
-When running the web server, MCP is automatically available via proxy endpoints:
+When running the web server with the `mcp-proxy` feature, MCP endpoints are automatically available through the web server:
 
 ```bash
-# Start the web server (MCP proxy enabled by default)
+# Start the web server (MCP proxy enabled by default if configured)
 structurizr serve --port 8080
-
-# MCP is now available at:
-# - WebSocket: ws://localhost:8080/mcp/ws
-# - Health check: http://localhost:8080/mcp/health
 ```
 
-### Configuring Claude Desktop
+**Web Proxy Endpoints**:
 
-Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS):
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/mcp` | GET | SSE stream for server notifications (with `Accept: text/event-stream`) |
+| `/mcp` | POST | JSON-RPC requests |
+| `/mcp` | DELETE | Session termination |
+| `/mcp/ws` | WebSocket | WebSocket MCP transport |
+| `/mcp/health` | GET | Health check status |
+| `/.well-known/oauth-authorization-server` | GET | OAuth metadata (returns 404, no auth required) |
+| `/.well-known/oauth-protected-resource` | GET | OAuth resource metadata (returns 404) |
+
+**Example URLs** (assuming web server on port 8080):
+- WebSocket: `ws://localhost:8080/mcp/ws`
+- HTTP endpoint: `http://localhost:8080/mcp`
+- Health check: `http://localhost:8080/mcp/health`
+
+## AI Tool Configuration
+
+### Claude Desktop
+
+Add to your Claude Desktop configuration:
+
+**macOS**: `~/Library/Application Support/Claude/claude_desktop_config.json`
+**Windows**: `%APPDATA%\Claude\claude_desktop_config.json`
+**Linux**: `~/.config/Claude/claude_desktop_config.json`
 
 ```json
 {
@@ -224,9 +392,52 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 }
 ```
 
-### Configuring Claude Code
+**With custom workspaces directory**:
+```json
+{
+  "mcpServers": {
+    "structurizr": {
+      "command": "structurizr",
+      "args": ["mcp-serve", "--workspaces-dir", "/Users/me/projects/architecture/workspaces"],
+      "env": {
+        "RUST_LOG": "info"
+      }
+    }
+  }
+}
+```
 
-Add to your Claude Code MCP settings:
+### Claude Code
+
+Add to your Claude Code settings (`.mcp.json` in project root or global settings):
+
+**Project-level** (`.mcp.json` in project root):
+```json
+{
+  "mcpServers": {
+    "structurizr": {
+      "command": "structurizr",
+      "args": ["mcp-serve", "--workspaces-dir", "./workspaces"]
+    }
+  }
+}
+```
+
+**Global settings** (`~/.claude/settings.json`):
+```json
+{
+  "mcpServers": {
+    "structurizr": {
+      "command": "/usr/local/bin/structurizr",
+      "args": ["mcp-serve", "--workspaces-dir", "/home/user/workspaces"]
+    }
+  }
+}
+```
+
+### Cursor
+
+Add to Cursor's MCP configuration (Settings → Extensions → MCP Servers):
 
 ```json
 {
@@ -237,6 +448,87 @@ Add to your Claude Code MCP settings:
     }
   }
 }
+```
+
+### VS Code with Continue.dev
+
+For Continue.dev extension, add to `.continue/config.json`:
+
+```json
+{
+  "mcpServers": {
+    "structurizr": {
+      "command": "structurizr",
+      "args": ["mcp-serve", "--workspaces-dir", "./workspaces"]
+    }
+  }
+}
+```
+
+### Custom WebSocket Client
+
+For custom applications using the WebSocket transport:
+
+```javascript
+// JavaScript/Node.js example
+const WebSocket = require('ws');
+
+const ws = new WebSocket('ws://localhost:8586');
+
+ws.on('open', () => {
+  // Send MCP initialize request
+  ws.send(JSON.stringify({
+    jsonrpc: "2.0",
+    id: 1,
+    method: "initialize",
+    params: {
+      protocolVersion: "2024-11-05",
+      capabilities: {},
+      clientInfo: { name: "my-app", version: "1.0.0" }
+    }
+  }));
+});
+
+ws.on('message', (data) => {
+  const response = JSON.parse(data);
+  console.log('Received:', response);
+});
+```
+
+### Custom HTTP Client
+
+For applications using the Streamable HTTP transport:
+
+```bash
+# Initialize session
+curl -X POST http://localhost:8586/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "initialize",
+    "params": {
+      "protocolVersion": "2024-11-05",
+      "capabilities": {},
+      "clientInfo": { "name": "curl-client", "version": "1.0.0" }
+    }
+  }'
+
+# List workspaces
+curl -X POST http://localhost:8586/mcp \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "workspace_list",
+      "arguments": {}
+    }
+  }'
+
+# Subscribe to server notifications (SSE)
+curl -N -H "Accept: text/event-stream" http://localhost:8586/mcp
 ```
 
 ## Architecture
@@ -262,7 +554,7 @@ crates/structurizr-mcp/
 - **tokio**: Async runtime for server operations
 - **tracing**: Structured logging
 - **tokio-tungstenite**: WebSocket transport support
-- **axum**: HTTP/SSE transport and web proxy integration
+- **axum**: Streamable HTTP transport and web proxy integration
 
 ### State Management
 
@@ -662,7 +954,7 @@ Claude: Workspace saved to 'workspaces/platform_horizon.json'.
 
 ### Phase 7 ✅ Complete
 - WebSocket transport via tokio-tungstenite
-- HTTP/SSE transport via Axum
+- Streamable HTTP transport via Axum
 - Web server proxy integration (`/mcp/*` endpoints)
 - Automatic MCP process spawning from web server
 - Health monitoring and reconnection support
@@ -686,22 +978,116 @@ Claude: Workspace saved to 'workspaces/platform_horizon.json'.
 
 ## Troubleshooting
 
-### MCP Server Won't Start
+### General Issues
+
+#### MCP Server Won't Start
 - Ensure workspaces directory exists and contains valid workspaces
-- Check that no other process is using the same transport
+- Check that no other process is using the same port (for WebSocket/HTTP)
 - Verify the binary has execute permissions
 - Check logs: `RUST_LOG=debug structurizr mcp-serve ...`
 
-### Claude Can't Connect
-- Verify Claude Desktop/Code configuration path is correct
-- Ensure the MCP server process can be spawned
-- Check that the structurizr binary is in PATH or use absolute path
-- Restart Claude after configuration changes
-
-### Views Not Rendering
+#### Views Not Rendering
 - Use `workspace_get_views` first to get valid view keys
 - Ensure the workspace DSL is valid (use `workspace_validate`)
 - Check that the view type is supported for the export format
+
+### Transport-Specific Issues
+
+#### stdio Transport
+
+**Claude Desktop/Code Can't Connect**:
+- Verify configuration file path is correct:
+  - macOS: `~/Library/Application Support/Claude/claude_desktop_config.json`
+  - Windows: `%APPDATA%\Claude\claude_desktop_config.json`
+  - Linux: `~/.config/Claude/claude_desktop_config.json`
+- Ensure the structurizr binary path is absolute or in PATH
+- Check that the command is `structurizr` (not `./structurizr` or the full path)
+- Restart the AI tool after configuration changes
+- Test manually: `structurizr mcp-serve --workspaces-dir ./workspaces`
+
+**Process Exits Immediately**:
+- Verify workspaces directory exists
+- Check for parse errors in workspace DSL files
+- Run with `RUST_LOG=debug` to see detailed output
+
+#### WebSocket Transport
+
+**Connection Refused**:
+```bash
+# Check if server is running
+curl http://localhost:8586/health
+
+# Verify no port conflicts
+lsof -i :8586
+```
+
+**Connection Drops**:
+- Check firewall settings for WebSocket connections
+- Ensure no proxy is interfering with WebSocket upgrade
+- Try a different port: `--port 9000`
+
+**Multiple Clients Not Working**:
+- Verify using WebSocket transport (not stdio)
+- Check server logs for connection handling
+
+#### Streamable HTTP Transport
+
+**POST Requests Fail**:
+```bash
+# Test basic connectivity
+curl -X POST http://localhost:8586/mcp \
+  -H "Content-Type: application/json" \
+  -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'
+```
+
+**SSE Stream Not Working**:
+- Ensure using `Accept: text/event-stream` header
+- Check that your HTTP client supports SSE
+- Verify no reverse proxy is buffering responses
+
+**CORS Issues**:
+- The server includes permissive CORS headers by default
+- If behind a proxy, ensure CORS headers are preserved
+
+### Web Proxy Issues
+
+#### Proxy Not Starting
+- Ensure `mcp-proxy` feature is enabled in build
+- Check `structurizr.toml` configuration:
+  ```toml
+  [mcp]
+  enabled = true
+  auto_start = true
+  ```
+- Verify MCP server binary can be spawned from web server process
+
+#### Health Check Failing
+```bash
+# Check proxy health
+curl http://localhost:8080/mcp/health
+
+# Check underlying MCP server health
+curl http://localhost:8586/health
+```
+
+#### OAuth Errors from MCP Clients
+- The server returns 404 for OAuth endpoints (no auth required)
+- If you see OAuth-related errors, the client may be misconfigured
+- Check that the client isn't trying to authenticate
+
+### Debug Mode
+
+Enable comprehensive logging:
+```bash
+# Full debug output
+RUST_LOG=debug structurizr mcp-serve --workspaces-dir ./workspaces
+
+# Just MCP-related logs
+RUST_LOG=structurizr_mcp=debug structurizr mcp-serve --workspaces-dir ./workspaces
+
+# Web server + MCP proxy logs
+RUST_LOG=structurizr_web=debug,structurizr_mcp=debug structurizr serve
+```
 
 ## Related Documentation
 

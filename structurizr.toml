@@ -28,8 +28,8 @@ auto_start = true
 [mcp.server]
 # MCP server port (used internally)
 port = 8586
-# Transport type: stdio | websocket | sse
-transport = "sse"  # NEW DEFAULT (was "websocket")
+# Transport type: stdio | websocket | http
+transport = "http"  # Streamable HTTP (recommended for web proxy)
 # Health check interval in milliseconds
 health_check_interval_ms = 30000
 
@@ -41,14 +41,11 @@ timeout_ms = 30000
 # Number of retry attempts for failed requests
 retry_attempts = 3
 
-[mcp.sse]
-# SSE-specific configuration
+[mcp.http]
+# Streamable HTTP transport configuration
 keep_alive_interval_ms = 30000
 max_connections_per_client = 5
 request_timeout_ms = 30000
-# Custom reconnection pattern: 1s×4, 3s×3, 5s continuous
-reconnect_pattern = "custom"
-cookie_session = true
 
 [mcp.websocket]
 # WebSocket still available as fallback

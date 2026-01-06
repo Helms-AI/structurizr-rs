@@ -9,7 +9,7 @@ description = "Model Context Protocol server for structurizr-rs"
 default = ["stdio"]
 stdio = []
 websocket = ["tokio-tungstenite"]
-sse = ["axum", "axum-extra", "tower-http", "tokio-stream"]
+http = ["axum", "tower-http", "tokio-stream"]
 
 [dependencies]
 # Core dependencies
@@ -37,9 +37,8 @@ tracing.workspace = true
 # Optional WebSocket support
 tokio-tungstenite = { version = "0.24", optional = true }
 
-# Optional SSE integration with Axum
+# Optional Streamable HTTP integration with Axum
 axum = { workspace = true, optional = true, features = ["macros"] }
-axum-extra = { version = "0.9", optional = true, features = ["cookie", "typed-header", "cookie-signed"] }
 tower-http = { workspace = true, optional = true }
 tokio-stream = { version = "0.1", optional = true }
 
@@ -50,5 +49,5 @@ uuid = { workspace = true, features = ["v4"] }
 schemars = "1.2"
 # Date handling for ADRs
 chrono = { version = "0.4", features = ["serde"] }
-# Async stream utilities (for WebSocket/SSE)
+# Async stream utilities (for WebSocket/HTTP)
 futures-util = "0.3"
