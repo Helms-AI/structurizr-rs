@@ -25,6 +25,9 @@ mod wasm_runtime;
 #[cfg(feature = "wasm")]
 pub use wasm_runtime::*;
 
+#[cfg(feature = "auto-build-plugins")]
+pub mod builder;
+
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
