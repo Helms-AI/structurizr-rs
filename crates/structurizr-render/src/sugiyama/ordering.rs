@@ -5,12 +5,48 @@
 //!
 //! The algorithm includes:
 //! 1. Connectivity-based initial ordering (groups related nodes)
-//! 2. Weighted barycentric heuristic (hubs have more influence)
+//! 2. Weighted barycentric/median heuristic (hubs have more influence)
 //! 3. 2-opt local refinement (swap adjacent nodes if it helps)
+//! 4. Adaptive iteration count based on graph complexity
 
 use std::collections::HashSet;
 
 use super::{LayeredGraph, SugiyamaConfig};
+
+/// Calculate optimal iteration count based on graph complexity.
+///
+/// Uses edge density to determine complexity:
+/// - High density (>0.3): 40-50 iterations
+/// - Medium density (0.1-0.3): 30 iterations
+/// - Low density (<0.1): 24 iterations
+fn calculate_adaptive_iterations(graph: &LayeredGraph, base_iterations: usize) -> usize {
+    let node_count = graph.node_count();
+    if node_count <= 2 {
+        return base_iterations;
+    }
+
+    let edge_count = graph.edges.len();
+    let max_edges = node_count * (node_count - 1); // Directed graph max edges
+    let density = edge_count as f64 / max_edges as f64;
+
+    // Also consider layer count for complexity
+    let layer_count = graph.layer_count();
+    let layer_factor = (layer_count as f64 / 3.0).min(2.0).max(1.0);
+
+    let iterations = if density > 0.3 {
+        // High density: need more iterations
+        (50.0 * layer_factor) as usize
+    } else if density > 0.1 {
+        // Medium density
+        (35.0 * layer_factor) as usize
+    } else {
+        // Low density: base iterations are usually sufficient
+        (base_iterations as f64 * layer_factor) as usize
+    };
+
+    // Clamp to reasonable bounds
+    iterations.clamp(base_iterations, 60)
+}
 
 /// Minimize edge crossings using barycentric heuristic with 2-opt refinement.
 ///
@@ -20,6 +56,7 @@ use super::{LayeredGraph, SugiyamaConfig};
 ///    - Down sweep: Order each layer based on positions of predecessors
 ///    - Up sweep: Order each layer based on positions of successors
 ///    - 2-opt: Swap adjacent nodes if it reduces crossings
+/// 3. Adaptive iteration count based on graph complexity (when enabled)
 pub fn minimize_crossings(graph: &mut LayeredGraph, config: &SugiyamaConfig) {
     if graph.layer_count() < 2 {
         return;
@@ -34,17 +71,36 @@ pub fn minimize_crossings(graph: &mut LayeredGraph, config: &SugiyamaConfig) {
     let mut best_crossings = count_total_crossings(graph);
     let mut best_order = save_layer_order(graph);
 
-    for _iteration in 0..config.max_iterations {
-        let initial_crossings = best_crossings;
+    // Calculate iteration count: use adaptive if enabled, otherwise use configured max
+    let iterations = if config.adaptive_iterations {
+        calculate_adaptive_iterations(graph, config.max_iterations)
+    } else {
+        config.max_iterations
+    };
+
+    // Track consecutive non-improvements for early termination
+    let mut no_improvement_count = 0;
+    const MAX_NO_IMPROVEMENT: usize = 5;
+
+    for _iteration in 0..iterations {
+        let _initial_crossings = best_crossings;
 
         // Down sweep (top to bottom)
         for layer_idx in 1..graph.layer_count() {
-            order_layer_by_barycenter(graph, layer_idx, true);
+            if config.use_weighted_median {
+                order_layer_by_weighted_median(graph, layer_idx, true);
+            } else {
+                order_layer_by_barycenter(graph, layer_idx, true);
+            }
         }
 
         // Up sweep (bottom to top)
         for layer_idx in (0..graph.layer_count() - 1).rev() {
-            order_layer_by_barycenter(graph, layer_idx, false);
+            if config.use_weighted_median {
+                order_layer_by_weighted_median(graph, layer_idx, false);
+            } else {
+                order_layer_by_barycenter(graph, layer_idx, false);
+            }
         }
 
         // 2-opt local refinement
@@ -57,10 +113,18 @@ pub fn minimize_crossings(graph: &mut LayeredGraph, config: &SugiyamaConfig) {
         if current_crossings < best_crossings {
             best_crossings = current_crossings;
             best_order = save_layer_order(graph);
+            no_improvement_count = 0;
+        } else {
+            no_improvement_count += 1;
         }
 
-        // Early termination if no improvement
-        if current_crossings >= initial_crossings {
+        // Early termination if no improvement for several iterations
+        if no_improvement_count >= MAX_NO_IMPROVEMENT {
+            break;
+        }
+
+        // Also terminate if we've achieved zero crossings
+        if best_crossings == 0 {
             break;
         }
     }
@@ -223,6 +287,149 @@ fn order_layer_by_barycenter(graph: &mut LayeredGraph, layer_idx: usize, use_pre
     for (pos, &node_idx) in graph.layers[layer_idx].iter().enumerate() {
         graph.nodes[node_idx].position_in_layer = pos;
     }
+}
+
+/// Order a single layer using weighted median heuristic.
+///
+/// The weighted median is more stable than the barycenter (weighted average) because:
+/// - It's less sensitive to outliers
+/// - It produces more consistent results across iterations
+/// - It handles cases with multiple neighbors better
+///
+/// If `use_predecessors` is true, order based on predecessor positions.
+/// Otherwise, order based on successor positions.
+fn order_layer_by_weighted_median(graph: &mut LayeredGraph, layer_idx: usize, use_predecessors: bool) {
+    let layer = &graph.layers[layer_idx];
+    if layer.len() <= 1 {
+        return;
+    }
+
+    // Calculate weighted median for each node
+    let mut medians: Vec<(usize, f64)> = layer
+        .iter()
+        .map(|&node_idx| {
+            let median = if use_predecessors {
+                calculate_weighted_median_from_predecessors(graph, node_idx)
+            } else {
+                calculate_weighted_median_from_successors(graph, node_idx)
+            };
+            (node_idx, median)
+        })
+        .collect();
+
+    // Sort by median, using original position as tiebreaker
+    medians.sort_by(|(idx_a, m_a), (idx_b, m_b)| {
+        m_a.partial_cmp(m_b).unwrap_or(std::cmp::Ordering::Equal).then_with(|| {
+            graph.nodes[*idx_a]
+                .position_in_layer
+                .cmp(&graph.nodes[*idx_b].position_in_layer)
+        })
+    });
+
+    // Update layer order
+    graph.layers[layer_idx] = medians.iter().map(|(idx, _)| *idx).collect();
+
+    // Update position_in_layer for nodes
+    for (pos, &node_idx) in graph.layers[layer_idx].iter().enumerate() {
+        graph.nodes[node_idx].position_in_layer = pos;
+    }
+}
+
+/// Calculate weighted median based on predecessor positions.
+///
+/// The weighted median finds the position where half the weight is on each side.
+/// This is more robust than the weighted average for skewed distributions.
+fn calculate_weighted_median_from_predecessors(graph: &LayeredGraph, node_idx: usize) -> f64 {
+    let predecessors = graph.predecessors(node_idx);
+    if predecessors.is_empty() {
+        return graph.nodes[node_idx].position_in_layer as f64;
+    }
+
+    // Collect (position, weight) pairs
+    let mut weighted_positions: Vec<(f64, f64)> = predecessors
+        .iter()
+        .map(|&pred_idx| {
+            let position = graph.nodes[pred_idx].position_in_layer as f64;
+            let edge_count = graph
+                .edges
+                .iter()
+                .filter(|e| e.source == pred_idx && e.target == node_idx)
+                .count() as f64;
+            let pred_degree = graph.incoming_edges(pred_idx).len() + graph.outgoing_edges(pred_idx).len();
+            let degree_factor = 1.0 + (pred_degree as f64).ln().max(0.0);
+            let weight = edge_count.max(1.0) * degree_factor;
+            (position, weight)
+        })
+        .collect();
+
+    calculate_weighted_median(&mut weighted_positions, graph.nodes[node_idx].position_in_layer as f64)
+}
+
+/// Calculate weighted median based on successor positions.
+fn calculate_weighted_median_from_successors(graph: &LayeredGraph, node_idx: usize) -> f64 {
+    let successors = graph.successors(node_idx);
+    if successors.is_empty() {
+        return graph.nodes[node_idx].position_in_layer as f64;
+    }
+
+    // Collect (position, weight) pairs
+    let mut weighted_positions: Vec<(f64, f64)> = successors
+        .iter()
+        .map(|&succ_idx| {
+            let position = graph.nodes[succ_idx].position_in_layer as f64;
+            let edge_count = graph
+                .edges
+                .iter()
+                .filter(|e| e.source == node_idx && e.target == succ_idx)
+                .count() as f64;
+            let succ_degree = graph.incoming_edges(succ_idx).len() + graph.outgoing_edges(succ_idx).len();
+            let degree_factor = 1.0 + (succ_degree as f64).ln().max(0.0);
+            let weight = edge_count.max(1.0) * degree_factor;
+            (position, weight)
+        })
+        .collect();
+
+    calculate_weighted_median(&mut weighted_positions, graph.nodes[node_idx].position_in_layer as f64)
+}
+
+/// Calculate the weighted median from a list of (position, weight) pairs.
+///
+/// The weighted median is the position where approximately half the total weight
+/// is on each side. For an odd number of neighbors with equal weights, this
+/// gives the same result as the regular median.
+fn calculate_weighted_median(weighted_positions: &mut [(f64, f64)], default: f64) -> f64 {
+    if weighted_positions.is_empty() {
+        return default;
+    }
+
+    if weighted_positions.len() == 1 {
+        return weighted_positions[0].0;
+    }
+
+    // Sort by position
+    weighted_positions.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+
+    // Calculate total weight
+    let total_weight: f64 = weighted_positions.iter().map(|(_, w)| w).sum();
+    let half_weight = total_weight / 2.0;
+
+    // Find the median position
+    let mut cumulative_weight = 0.0;
+    for (i, &(position, weight)) in weighted_positions.iter().enumerate() {
+        cumulative_weight += weight;
+        if cumulative_weight >= half_weight {
+            // For better precision, interpolate if we're exactly at the median
+            if i + 1 < weighted_positions.len() && (cumulative_weight - half_weight).abs() < weight * 0.01 {
+                // Interpolate between this position and the next
+                let next_position = weighted_positions[i + 1].0;
+                return (position + next_position) / 2.0;
+            }
+            return position;
+        }
+    }
+
+    // Fallback: return last position
+    weighted_positions.last().map(|(p, _)| *p).unwrap_or(default)
 }
 
 /// Calculate barycenter based on predecessor positions.

@@ -10,6 +10,7 @@ use structurizr_core::view::{AutoLayout, AutoLayoutDirection};
 
 // Import advanced layout implementation
 use crate::sugiyama as advanced;
+pub use crate::sugiyama::ViewType;
 
 /// Position of an element in the layout.
 #[derive(Debug, Clone, Copy)]
@@ -117,6 +118,52 @@ impl GridLayout {
             direction: config.direction,
             rank_separation: config.rank_separation as f64,
             node_separation: config.node_separation as f64,
+            ..Default::default()
+        }
+    }
+
+    /// Create a view-type-aware GridLayout with optimal direction for the view type.
+    ///
+    /// This method selects the optimal layout direction based on the C4 view type:
+    /// - C1 (SystemLandscape/SystemContext): Left-to-right layout
+    /// - C2 (Container): Top-to-bottom layout
+    /// - C3 (Component): Left-to-right layout
+    ///
+    /// If an explicit `auto_layout` is provided in the DSL, its direction takes precedence.
+    pub fn for_view_type(view_type: ViewType, auto_layout: Option<&AutoLayout>) -> Self {
+        // If user explicitly specified a direction in DSL, respect that
+        if let Some(al) = auto_layout {
+            return Self::from_config(al);
+        }
+
+        // Otherwise, use view-type-specific defaults
+        let direction = match view_type {
+            // C1 views: left-to-right for showing system relationships horizontally
+            ViewType::SystemLandscape | ViewType::SystemContext => AutoLayoutDirection::LeftRight,
+            // C2 views: top-to-bottom for showing container hierarchy
+            ViewType::Container => AutoLayoutDirection::TopBottom,
+            // C3 views: left-to-right for showing component interactions
+            ViewType::Component => AutoLayoutDirection::LeftRight,
+            // Dynamic views: top-to-bottom for showing sequence flow
+            ViewType::Dynamic => AutoLayoutDirection::TopBottom,
+            // Deployment views: top-to-bottom for showing infrastructure layers
+            ViewType::Deployment => AutoLayoutDirection::TopBottom,
+            // Filtered views: default to top-to-bottom
+            ViewType::Filtered => AutoLayoutDirection::TopBottom,
+        };
+
+        // Adjust spacing based on layout direction for better aesthetics
+        let (rank_separation, node_separation) = match direction {
+            // Horizontal layouts need more horizontal space between ranks
+            AutoLayoutDirection::LeftRight | AutoLayoutDirection::RightLeft => (200.0, 150.0),
+            // Vertical layouts need more vertical space between ranks
+            AutoLayoutDirection::TopBottom | AutoLayoutDirection::BottomTop => (150.0, 200.0),
+        };
+
+        Self {
+            direction,
+            rank_separation,
+            node_separation,
             ..Default::default()
         }
     }

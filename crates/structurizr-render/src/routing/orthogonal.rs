@@ -2,6 +2,12 @@
 //!
 //! This module implements channel-based orthogonal routing where edges
 //! use only horizontal and vertical segments with 90-degree bends.
+//!
+//! Features:
+//! - Port distribution: Evenly distributes connection ports along element sides
+//! - Obstacle avoidance: A* pathfinding to route around diagram elements
+//! - Edge bundling: Groups parallel edges for cleaner visual appearance
+//! - Direction-aware: Respects layout direction for optimal port placement
 
 use std::collections::HashMap;
 
@@ -9,6 +15,7 @@ use structurizr_core::view::AutoLayoutDirection;
 
 use crate::layout::{LayoutNode, Point};
 
+use super::pathfinder::ObstacleAwareRouter;
 use super::{EdgePath, Port, PortSide, RoutedEdge};
 
 /// Configuration for the orthogonal router.
@@ -20,6 +27,12 @@ pub struct OrthogonalConfig {
     pub channel_spacing: f64,
     /// Layout direction (affects port preference)
     pub direction: AutoLayoutDirection,
+    /// Enable A* pathfinding for obstacle avoidance
+    pub use_pathfinding: bool,
+    /// Enable edge bundling for parallel edges
+    pub bundle_edges: bool,
+    /// Maximum edges to bundle together
+    pub max_bundle_size: usize,
 }
 
 impl Default for OrthogonalConfig {
@@ -28,6 +41,9 @@ impl Default for OrthogonalConfig {
             port_clearance: 20.0,
             channel_spacing: 15.0,
             direction: AutoLayoutDirection::TopBottom,
+            use_pathfinding: true,
+            bundle_edges: true,
+            max_bundle_size: 5,
         }
     }
 }
@@ -36,6 +52,16 @@ impl OrthogonalConfig {
     pub fn for_direction(direction: AutoLayoutDirection) -> Self {
         Self {
             direction,
+            ..Default::default()
+        }
+    }
+
+    /// Create config with pathfinding disabled (faster but less precise).
+    pub fn simple(direction: AutoLayoutDirection) -> Self {
+        Self {
+            direction,
+            use_pathfinding: false,
+            bundle_edges: false,
             ..Default::default()
         }
     }
@@ -64,11 +90,25 @@ impl OrthogonalConfig {
 /// Orthogonal edge router.
 pub struct OrthogonalRouter {
     config: OrthogonalConfig,
+    /// Optional pathfinder for obstacle avoidance (built from nodes)
+    pathfinder: Option<ObstacleAwareRouter>,
 }
 
 impl OrthogonalRouter {
     pub fn new(config: OrthogonalConfig) -> Self {
-        Self { config }
+        Self { config, pathfinder: None }
+    }
+
+    /// Create a router with obstacle-aware pathfinding from layout nodes.
+    ///
+    /// This enables A* pathfinding for `route_edge` calls, not just `route_all`.
+    pub fn with_nodes(config: OrthogonalConfig, nodes: &[LayoutNode]) -> Self {
+        let pathfinder = if config.use_pathfinding && !nodes.is_empty() {
+            Some(ObstacleAwareRouter::new(nodes))
+        } else {
+            None
+        };
+        Self { config, pathfinder }
     }
 
     /// Route all edges with orthogonal paths.
@@ -82,6 +122,13 @@ impl OrthogonalRouter {
             .map(|n| (n.id.as_str(), n))
             .collect();
 
+        // Create obstacle-aware router if pathfinding is enabled
+        let pathfinder = if self.config.use_pathfinding {
+            Some(ObstacleAwareRouter::new(nodes))
+        } else {
+            None
+        };
+
         // Group edges by source and target for port distribution
         let mut edges_by_source: HashMap<&str, Vec<&str>> = HashMap::new();
         let mut edges_by_target: HashMap<&str, Vec<&str>> = HashMap::new();
@@ -90,6 +137,44 @@ impl OrthogonalRouter {
             edges_by_source.entry(src.as_str()).or_default().push(tgt.as_str());
             edges_by_target.entry(tgt.as_str()).or_default().push(src.as_str());
         }
+
+        // Sort edges at each node for consistent port assignment
+        for targets in edges_by_source.values_mut() {
+            targets.sort_by(|a, b| {
+                let a_node = node_map.get(a);
+                let b_node = node_map.get(b);
+                match (a_node, b_node) {
+                    (Some(a), Some(b)) => {
+                        // Sort by position for consistent ordering
+                        let a_pos = a.position.x + a.position.y;
+                        let b_pos = b.position.x + b.position.y;
+                        a_pos.partial_cmp(&b_pos).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    _ => std::cmp::Ordering::Equal,
+                }
+            });
+        }
+        for sources in edges_by_target.values_mut() {
+            sources.sort_by(|a, b| {
+                let a_node = node_map.get(a);
+                let b_node = node_map.get(b);
+                match (a_node, b_node) {
+                    (Some(a), Some(b)) => {
+                        let a_pos = a.position.x + a.position.y;
+                        let b_pos = b.position.x + b.position.y;
+                        a_pos.partial_cmp(&b_pos).unwrap_or(std::cmp::Ordering::Equal)
+                    }
+                    _ => std::cmp::Ordering::Equal,
+                }
+            });
+        }
+
+        // Identify edge bundles if bundling is enabled
+        let bundles = if self.config.bundle_edges {
+            self.identify_bundles(edges, &node_map)
+        } else {
+            HashMap::new()
+        };
 
         edges
             .iter()
@@ -103,13 +188,21 @@ impl OrthogonalRouter {
                 let edge_idx_at_source = src_edges.iter().position(|&t| t == tgt_id.as_str()).unwrap_or(0);
                 let edge_idx_at_target = tgt_edges.iter().position(|&s| s == src_id.as_str()).unwrap_or(0);
 
-                let path = self.route_edge(
+                // Check if this edge is part of a bundle
+                let bundle_offset = bundles
+                    .get(&(src_id.as_str(), tgt_id.as_str()))
+                    .copied()
+                    .unwrap_or(0.0);
+
+                let path = self.route_edge_with_options(
                     source,
                     target,
                     edge_idx_at_source,
                     src_edges.len(),
                     edge_idx_at_target,
                     tgt_edges.len(),
+                    pathfinder.as_ref(),
+                    bundle_offset,
                 );
 
                 Some(RoutedEdge {
@@ -121,7 +214,102 @@ impl OrthogonalRouter {
             .collect()
     }
 
+    /// Identify edges that should be bundled together.
+    ///
+    /// Returns a map of (source, target) -> bundle offset for spacing.
+    fn identify_bundles<'a>(
+        &self,
+        edges: &'a [(String, String)],
+        node_map: &HashMap<&str, &LayoutNode>,
+    ) -> HashMap<(&'a str, &'a str), f64> {
+        let mut bundles: HashMap<(&str, &str), f64> = HashMap::new();
+
+        // Group edges by their approximate direction (same source layer to same target layer)
+        let mut direction_groups: HashMap<(usize, usize), Vec<(&str, &str)>> = HashMap::new();
+
+        for (src_id, tgt_id) in edges {
+            if let (Some(src), Some(tgt)) = (node_map.get(src_id.as_str()), node_map.get(tgt_id.as_str())) {
+                let key = (src.rank, tgt.rank);
+                direction_groups.entry(key).or_default().push((src_id.as_str(), tgt_id.as_str()));
+            }
+        }
+
+        // For each group with multiple edges, calculate offsets
+        for (_key, group) in direction_groups.iter() {
+            if group.len() <= 1 || group.len() > self.config.max_bundle_size {
+                continue;
+            }
+
+            // Sort edges by their midpoint position for consistent bundling
+            let mut sorted_group: Vec<_> = group.clone();
+            sorted_group.sort_by(|(src_a, tgt_a), (src_b, tgt_b)| {
+                let get_midpoint = |s: &str, t: &str| {
+                    let src_node = node_map.get(s)?;
+                    let tgt_node = node_map.get(t)?;
+                    let mid_x = (src_node.position.x + tgt_node.position.x) / 2.0;
+                    let mid_y = (src_node.position.y + tgt_node.position.y) / 2.0;
+                    Some(mid_x + mid_y)
+                };
+
+                let mid_a = get_midpoint(src_a, tgt_a).unwrap_or(0.0);
+                let mid_b = get_midpoint(src_b, tgt_b).unwrap_or(0.0);
+                mid_a.partial_cmp(&mid_b).unwrap_or(std::cmp::Ordering::Equal)
+            });
+
+            // Assign offsets
+            let total = sorted_group.len() as f64;
+            for (i, (src, tgt)) in sorted_group.iter().enumerate() {
+                let offset = (i as f64 - (total - 1.0) / 2.0) * self.config.channel_spacing;
+                bundles.insert((*src, *tgt), offset);
+            }
+        }
+
+        bundles
+    }
+
+    /// Route a single edge with all options.
+    fn route_edge_with_options(
+        &self,
+        source: &LayoutNode,
+        target: &LayoutNode,
+        edge_idx_at_source: usize,
+        total_edges_at_source: usize,
+        edge_idx_at_target: usize,
+        total_edges_at_target: usize,
+        pathfinder: Option<&ObstacleAwareRouter>,
+        bundle_offset: f64,
+    ) -> EdgePath {
+        // Determine port sides based on relative positions
+        let (source_side, target_side) = self.determine_port_sides(source, target);
+
+        // Calculate port positions
+        let source_port = self.calculate_port(
+            source,
+            source_side,
+            edge_idx_at_source,
+            total_edges_at_source,
+        );
+        let target_port = self.calculate_port(
+            target,
+            target_side,
+            edge_idx_at_target,
+            total_edges_at_target,
+        );
+
+        // Generate the path
+        let waypoints = if let Some(router) = pathfinder {
+            self.generate_path_with_pathfinding(source, target, &source_port, &target_port, router, bundle_offset)
+        } else {
+            self.generate_path(source, target, &source_port, &target_port)
+        };
+
+        EdgePath::Orthogonal { waypoints }
+    }
+
     /// Route a single edge with orthogonal path.
+    ///
+    /// If the router was created with `with_nodes()`, this will use A* pathfinding
+    /// for obstacle avoidance. Otherwise, it uses simple channel-based routing.
     pub fn route_edge(
         &self,
         source: &LayoutNode,
@@ -148,8 +336,12 @@ impl OrthogonalRouter {
             total_edges_at_target,
         );
 
-        // Generate the orthogonal path
-        let waypoints = self.generate_path(source, target, &source_port, &target_port);
+        // Generate the orthogonal path - use pathfinding if available
+        let waypoints = if let Some(ref pathfinder) = self.pathfinder {
+            self.generate_path_with_pathfinding(source, target, &source_port, &target_port, pathfinder, 0.0)
+        } else {
+            self.generate_path(source, target, &source_port, &target_port)
+        };
 
         EdgePath::Orthogonal { waypoints }
     }
@@ -382,6 +574,115 @@ impl OrthogonalRouter {
             // Horizontal segment to target clearance X
             waypoints.push(Point::new(target_clear.x, target_clear.y));
         }
+    }
+
+    /// Generate path using A* pathfinding for obstacle avoidance.
+    fn generate_path_with_pathfinding(
+        &self,
+        _source: &LayoutNode,
+        _target: &LayoutNode,
+        source_port: &Port,
+        target_port: &Port,
+        router: &ObstacleAwareRouter,
+        bundle_offset: f64,
+    ) -> Vec<Point> {
+        // Calculate clearance points
+        let source_clear = self.add_clearance(source_port);
+        let target_clear = self.add_clearance(target_port);
+
+        // Apply bundle offset to the clearance points
+        let (source_clear, target_clear) = if bundle_offset.abs() > 0.1 {
+            // Offset perpendicular to the main direction
+            match (source_port.side, target_port.side) {
+                (PortSide::Top, _) | (PortSide::Bottom, _) => {
+                    // Vertical layout - offset horizontally
+                    (
+                        Point::new(source_clear.x + bundle_offset, source_clear.y),
+                        Point::new(target_clear.x + bundle_offset, target_clear.y),
+                    )
+                }
+                _ => {
+                    // Horizontal layout - offset vertically
+                    (
+                        Point::new(source_clear.x, source_clear.y + bundle_offset),
+                        Point::new(target_clear.x, target_clear.y + bundle_offset),
+                    )
+                }
+            }
+        } else {
+            (source_clear, target_clear)
+        };
+
+        // Use pathfinder to find route between clearance points
+        let path = router.find_path_with_clearance(
+            Point::new(source_port.x, source_port.y),
+            source_clear,
+            target_clear,
+            Point::new(target_port.x, target_port.y),
+        );
+
+        // Ensure orthogonality by snapping waypoints
+        self.ensure_orthogonal(path)
+    }
+
+    /// Ensure all path segments are orthogonal (horizontal or vertical).
+    fn ensure_orthogonal(&self, path: Vec<Point>) -> Vec<Point> {
+        if path.len() <= 2 {
+            return path;
+        }
+
+        let mut result = vec![path[0]];
+
+        for i in 1..path.len() {
+            let prev = result.last().unwrap();
+            let curr = &path[i];
+
+            // Check if segment is diagonal
+            let dx = (curr.x - prev.x).abs();
+            let dy = (curr.y - prev.y).abs();
+
+            if dx > 1.0 && dy > 1.0 {
+                // Insert intermediate point to make orthogonal
+                // Choose direction based on which delta is larger
+                if dx > dy {
+                    // Go horizontal first, then vertical
+                    result.push(Point::new(curr.x, prev.y));
+                } else {
+                    // Go vertical first, then horizontal
+                    result.push(Point::new(prev.x, curr.y));
+                }
+            }
+
+            result.push(*curr);
+        }
+
+        // Simplify to remove collinear points
+        self.simplify_path_vec(&result)
+    }
+
+    /// Simplify path vector (non-mutating version).
+    fn simplify_path_vec(&self, path: &[Point]) -> Vec<Point> {
+        if path.len() <= 2 {
+            return path.to_vec();
+        }
+
+        let mut simplified = vec![path[0]];
+
+        for i in 1..path.len() - 1 {
+            let prev = simplified.last().unwrap();
+            let curr = &path[i];
+            let next = &path[i + 1];
+
+            let is_horizontal = (prev.y - curr.y).abs() < 0.5 && (curr.y - next.y).abs() < 0.5;
+            let is_vertical = (prev.x - curr.x).abs() < 0.5 && (curr.x - next.x).abs() < 0.5;
+
+            if !is_horizontal && !is_vertical {
+                simplified.push(*curr);
+            }
+        }
+
+        simplified.push(*path.last().unwrap());
+        simplified
     }
 
     /// Remove redundant waypoints (collinear points).

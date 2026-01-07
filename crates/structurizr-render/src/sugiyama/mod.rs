@@ -18,7 +18,31 @@ pub mod ordering;
 pub mod positioning;
 pub mod ranking;
 
-use structurizr_core::view::AutoLayoutDirection;
+use structurizr_core::view::{AutoLayout, AutoLayoutDirection};
+
+/// C4 view types for view-aware layout configuration.
+///
+/// Each view type has an optimal default layout direction:
+/// - C1 (SystemLandscape/SystemContext): Left-to-right for showing system relationships
+/// - C2 (Container): Top-to-bottom for showing container hierarchy
+/// - C3 (Component): Left-to-right for showing component interactions
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ViewType {
+    /// System Landscape view (C1) - shows all systems in the enterprise
+    SystemLandscape,
+    /// System Context view (C1) - shows a system and its external dependencies
+    SystemContext,
+    /// Container view (C2) - shows containers within a system
+    Container,
+    /// Component view (C3) - shows components within a container
+    Component,
+    /// Dynamic view - shows sequence of interactions
+    Dynamic,
+    /// Deployment view - shows infrastructure and deployments
+    Deployment,
+    /// Filtered view - derived from another view
+    Filtered,
+}
 
 pub use graph::{LayeredEdge, LayeredGraph, LayeredNode};
 
@@ -82,7 +106,7 @@ pub struct SugiyamaConfig {
     pub node_separation: f64,
     pub default_width: f64,
     pub default_height: f64,
-    /// Maximum iterations for crossing minimization
+    /// Maximum iterations for crossing minimization (0 = auto-detect based on complexity)
     pub max_iterations: usize,
     /// Whether to apply 2-opt local refinement
     pub local_refinement: bool,
@@ -92,6 +116,12 @@ pub struct SugiyamaConfig {
     pub force_directed_refinement: bool,
     /// Number of force-directed iterations (higher = better grouping, slower)
     pub force_iterations: usize,
+    /// Use adaptive iteration count based on graph complexity
+    pub adaptive_iterations: bool,
+    /// Use weighted median instead of weighted average for barycenter (more stable)
+    pub use_weighted_median: bool,
+    /// Apply repulsive forces between non-connected nodes
+    pub repulsion_enabled: bool,
 }
 
 impl Default for SugiyamaConfig {
@@ -106,7 +136,10 @@ impl Default for SugiyamaConfig {
             local_refinement: true,
             connectivity_ordering: true,
             force_directed_refinement: true,
-            force_iterations: 10,
+            force_iterations: 20,  // Increased from 10 for better convergence
+            adaptive_iterations: true,  // Enable adaptive iteration count
+            use_weighted_median: true,  // Use median for more stable results
+            repulsion_enabled: true,    // Enable repulsion between non-connected nodes
         }
     }
 }
@@ -122,6 +155,53 @@ impl SugiyamaConfig {
             direction,
             rank_separation: rank_separation as f64,
             node_separation: node_separation as f64,
+            ..Default::default()
+        }
+    }
+
+    /// Create view-type-aware configuration.
+    ///
+    /// This method selects the optimal layout direction based on the C4 view type:
+    /// - C1 (SystemLandscape/SystemContext): Left-to-right layout
+    /// - C2 (Container): Top-to-bottom layout
+    /// - C3 (Component): Left-to-right layout
+    ///
+    /// If an explicit `auto_layout` is provided in the DSL, its direction takes precedence.
+    /// Otherwise, the view-type-specific default is used.
+    pub fn for_view_type(view_type: ViewType, auto_layout: Option<&AutoLayout>) -> Self {
+        // If user explicitly specified a direction in DSL, respect that
+        if let Some(al) = auto_layout {
+            return Self::from_auto_layout(al.direction, al.rank_separation, al.node_separation);
+        }
+
+        // Otherwise, use view-type-specific defaults
+        let direction = match view_type {
+            // C1 views: left-to-right for showing system relationships horizontally
+            ViewType::SystemLandscape | ViewType::SystemContext => AutoLayoutDirection::LeftRight,
+            // C2 views: top-to-bottom for showing container hierarchy
+            ViewType::Container => AutoLayoutDirection::TopBottom,
+            // C3 views: left-to-right for showing component interactions
+            ViewType::Component => AutoLayoutDirection::LeftRight,
+            // Dynamic views: top-to-bottom for showing sequence flow
+            ViewType::Dynamic => AutoLayoutDirection::TopBottom,
+            // Deployment views: top-to-bottom for showing infrastructure layers
+            ViewType::Deployment => AutoLayoutDirection::TopBottom,
+            // Filtered views: default to top-to-bottom
+            ViewType::Filtered => AutoLayoutDirection::TopBottom,
+        };
+
+        // Adjust spacing based on layout direction for better aesthetics
+        let (rank_separation, node_separation) = match direction {
+            // Horizontal layouts need more horizontal space
+            AutoLayoutDirection::LeftRight | AutoLayoutDirection::RightLeft => (200.0, 150.0),
+            // Vertical layouts need more vertical space
+            AutoLayoutDirection::TopBottom | AutoLayoutDirection::BottomTop => (150.0, 200.0),
+        };
+
+        Self {
+            direction,
+            rank_separation,
+            node_separation,
             ..Default::default()
         }
     }

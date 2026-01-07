@@ -14,7 +14,10 @@
 //! - **Layout Algorithms**: Grid-based auto-layout with configurable directions,
 //!   plus advanced Sugiyama-style layout with crossing minimization.
 //! - **Edge Routing**: Direct (straight line) and orthogonal (right-angle) routing.
+//! - **Collision Detection**: Quadtree-based spatial indexing for overlap detection
+//!   and label placement optimization.
 
+pub mod collision;
 pub mod error;
 pub mod layout;
 pub mod routing;

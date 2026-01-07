@@ -4,10 +4,12 @@
 //! - Direct: Straight lines between elements
 //! - Orthogonal: Right-angle paths through channels
 //! - Curved: Smooth Bezier curves
+//! - Pathfinder: A* based obstacle avoidance routing
 
 pub mod curved;
 pub mod direct;
 pub mod orthogonal;
+pub mod pathfinder;
 
 pub use curved::route_curved;
 

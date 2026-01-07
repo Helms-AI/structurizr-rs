@@ -44,12 +44,16 @@ pub enum LineStyle {
 }
 
 /// Routing style for relationship lines.
+///
+/// Orthogonal routing produces cleaner, grid-aligned edges that are easier to read
+/// in complex diagrams. Curved routing uses smooth Bezier curves. Direct uses
+/// straight lines from center to center.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase")]
 pub enum Routing {
     Direct,
-    Orthogonal,
     #[default]
+    Orthogonal,
     Curved,
 }
 

@@ -19,7 +19,7 @@ use structurizr_core::view::{
 use structurizr_core::Workspace;
 
 use crate::error::Result;
-use crate::layout::{GridLayout, LayoutEdge, LayoutNode, Position, Size};
+use crate::layout::{GridLayout, LayoutEdge, LayoutNode, Position, Size, ViewType};
 use crate::routing::orthogonal::{OrthogonalConfig, OrthogonalRouter};
 use crate::routing::{route_curved, EdgePath};
 use crate::shapes::{render_shape, Bounds};
@@ -45,6 +45,93 @@ fn apply_explicit_positions(nodes: &mut Vec<LayoutNode>, explicit_positions: &Ha
             node.position = Position { x: x as f64, y: y as f64 };
         }
     }
+}
+
+/// Lift an element ID to system level for system context views.
+///
+/// - Person IDs → kept as-is
+/// - SoftwareSystem IDs → kept as-is
+/// - Container/Component IDs → lifted to their parent system's ID
+///
+/// Returns None if the element cannot be found or mapped.
+fn lift_to_system_level(
+    element_id: ElementId,
+    model: &structurizr_core::model::Model,
+) -> Option<ElementId> {
+    // Check people first - return as-is
+    for person in &model.people {
+        if person.id() == element_id {
+            return Some(element_id);
+        }
+    }
+
+    // Check software systems and their children
+    for system in &model.software_systems {
+        // Direct system match
+        if system.id() == element_id {
+            return Some(element_id);
+        }
+
+        // Check containers
+        for container in &system.containers {
+            if container.id() == element_id {
+                return Some(system.id()); // Lift to parent system
+            }
+
+            // Check components
+            for component in &container.components {
+                if component.id() == element_id {
+                    return Some(system.id()); // Lift to parent system
+                }
+            }
+        }
+    }
+
+    None
+}
+
+/// Create edges for a system context view by lifting container/component-level
+/// relationships to system level.
+///
+/// This ensures proper graph connectivity for layout:
+/// - person → container becomes person → system
+/// - system_a.container → system_b.container becomes system_a → system_b
+fn create_system_context_edges(
+    model: &structurizr_core::model::Model,
+    element_ids: &[String],
+) -> Vec<LayoutEdge> {
+    let element_id_set: HashSet<&str> = element_ids.iter().map(|s| s.as_str()).collect();
+    let mut seen_edges: HashSet<(String, String)> = HashSet::new();
+    let mut edges = Vec::new();
+
+    for rel in &model.relationships {
+        // Lift source and target to system level
+        let lifted_source = lift_to_system_level(rel.source_id, model);
+        let lifted_target = lift_to_system_level(rel.destination_id, model);
+
+        if let (Some(source_id), Some(target_id)) = (lifted_source, lifted_target) {
+            let source_str = source_id.to_string();
+            let target_str = target_id.to_string();
+
+            // Only include if both are in the view's elements
+            if element_id_set.contains(source_str.as_str())
+                && element_id_set.contains(target_str.as_str())
+                && source_str != target_str  // Skip self-loops
+            {
+                // Deduplicate - only add each edge once
+                let edge_key = (source_str.clone(), target_str.clone());
+                if !seen_edges.contains(&edge_key) {
+                    seen_edges.insert(edge_key);
+                    edges.push(LayoutEdge {
+                        source: source_str,
+                        target: target_str,
+                    });
+                }
+            }
+        }
+    }
+
+    edges
 }
 
 /// Tracks the bounding box of all content in the SVG.
@@ -595,22 +682,15 @@ impl SvgRenderer {
             });
         }
 
-        // Build edges from relationships
-        let edges: Vec<LayoutEdge> = model
-            .relationships
-            .iter()
-            .map(|r| LayoutEdge {
-                source: r.source_id.to_string(),
-                target: r.destination_id.to_string(),
-            })
-            .collect();
+        // Create edges with relationship lifting to system level
+        // This ensures proper graph connectivity (e.g., person→container becomes person→system)
+        let edges = create_system_context_edges(model, &element_ids);
 
-        // Compute layout
-        let layout = if let Some(ref auto_layout) = view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout with view-type-aware direction (C1 = LeftRight)
+        let layout = GridLayout::for_view_type(
+            ViewType::SystemLandscape,
+            view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -743,20 +823,15 @@ impl SvgRenderer {
             });
         }
 
-        let edges: Vec<LayoutEdge> = model
-            .relationships
-            .iter()
-            .map(|r| LayoutEdge {
-                source: r.source_id.to_string(),
-                target: r.destination_id.to_string(),
-            })
-            .collect();
+        // Create edges with relationship lifting to system level
+        // This ensures proper graph connectivity (e.g., person→container becomes person→system)
+        let edges = create_system_context_edges(model, &element_ids);
 
-        let layout = if let Some(ref auto_layout) = view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout with view-type-aware direction (C1 = LeftRight)
+        let layout = GridLayout::for_view_type(
+            ViewType::SystemContext,
+            view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -914,11 +989,11 @@ impl SvgRenderer {
             })
             .collect();
 
-        let layout = if let Some(ref auto_layout) = view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout with view-type-aware direction (C2 = TopBottom)
+        let layout = GridLayout::for_view_type(
+            ViewType::Container,
+            view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -1023,11 +1098,11 @@ impl SvgRenderer {
             })
             .collect();
 
-        let layout = if let Some(ref auto_layout) = view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout with view-type-aware direction (C3 = LeftRight)
+        let layout = GridLayout::for_view_type(
+            ViewType::Component,
+            view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -1127,11 +1202,11 @@ impl SvgRenderer {
             })
             .collect();
 
-        let layout = if let Some(ref auto_layout) = view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout with view-type-aware direction (Deployment = TopBottom)
+        let layout = GridLayout::for_view_type(
+            ViewType::Deployment,
+            view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -1420,11 +1495,11 @@ impl SvgRenderer {
             })
             .collect();
 
-        let layout = if let Some(ref auto_layout) = base_view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout with view-type-aware direction (Dynamic = TopBottom for sequence flow)
+        let layout = GridLayout::for_view_type(
+            ViewType::Dynamic,
+            base_view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -1518,11 +1593,11 @@ impl SvgRenderer {
             })
             .collect();
 
-        let layout = if let Some(ref auto_layout) = base_view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout with view-type-aware direction (Filtered context = LeftRight like C1)
+        let layout = GridLayout::for_view_type(
+            ViewType::SystemContext,
+            base_view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -1624,11 +1699,11 @@ impl SvgRenderer {
             })
             .collect();
 
-        let layout = if let Some(ref auto_layout) = base_view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout with view-type-aware direction (Filtered container = TopBottom like C2)
+        let layout = GridLayout::for_view_type(
+            ViewType::Container,
+            base_view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -1727,11 +1802,11 @@ impl SvgRenderer {
             })
             .collect();
 
-        let layout = if let Some(ref auto_layout) = view.properties.auto_layout {
-            GridLayout::from_config(auto_layout)
-        } else {
-            GridLayout::default()
-        };
+        // Compute layout - custom views default to TopBottom unless DSL specifies otherwise
+        let layout = GridLayout::for_view_type(
+            ViewType::Filtered, // Custom views use filtered default (TopBottom)
+            view.properties.auto_layout.as_ref(),
+        );
 
         // Prepare node sizes for Sugiyama
         let node_sizes: Vec<(String, Size)> = element_ids.iter()
@@ -2090,11 +2165,12 @@ impl SvgRenderer {
 
         let mut rel_lines: Vec<RelLineData> = Vec::new();
 
-        // Create orthogonal router for use when needed
+        // Create orthogonal router with A* pathfinding enabled
+        // Pass nodes so the router can build an obstacle grid for pathfinding
         let orthogonal_config = OrthogonalConfig::for_direction(
             structurizr_core::view::AutoLayoutDirection::TopBottom
         );
-        let orthogonal_router = OrthogonalRouter::new(orthogonal_config);
+        let orthogonal_router = OrthogonalRouter::with_nodes(orthogonal_config, nodes);
 
         // Pre-compute edge indices for port distribution
         // This allows multiple connectors to the same node to attach at different points

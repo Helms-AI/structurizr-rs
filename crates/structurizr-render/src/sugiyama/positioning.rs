@@ -153,6 +153,7 @@ fn assign_node_positions(
 /// - Highly-connected "hub" nodes have stronger influence
 /// - Multiple iterations with constant pull (no damping) for aggressive grouping
 /// - Maintains minimum separation between nodes
+/// - Applies repulsive forces between non-connected nodes (if enabled)
 fn refine_positions(
     graph: &mut LayeredGraph,
     config: &SugiyamaConfig,
@@ -160,9 +161,28 @@ fn refine_positions(
 ) {
     // Use constant pull factor without damping for more aggressive grouping
     const PULL_FACTOR: f64 = 0.4;
+    // Repulsion factor (weaker than attraction to prioritize grouping connected nodes)
+    const REPULSION_FACTOR: f64 = 0.15;
+    // Minimum distance for repulsion to activate (prevents division by zero)
+    const MIN_REPULSION_DISTANCE: f64 = 50.0;
 
     // More iterations for better convergence
     let iterations = config.force_iterations.max(15);
+
+    // Build connectivity set for quick lookup (used for repulsion)
+    let connected_pairs: std::collections::HashSet<(usize, usize)> = if config.repulsion_enabled {
+        graph
+            .edges
+            .iter()
+            .flat_map(|e| {
+                vec![
+                    (e.source.min(e.target), e.source.max(e.target)),
+                ]
+            })
+            .collect()
+    } else {
+        std::collections::HashSet::new()
+    };
 
     for _ in 0..iterations {
         // Down sweep: adjust based on predecessors
@@ -176,6 +196,19 @@ fn refine_positions(
                     set_position_coord(&mut graph.nodes[node_idx], new_pos, config);
                 }
             }
+
+            // Apply repulsive forces between non-connected nodes in same layer
+            if config.repulsion_enabled {
+                apply_repulsion_in_layer(
+                    graph,
+                    layer_idx,
+                    &connected_pairs,
+                    config,
+                    REPULSION_FACTOR,
+                    MIN_REPULSION_DISTANCE,
+                );
+            }
+
             resolve_overlaps_in_layer(graph, layer_idx, config, size_map);
         }
 
@@ -190,8 +223,115 @@ fn refine_positions(
                     set_position_coord(&mut graph.nodes[node_idx], new_pos, config);
                 }
             }
+
+            // Apply repulsive forces between non-connected nodes in same layer
+            if config.repulsion_enabled {
+                apply_repulsion_in_layer(
+                    graph,
+                    layer_idx,
+                    &connected_pairs,
+                    config,
+                    REPULSION_FACTOR,
+                    MIN_REPULSION_DISTANCE,
+                );
+            }
+
             resolve_overlaps_in_layer(graph, layer_idx, config, size_map);
         }
+    }
+}
+
+/// Apply repulsive forces between non-connected nodes in the same layer.
+///
+/// This helps separate visually distinct clusters while connected nodes
+/// remain grouped due to the stronger attraction forces.
+fn apply_repulsion_in_layer(
+    graph: &mut LayeredGraph,
+    layer_idx: usize,
+    connected_pairs: &std::collections::HashSet<(usize, usize)>,
+    config: &SugiyamaConfig,
+    repulsion_factor: f64,
+    min_distance: f64,
+) {
+    let layer = graph.layers[layer_idx].clone();
+    if layer.len() < 2 {
+        return;
+    }
+
+    // Calculate repulsion forces for each node
+    let mut forces: Vec<f64> = vec![0.0; layer.len()];
+
+    for i in 0..layer.len() {
+        let node_i = layer[i];
+        // Skip dummy nodes
+        if graph.nodes[node_i].is_dummy {
+            continue;
+        }
+
+        for j in (i + 1)..layer.len() {
+            let node_j = layer[j];
+            // Skip dummy nodes
+            if graph.nodes[node_j].is_dummy {
+                continue;
+            }
+
+            // Check if nodes are connected (directly)
+            let key = (node_i.min(node_j), node_i.max(node_j));
+            if connected_pairs.contains(&key) {
+                // Connected nodes don't repel each other
+                continue;
+            }
+
+            // Also check if they share a common neighbor (indirect connection)
+            // This prevents repulsion between nodes that should be grouped together
+            let i_neighbors: std::collections::HashSet<_> = graph
+                .predecessors(node_i)
+                .into_iter()
+                .chain(graph.successors(node_i))
+                .collect();
+            let j_neighbors: std::collections::HashSet<_> = graph
+                .predecessors(node_j)
+                .into_iter()
+                .chain(graph.successors(node_j))
+                .collect();
+
+            // If they share neighbors, reduce repulsion significantly
+            let shared_neighbors = i_neighbors.intersection(&j_neighbors).count();
+            if shared_neighbors > 0 {
+                continue; // Don't repel nodes that share neighbors
+            }
+
+            let pos_i = get_position_coord(&graph.nodes[node_i], config);
+            let pos_j = get_position_coord(&graph.nodes[node_j], config);
+            let distance = (pos_j - pos_i).abs().max(min_distance);
+
+            // Inverse-square repulsion force (weaker at larger distances)
+            // Force magnitude: repulsion_factor * (ideal_distance / actual_distance)^2
+            let ideal_distance = config.node_separation + config.default_width;
+            let force_magnitude = repulsion_factor * (ideal_distance / distance).powi(2);
+
+            // Cap the force to prevent extreme movements
+            let capped_force = force_magnitude.min(repulsion_factor * 2.0);
+
+            // Apply forces in opposite directions
+            if pos_i < pos_j {
+                forces[i] -= capped_force * (ideal_distance - distance).max(0.0);
+                forces[j] += capped_force * (ideal_distance - distance).max(0.0);
+            } else {
+                forces[i] += capped_force * (ideal_distance - distance).max(0.0);
+                forces[j] -= capped_force * (ideal_distance - distance).max(0.0);
+            }
+        }
+    }
+
+    // Apply accumulated forces
+    for (i, &node_idx) in layer.iter().enumerate() {
+        if graph.nodes[node_idx].is_dummy {
+            continue;
+        }
+        let current = get_position_coord(&graph.nodes[node_idx], config);
+        let new_pos = current + forces[i];
+        set_position_coord(&mut graph.nodes[node_idx], new_pos, config);
     }
 }
 
