@@ -78,6 +78,9 @@ wasmtime = "27"
 # TOML parsing for plugin manifests
 toml = "0.8"
 
+# Glob for finding plugin files
+glob = "0.3"
+
 # Internal crates
 structurizr-core = { path = "crates/structurizr-core" }
 structurizr-dsl = { path = "crates/structurizr-dsl" }
@@ -112,6 +115,8 @@ mcp-websocket = ["mcp", "structurizr-mcp/websocket"]
 mcp-http = ["mcp", "structurizr-mcp/http"]
 # Enable all MCP transports
 mcp-all = ["mcp", "mcp-websocket", "mcp-http"]
+# Enable automatic plugin building on server startup
+auto-build-plugins = ["structurizr-scripting/auto-build-plugins"]
 
 [dependencies]
 structurizr-core.workspace = true
@@ -119,6 +124,7 @@ structurizr-dsl.workspace = true
 structurizr-render.workspace = true
 structurizr-export.workspace = true
 structurizr-web.workspace = true
+structurizr-scripting.workspace = true
 structurizr-mcp = { workspace = true, optional = true }
 clap.workspace = true
 tokio.workspace = true
