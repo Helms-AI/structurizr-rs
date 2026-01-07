@@ -9,6 +9,7 @@ description = "Scripting and plugin support for structurizr-rs"
 [features]
 default = ["wasm"]
 wasm = ["wasmtime", "toml"]
+auto-build-plugins = ["wasm", "glob", "tokio"]
 
 [dependencies]
 structurizr-core.workspace = true
@@ -25,3 +26,7 @@ regex-lite.workspace = true
 # WASM plugin runtime (optional)
 wasmtime = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
+
+# For auto-build plugins (optional)
+glob = { workspace = true, optional = true }
+tokio = { workspace = true, features = ["process"], optional = true }

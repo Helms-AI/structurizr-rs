@@ -145,16 +145,21 @@ impl PluginEngine {
         let instance = linker.instantiate(&mut store, &module)
             .map_err(|e| ScriptError::Lua(mlua::Error::external(format!("Failed to instantiate WASM: {}", e))))?;
 
-        // Call the plugin's entry point (convention: _start or run)
-        if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
+        // Call the plugin's entry point
+        // Try run/main first (for languages like AssemblyScript where _start is internal init)
+        // Then fall back to _start (for languages like Rust/C where it's the user entry point)
+        if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "run") {
             func.call(&mut store, ())
-                .map_err(|e| ScriptError::Lua(mlua::Error::external(format!("Plugin execution failed: {}", e))))?;
-        } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "run") {
+                .map_err(|e| ScriptError::Lua(mlua::Error::external(format!("Plugin execution failed (run): {}", e))))?;
+        } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "main") {
             func.call(&mut store, ())
-                .map_err(|e| ScriptError::Lua(mlua::Error::external(format!("Plugin execution failed: {}", e))))?;
+                .map_err(|e| ScriptError::Lua(mlua::Error::external(format!("Plugin execution failed (main): {}", e))))?;
+        } else if let Ok(func) = instance.get_typed_func::<(), ()>(&mut store, "_start") {
+            func.call(&mut store, ())
+                .map_err(|e| ScriptError::Lua(mlua::Error::external(format!("Plugin execution failed (_start): {}", e))))?;
         } else {
             return Err(ScriptError::Configuration(
-                "Plugin must export '_start' or 'run' function".to_string()
+                "Plugin must export 'run', 'main', or '_start' function".to_string()
             ));
         }
 
@@ -214,6 +219,53 @@ impl PluginEngine {
                 }
             } else {
                 println!("[Plugin] <no memory export>");
+            }
+        }).map_err(|e| ScriptError::Configuration(format!("Failed to register function: {}", e)))?;
+
+        // Abort function (required by AssemblyScript runtime)
+        // Signature: abort(message: usize, fileName: usize, lineNumber: u32, columnNumber: u32) -> void
+        linker.func_wrap("env", "abort", |mut caller: Caller<'_, ()>, msg_ptr: i32, file_ptr: i32, line: i32, col: i32| {
+            // Try to read error message from memory
+            if let Some(memory) = caller.get_export("memory").and_then(|e| e.into_memory()) {
+                let data = memory.data(&caller);
+
+                // AssemblyScript strings are UTF-16 encoded with a 4-byte length prefix
+                let read_as_string = |ptr: i32| -> String {
+                    if ptr == 0 {
+                        return "<null>".to_string();
+                    }
+                    let start = ptr as usize;
+                    if start + 4 > data.len() {
+                        return "<invalid>".to_string();
+                    }
+                    // Read length (4 bytes, little-endian, represents number of UTF-16 code units)
+                    let len = u32::from_le_bytes([
+                        data[start], data[start+1], data[start+2], data[start+3]
+                    ]) as usize;
+
+                    // Read UTF-16 bytes
+                    let str_start = start + 4;
+                    let str_end = str_start + len * 2;
+                    if str_end > data.len() {
+                        return "<truncated>".to_string();
+                    }
+
+                    // Convert UTF-16 LE to String
+                    let utf16: Vec<u16> = (0..len)
+                        .map(|i| u16::from_le_bytes([
+                            data[str_start + i*2],
+                            data[str_start + i*2 + 1]
+                        ]))
+                        .collect();
+
+                    String::from_utf16_lossy(&utf16)
+                };
+
+                let msg = read_as_string(msg_ptr);
+                let file = read_as_string(file_ptr);
+                eprintln!("[Plugin ABORT] {} at {}:{}:{}", msg, file, line, col);
+            } else {
+                eprintln!("[Plugin ABORT] at line {}:{}", line, col);
             }
         }).map_err(|e| ScriptError::Configuration(format!("Failed to register function: {}", e)))?;
 
