@@ -53,6 +53,7 @@ Implementation details and architecture documentation:
 | [Connector Rendering Implementation](development/connector-rendering-implementation.md) | How to match Structurizr Java's connector rendering |
 | [Directives Implementation](development/directives-impl.md) | DSL directive execution internals |
 | [Drag-and-Drop Implementation](development/drag-drop-implementation.md) | Interactive element positioning with undo/redo |
+| [DSL Error Handling Fix](development/dsl-error-handling-fix.md) | Fix for DSL parsing errors showing as "Workspace not found" |
 | [Legend Implementation](development/legend-impl.md) | Legend rendering implementation |
 | [Perspectives Implementation](development/perspectives-impl.md) | Perspectives filtering internals |
 | [Validation Implementation](development/validation-impl.md) | Workspace validation internals |
