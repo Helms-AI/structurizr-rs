@@ -40,6 +40,8 @@ pub fn generate_explore_page_html(
         content_type: ContentType::ToolbarViewport,
         extra_head: &extra_styles,
         extra_body_end: &extra_scripts,
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&layout_config, &content)

@@ -23,6 +23,10 @@ pub struct LayoutConfig<'a> {
     pub extra_head: &'a str,
     /// Additional content before </body> (page-specific scripts)
     pub extra_body_end: &'a str,
+    /// Optional header title (shown on left side of header-top, replaces breadcrumb)
+    pub header_title: Option<&'a str>,
+    /// Whether to show the navigation bar (default: true)
+    pub show_nav: bool,
 }
 
 /// Navigation items for the header.
@@ -425,6 +429,13 @@ fn generate_base_css() -> &'static str {
             display: flex;
             align-items: center;
             gap: 12px;
+            margin-left: auto;
+        }
+
+        .header-title {
+            font-size: 16px;
+            font-weight: 500;
+            color: var(--header-text);
         }
 
         /* Theme toggle button */
@@ -754,7 +765,16 @@ fn generate_hot_reload_js(workspace_id: Option<&str>) -> String {
 
 /// Generate the complete page wrapper with header, navigation, theme toggle, and hot-reload.
 pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
-    let breadcrumb_html = generate_breadcrumb(config);
+    // Use header_title if provided, otherwise use breadcrumb
+    let header_left_html = if let Some(title) = config.header_title {
+        format!(
+            r#"<div class="header-title">{}</div>"#,
+            escape_html(title)
+        )
+    } else {
+        generate_breadcrumb(config)
+    };
+
     let nav_html = generate_navigation(config);
     let theme_toggle_html = generate_theme_toggle();
     let theme_css = generate_theme_css();
@@ -768,6 +788,20 @@ pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
         ContentType::Sidebar => "layout-content sidebar-layout",
         ContentType::FullViewport => "layout-content full-viewport",
         ContentType::ToolbarViewport => "layout-content toolbar-viewport",
+    };
+
+    // Conditionally render navigation bar
+    let nav_bar_html = if config.show_nav {
+        format!(
+            r#"<div class="header-bottom">
+            <nav class="nav-links">
+                {nav_html}
+            </nav>
+        </div>"#,
+            nav_html = nav_html
+        )
+    } else {
+        String::new()
     };
 
     format!(
@@ -787,16 +821,12 @@ pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
 <body>
     <header class="app-header">
         <div class="header-top">
-            {breadcrumb_html}
+            {header_left_html}
             <div class="header-right">
                 {theme_toggle_html}
             </div>
         </div>
-        <div class="header-bottom">
-            <nav class="nav-links">
-                {nav_html}
-            </nav>
-        </div>
+        {nav_bar_html}
     </header>
     <main class="{container_class}">
         {content}
@@ -811,9 +841,9 @@ pub fn generate_page_layout(config: &LayoutConfig, content: &str) -> String {
         base_css = base_css,
         hot_reload_css = hot_reload_css,
         extra_head = config.extra_head,
-        breadcrumb_html = breadcrumb_html,
+        header_left_html = header_left_html,
         theme_toggle_html = theme_toggle_html,
-        nav_html = nav_html,
+        nav_bar_html = nav_bar_html,
         container_class = container_class,
         content = content,
         theme_js = theme_js,
