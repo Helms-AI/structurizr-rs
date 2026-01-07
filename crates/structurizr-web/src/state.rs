@@ -101,12 +101,35 @@ impl AppState {
     }
 
     /// Get a workspace by ID.
+    ///
+    /// This method logs DSL parsing errors but returns None to maintain backwards compatibility.
+    /// Use `try_get_workspace_by_id` if you need to handle the actual error.
     pub async fn get_workspace_by_id(&self, id: &str) -> Option<Workspace> {
         let registry = self.registry.read().await;
         if let Some(reg) = registry.as_ref() {
-            reg.get_workspace(id).await.ok().flatten()
+            match reg.get_workspace(id).await {
+                Ok(workspace) => workspace,
+                Err(e) => {
+                    // Log the actual error so it's not completely lost
+                    tracing::error!("Failed to load workspace '{}': {}", id, e);
+                    None
+                }
+            }
         } else {
             None
+        }
+    }
+
+    /// Try to get a workspace by ID, returning the full error if loading fails.
+    ///
+    /// Unlike `get_workspace_by_id`, this method preserves DSL parsing errors
+    /// so they can be shown to the user.
+    pub async fn try_get_workspace_by_id(&self, id: &str) -> crate::Result<Option<Workspace>> {
+        let registry = self.registry.read().await;
+        if let Some(reg) = registry.as_ref() {
+            reg.get_workspace(id).await
+        } else {
+            Ok(None)
         }
     }
 

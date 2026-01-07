@@ -2658,8 +2658,10 @@ pub async fn workspace_home(
     Path(workspace_id): Path<String>,
 ) -> Result<Html<String>> {
     let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+    let workspace = match state.try_get_workspace_by_id(&workspace_id).await? {
+        Some(ws) => ws,
+        None => return Err(Error::WorkspaceNotFound(workspace_id.clone())),
+    };
 
     let base_path = format!("/w/{}", workspace_id);
     let html = generate_home_page_html(&workspace, &base_path, Some(&workspace_id));
@@ -2673,8 +2675,10 @@ pub async fn workspace_view_diagram(
     Path((workspace_id, view_key)): Path<(String, String)>,
 ) -> Result<Html<String>> {
     let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+    let workspace = match state.try_get_workspace_by_id(&workspace_id).await? {
+        Some(ws) => ws,
+        None => return Err(Error::WorkspaceNotFound(workspace_id.clone())),
+    };
 
     let base_path = format!("/w/{}", workspace_id);
     render_view_diagram_html(&workspace, &view_key, &base_path)
@@ -2782,8 +2786,10 @@ pub async fn workspace_get_json(
     Path(workspace_id): Path<String>,
 ) -> Result<Json<Workspace>> {
     let workspace_id = extract_workspace_id(&workspace_id);
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+    let workspace = match state.try_get_workspace_by_id(&workspace_id).await? {
+        Some(ws) => ws,
+        None => return Err(Error::WorkspaceNotFound(workspace_id.clone())),
+    };
 
     Ok(Json(workspace))
 }
@@ -8166,8 +8172,10 @@ pub async fn workspace_home_nested(
     Path((category, workspace_id)): Path<(String, String)>,
 ) -> Result<Html<String>> {
     let full_id = make_nested_workspace_id(&category, &workspace_id);
-    let workspace = state.get_workspace_by_id(&full_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(full_id.clone()))?;
+    let workspace = match state.try_get_workspace_by_id(&full_id).await? {
+        Some(ws) => ws,
+        None => return Err(Error::WorkspaceNotFound(full_id.clone())),
+    };
 
     let base_path = format!("/w/{}", full_id);
     let html = generate_home_page_html(&workspace, &base_path, Some(&full_id));
@@ -8472,8 +8480,10 @@ pub async fn workspace_dispatch(
         .await
         .ok_or_else(|| Error::WorkspaceNotFound(path.clone()))?;
 
-    let workspace = state.get_workspace_by_id(&workspace_id).await
-        .ok_or_else(|| Error::WorkspaceNotFound(workspace_id.clone()))?;
+    let workspace = match state.try_get_workspace_by_id(&workspace_id).await? {
+        Some(ws) => ws,
+        None => return Err(Error::WorkspaceNotFound(workspace_id.clone())),
+    };
 
     let base_path = format!("/w/{}", workspace_id);
 

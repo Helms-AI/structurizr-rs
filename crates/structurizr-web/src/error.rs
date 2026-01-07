@@ -43,7 +43,7 @@ impl IntoResponse for Error {
             Error::WorkspaceNotFound(_) | Error::ViewNotFound(_) => {
                 (StatusCode::NOT_FOUND, self.to_string())
             }
-            Error::Parse(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            Error::Parse(_) | Error::Dsl(_) => (StatusCode::BAD_REQUEST, self.to_string()),
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
 
