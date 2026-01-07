@@ -15,6 +15,9 @@ pub enum Error {
     #[error("View not found: {0}")]
     ViewNotFound(String),
 
+    #[error("Documentation not found: {0}")]
+    DocNotFound(String),
+
     #[error("Parse error: {0}")]
     Parse(String),
 
@@ -40,7 +43,7 @@ pub enum Error {
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
-            Error::WorkspaceNotFound(_) | Error::ViewNotFound(_) => {
+            Error::WorkspaceNotFound(_) | Error::ViewNotFound(_) | Error::DocNotFound(_) => {
                 (StatusCode::NOT_FOUND, self.to_string())
             }
             Error::Parse(_) | Error::Dsl(_) => (StatusCode::BAD_REQUEST, self.to_string()),

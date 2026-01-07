@@ -43,6 +43,10 @@ impl Server {
             .route("/", get(handlers::workspaces_index))
             .route("/health", get(handlers::health))
 
+            // Project documentation routes
+            .route("/docs", get(handlers::project_docs_index))
+            .route("/docs/*path", get(handlers::project_docs_page))
+
             // Hot-reload WebSocket endpoint
             .route("/ws/reload", get(hot_reload::hot_reload_ws_handler))
 

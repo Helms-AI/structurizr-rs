@@ -591,6 +591,8 @@ fn generate_home_page_html(ws: &Workspace, base_path: &str, workspace_id: Option
         content_type: ContentType::Standard,
         extra_head: extra_styles,
         extra_body_end: extra_scripts,
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&config, &content)
@@ -704,6 +706,27 @@ fn render_nav_tree(nodes: &[HeadingNode], depth: usize) -> String {
     }).collect()
 }
 
+/// Render a simple flat list of TOC links for the right aside column.
+/// Outputs <li> elements with .toc-link anchors and data-level attributes for indentation.
+fn render_toc_links(nodes: &[HeadingNode], base_level: usize) -> String {
+    let mut result = String::new();
+    for node in nodes {
+        // Calculate the data-level attribute (2 for h2, 3 for h3, etc.)
+        let level = base_level.max(2).min(4);
+        result.push_str(&format!(
+            r##"<li><a class="toc-link" data-level="{level}" href="#{id}">{title}</a></li>"##,
+            level = level,
+            id = node.id,
+            title = escape_html(&node.title)
+        ));
+        // Recursively render children
+        if !node.children.is_empty() {
+            result.push_str(&render_toc_links(&node.children, base_level + 1));
+        }
+    }
+    result
+}
+
 /// Health check endpoint.
 pub async fn health() -> &'static str {
     "OK"
@@ -801,6 +824,8 @@ fn generate_search_page_html(workspace: &Workspace, base_path: &str, workspace_i
         content_type: ContentType::Standard,
         extra_head: extra_styles,
         extra_body_end: "",
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&config, &content)
@@ -1097,6 +1122,34 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
             transform: translateY(-1px);
         }}
         .mcp-btn svg {{
+            width: 18px;
+            height: 18px;
+        }}
+        .docs-btn {{
+            position: absolute;
+            top: 0;
+            right: 85px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            text-decoration: none;
+        }}
+        .docs-btn:hover {{
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+            transform: translateY(-1px);
+            text-decoration: none;
+            color: white;
+        }}
+        .docs-btn svg {{
             width: 18px;
             height: 18px;
         }}
@@ -1843,6 +1896,10 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
 <body>
     <div class="header">
         <div class="header-content">
+            <a href="/docs" class="docs-btn">
+                <i data-lucide="book-open"></i>
+                Docs
+            </a>
             <button class="mcp-btn" onclick="openMcpModal()">
                 <i data-lucide="cpu"></i>
                 MCP
@@ -3180,6 +3237,8 @@ fn generate_tree_page_html(workspace: &Workspace, base_path: &str, workspace_id:
         content_type: ContentType::Standard,
         extra_head: extra_styles,
         extra_body_end: extra_scripts,
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&config, &content)
@@ -4417,6 +4476,8 @@ fn generate_view_diagram_html(workspace: &Workspace, view_key: &str, base_path: 
         content_type: ContentType::ToolbarViewport,
         extra_head: extra_styles,
         extra_body_end: &extra_scripts,
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&config, &content)
@@ -6974,6 +7035,8 @@ fn generate_editor_html(workspace: &Workspace, view_key: &str, base_path: &str, 
         content_type: ContentType::ToolbarViewport,
         extra_head: extra_styles,
         extra_body_end: &extra_scripts,
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&config, &content)
@@ -7249,6 +7312,8 @@ fn generate_documentation_html(workspace: &Workspace, base_path: &str) -> String
         content_type: ContentType::Sidebar,
         extra_head: extra_styles,
         extra_body_end: extra_scripts,
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&config, &content)
@@ -7481,6 +7546,8 @@ fn generate_decisions_html(workspace: &Workspace, base_path: &str) -> String {
         content_type: ContentType::Sidebar,
         extra_head: extra_styles,
         extra_body_end: &extra_scripts,
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&config, &content)
@@ -7979,6 +8046,8 @@ fn generate_export_viewer_html(
         content_type: ContentType::FullViewport,
         extra_head: extra_styles,
         extra_body_end: &extra_scripts,
+        header_title: None,
+        show_nav: true,
     };
 
     generate_page_layout(&layout_config, &content)
@@ -8775,6 +8844,1356 @@ pub async fn workspace_dispatch_post(
 
         _ => Err(Error::ViewNotFound(format!("Unknown POST route: /w/{}", path)))
     }
+}
+
+// ============================================================================
+// Project Documentation Handlers
+// ============================================================================
+
+/// Represents a documentation file or folder node in the navigation tree.
+#[derive(Debug)]
+struct DocNode {
+    /// Display name (e.g., "Animation", "SVG Rendering Pipeline")
+    name: String,
+    /// Relative path from docs directory (e.g., "features/animation.md")
+    path: String,
+    /// Whether this is a directory node
+    is_dir: bool,
+    /// Child nodes (for directories)
+    children: Vec<DocNode>,
+}
+
+/// Get the project docs directory path.
+///
+/// Tries multiple locations in order:
+/// 1. STRUCTURIZR_DOCS_DIR environment variable
+/// 2. ./docs (relative to current working directory)
+/// 3. CARGO_MANIFEST_DIR/../../docs (for development)
+fn get_project_docs_dir() -> Result<std::path::PathBuf> {
+    use std::path::PathBuf;
+
+    // Try environment variable first
+    if let Ok(docs_dir) = std::env::var("STRUCTURIZR_DOCS_DIR") {
+        let path = PathBuf::from(docs_dir);
+        if path.exists() && path.is_dir() {
+            return Ok(path.canonicalize().map_err(|e| Error::DocNotFound(format!("Failed to canonicalize docs dir: {}", e)))?);
+        }
+    }
+
+    // Try ./docs relative to current working directory
+    let cwd_docs = PathBuf::from("docs");
+    if cwd_docs.exists() && cwd_docs.is_dir() {
+        return Ok(cwd_docs.canonicalize().map_err(|e| Error::DocNotFound(format!("Failed to canonicalize docs dir: {}", e)))?);
+    }
+
+    // For development, try CARGO_MANIFEST_DIR/../../docs
+    if let Ok(manifest_dir) = std::env::var("CARGO_MANIFEST_DIR") {
+        let dev_docs = PathBuf::from(manifest_dir).join("../../docs");
+        if dev_docs.exists() && dev_docs.is_dir() {
+            return Ok(dev_docs.canonicalize().map_err(|e| Error::DocNotFound(format!("Failed to canonicalize docs dir: {}", e)))?);
+        }
+    }
+
+    Err(Error::DocNotFound("Documentation directory not found. Set STRUCTURIZR_DOCS_DIR or ensure ./docs exists.".into()))
+}
+
+/// Convert a filename to a display name.
+///
+/// Examples:
+/// - "animation" -> "Animation"
+/// - "svg-rendering-pipeline" -> "Svg Rendering Pipeline"
+/// - "animation-impl" -> "Animation Impl"
+fn format_doc_name(name: &str) -> String {
+    name.split('-')
+        .map(|word| {
+            let mut chars = word.chars();
+            match chars.next() {
+                None => String::new(),
+                Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+/// Scan the docs directory and build a tree structure.
+fn scan_docs_directory(docs_dir: &std::path::Path) -> Result<Vec<DocNode>> {
+    fn scan_dir(dir: &std::path::Path, base: &std::path::Path) -> Vec<DocNode> {
+        let mut nodes = Vec::new();
+
+        if let Ok(entries) = std::fs::read_dir(dir) {
+            let mut entries: Vec<_> = entries.filter_map(|e| e.ok()).collect();
+            // Sort alphabetically by filename
+            entries.sort_by(|a, b| a.file_name().cmp(&b.file_name()));
+
+            for entry in entries {
+                let path = entry.path();
+                let rel_path = path.strip_prefix(base).unwrap_or(&path);
+                let name = path.file_stem()
+                    .map(|s| s.to_string_lossy().to_string())
+                    .unwrap_or_default();
+
+                // Skip hidden files/directories
+                if name.starts_with('.') {
+                    continue;
+                }
+
+                if path.is_dir() {
+                    let children = scan_dir(&path, base);
+                    if !children.is_empty() {
+                        nodes.push(DocNode {
+                            name: format_doc_name(&name),
+                            path: rel_path.to_string_lossy().to_string(),
+                            is_dir: true,
+                            children,
+                        });
+                    }
+                } else if path.extension().map_or(false, |e| e == "md") {
+                    nodes.push(DocNode {
+                        name: format_doc_name(&name),
+                        path: rel_path.to_string_lossy().to_string(),
+                        is_dir: false,
+                        children: Vec::new(),
+                    });
+                }
+            }
+        }
+
+        nodes
+    }
+
+    Ok(scan_dir(docs_dir, docs_dir))
+}
+
+/// Render the documentation sidebar navigation.
+fn render_docs_sidebar(nodes: &[DocNode], current_file: Option<&str>) -> String {
+    fn render_node(node: &DocNode, current: Option<&str>, depth: usize) -> String {
+        if node.is_dir {
+            // Check if any child matches current file (to auto-expand)
+            let is_in_path = current.map_or(false, |c| c.starts_with(&node.path));
+            // Only expand if active item is inside, otherwise default collapsed
+            let expanded = if is_in_path { "true" } else { "false" };
+            let children_html: String = node.children.iter()
+                .map(|c| render_node(c, current, depth + 1))
+                .collect();
+
+            // Sanitize path for use as HTML id
+            let safe_id = node.path.replace('/', "-").replace('.', "-");
+
+            format!(
+                r##"<li class="nav-item nav-folder" role="treeitem" aria-expanded="{expanded}" data-path="{path}" data-depth="{depth}">
+                    <button class="nav-row" type="button" aria-controls="nav-children-{safe_id}">
+                        <span class="nav-icon"><i data-lucide="folder"></i></span>
+                        <span class="nav-label">{name}</span>
+                        <span class="nav-chevron"><i data-lucide="chevron-right"></i></span>
+                    </button>
+                    <div class="nav-children" id="nav-children-{safe_id}" role="group">
+                        <div><ul>{children_html}</ul></div>
+                    </div>
+                </li>"##,
+                expanded = expanded,
+                path = escape_html(&node.path),
+                depth = depth,
+                safe_id = safe_id,
+                name = escape_html(&node.name),
+                children_html = children_html
+            )
+        } else {
+            // Remove .md extension for URL
+            let url_path = node.path.trim_end_matches(".md");
+            let is_current = current.map_or(false, |c| {
+                c == node.path || c.trim_end_matches(".md") == url_path
+            });
+            let active_class = if is_current { " active" } else { "" };
+
+            format!(
+                r##"<li class="nav-item nav-leaf" role="treeitem" data-depth="{depth}">
+                    <a href="/docs/{url_path}" class="nav-link{active_class}">
+                        <span class="nav-icon"><i data-lucide="file-text"></i></span>
+                        <span class="nav-label">{name}</span>
+                    </a>
+                </li>"##,
+                depth = depth,
+                url_path = url_path,
+                active_class = active_class,
+                name = escape_html(&node.name)
+            )
+        }
+    }
+
+    let items: String = nodes.iter()
+        .map(|n| render_node(n, current_file, 0))
+        .collect();
+
+    // Build complete sidebar with search box
+    format!(
+        r##"<div class="nav-search">
+            <div class="nav-search-wrapper">
+                <span class="nav-search-icon"><i data-lucide="search"></i></span>
+                <input type="text" placeholder="Search docs..." aria-label="Search documentation" id="docs-search-input">
+                <kbd>⌘K</kbd>
+            </div>
+        </div>
+        <div class="nav-tree-container">
+            <ul class="nav-tree" role="tree" aria-label="Documentation navigation">{items}</ul>
+        </div>"##,
+        items = items
+    )
+}
+
+/// Generate CSS for the project documentation pages.
+fn get_project_docs_css() -> String {
+    r##"<script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* ========================================
+           Documentation Design System
+           Inspired by Stripe, Tailwind, Vercel
+           ======================================== */
+
+        /* Override layout wrapper to allow full-width docs */
+        .layout-content.standard:has(.docs-layout) {
+            max-width: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        /* Design Tokens */
+        .docs-layout {
+            /* Gray Scale */
+            --gray-50: #fafafa;
+            --gray-100: #f4f4f5;
+            --gray-200: #e4e4e7;
+            --gray-300: #d4d4d8;
+            --gray-400: #a1a1aa;
+            --gray-500: #71717a;
+            --gray-600: #52525b;
+            --gray-700: #3f3f46;
+            --gray-800: #27272a;
+            --gray-900: #18181b;
+
+            /* Accent */
+            --blue-500: #3b82f6;
+            --blue-600: #2563eb;
+
+            /* Typography */
+            --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+            --font-mono: 'JetBrains Mono', 'SF Mono', monospace;
+
+            /* Type Scale */
+            --text-xs: 0.75rem;
+            --text-sm: 0.875rem;
+            --text-base: 1rem;
+            --text-lg: 1.125rem;
+            --text-xl: 1.25rem;
+            --text-2xl: 1.5rem;
+            --text-3xl: 1.875rem;
+            --text-4xl: 2.25rem;
+
+            /* Spacing */
+            --sp-1: 4px;
+            --sp-2: 8px;
+            --sp-3: 12px;
+            --sp-4: 16px;
+            --sp-5: 20px;
+            --sp-6: 24px;
+            --sp-8: 32px;
+            --sp-10: 40px;
+            --sp-12: 48px;
+
+            /* Semantic - Light (default) */
+            --bg-page: var(--gray-50);
+            --bg-sidebar: #ffffff;
+            --bg-hover: var(--gray-100);
+            --text-primary: var(--gray-900);
+            --text-secondary: var(--gray-600);
+            --text-muted: var(--gray-400);
+            --border: var(--gray-200);
+            --accent: var(--blue-600);
+            --code-bg: var(--gray-100);
+        }
+
+        /* Dark Theme Override */
+        [data-theme="dark"] .docs-layout {
+            --bg-page: var(--gray-900);
+            --bg-sidebar: var(--gray-800);
+            --bg-hover: var(--gray-700);
+            --text-primary: var(--gray-50);
+            --text-secondary: var(--gray-400);
+            --text-muted: var(--gray-500);
+            --border: var(--gray-700);
+            --accent: #60a5fa;
+            --code-bg: var(--gray-800);
+        }
+
+        /* ========================================
+           Three-Column Layout - Fixed Sidebars
+           ======================================== */
+        .docs-layout {
+            min-height: calc(100vh - 40px);
+            background: var(--bg-page);
+            /* Use margins to account for fixed sidebars */
+            margin-left: 260px;
+            margin-right: 200px;
+        }
+
+        /* Hide TOC on medium screens */
+        @media (max-width: 1280px) {
+            .docs-layout {
+                margin-right: 0;
+            }
+            .docs-toc {
+                display: none;
+            }
+        }
+
+        /* Single column on mobile */
+        @media (max-width: 1024px) {
+            .docs-layout {
+                margin-left: 0;
+                margin-right: 0;
+            }
+            .docs-sidebar {
+                display: none;
+            }
+        }
+
+        /* ========================================
+           Left Sidebar - FIXED positioning
+           ======================================== */
+        .docs-sidebar {
+            position: fixed;
+            top: 40px; /* Below header (no nav bar) */
+            left: 0;
+            width: 260px;
+            height: calc(100vh - 40px);
+            background: var(--bg-sidebar);
+            border-right: 1px solid var(--border);
+            overflow-y: auto;
+            overflow-x: hidden;
+            display: flex;
+            flex-direction: column;
+            z-index: 50;
+        }
+
+        /* Custom scrollbar for sidebar */
+        .docs-sidebar::-webkit-scrollbar {
+            width: 6px;
+        }
+        .docs-sidebar::-webkit-scrollbar-track {
+            background: transparent;
+        }
+        .docs-sidebar::-webkit-scrollbar-thumb {
+            background: var(--gray-300);
+            border-radius: 3px;
+        }
+        .docs-sidebar::-webkit-scrollbar-thumb:hover {
+            background: var(--gray-400);
+        }
+        [data-theme="dark"] .docs-sidebar::-webkit-scrollbar-thumb {
+            background: var(--gray-600);
+        }
+        [data-theme="dark"] .docs-sidebar::-webkit-scrollbar-thumb:hover {
+            background: var(--gray-500);
+        }
+
+        /* ========================================
+           Search Box
+           ======================================== */
+        .nav-search {
+            position: sticky;
+            top: 0;
+            padding: var(--sp-4);
+            background: var(--bg-sidebar);
+            border-bottom: 1px solid var(--border);
+            z-index: 10;
+        }
+
+        .nav-search-wrapper {
+            position: relative;
+            display: flex;
+            align-items: center;
+        }
+
+        .nav-search-icon {
+            position: absolute;
+            left: var(--sp-3);
+            color: var(--text-muted);
+            pointer-events: none;
+            display: flex;
+            align-items: center;
+        }
+
+        .nav-search-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .nav-search input {
+            width: 100%;
+            padding: var(--sp-2) var(--sp-3);
+            padding-left: 36px;
+            padding-right: 48px;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            background: var(--bg-page);
+            font-family: var(--font-sans);
+            font-size: var(--text-sm);
+            color: var(--text-primary);
+            transition: border-color 200ms ease, box-shadow 200ms ease;
+        }
+
+        .nav-search input::placeholder {
+            color: var(--text-muted);
+        }
+
+        .nav-search input:focus {
+            outline: none;
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 15%, transparent);
+        }
+
+        .nav-search kbd {
+            position: absolute;
+            right: var(--sp-2);
+            padding: 2px 6px;
+            font-size: 11px;
+            font-family: var(--font-mono);
+            background: var(--bg-hover);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            color: var(--text-muted);
+            line-height: 1.4;
+        }
+
+        /* ========================================
+           Navigation Tree
+           ======================================== */
+        .nav-tree-container {
+            flex: 1;
+            padding: var(--sp-3) 0;
+            overflow-y: auto;
+        }
+
+        .nav-tree, .nav-tree ul {
+            list-style: none;
+            margin: 0;
+            padding: 0;
+        }
+
+        .nav-children {
+            display: grid;
+            grid-template-rows: 0fr;
+            transition: grid-template-rows 200ms cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        .nav-children > div {
+            overflow: hidden;
+        }
+
+        .nav-folder[aria-expanded="true"] > .nav-children {
+            grid-template-rows: 1fr;
+        }
+
+        /* Navigation Item Base */
+        .nav-item {
+            position: relative;
+        }
+
+        /* Folder Row (button) */
+        .nav-row {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+            width: 100%;
+            padding: var(--sp-2) var(--sp-4);
+            border: none;
+            background: none;
+            font-family: var(--font-sans);
+            font-size: var(--text-sm);
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 150ms ease;
+            text-align: left;
+            border-left: 2px solid transparent;
+        }
+
+        .nav-row:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        /* Leaf Link */
+        .nav-link {
+            display: flex;
+            align-items: center;
+            gap: var(--sp-2);
+            width: 100%;
+            padding: var(--sp-2) var(--sp-4);
+            font-size: var(--text-sm);
+            color: var(--text-secondary);
+            text-decoration: none;
+            transition: all 150ms ease;
+            border-left: 2px solid transparent;
+        }
+
+        .nav-link:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .nav-link.active {
+            color: var(--accent);
+            background: color-mix(in srgb, var(--accent) 8%, transparent);
+            border-left-color: var(--accent);
+            font-weight: 500;
+        }
+
+        /* Icons */
+        .nav-icon {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 16px;
+            height: 16px;
+            flex-shrink: 0;
+            color: var(--text-muted);
+            transition: color 150ms ease;
+        }
+
+        .nav-icon svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .nav-folder[aria-expanded="true"] > .nav-row .nav-icon {
+            color: var(--accent);
+        }
+
+        .nav-link.active .nav-icon {
+            color: var(--accent);
+        }
+
+        /* Chevron */
+        .nav-chevron {
+            display: flex;
+            align-items: center;
+            margin-left: auto;
+            transition: transform 200ms cubic-bezier(0.4, 0, 0.2, 1);
+            color: var(--text-muted);
+        }
+
+        .nav-chevron svg {
+            width: 14px;
+            height: 14px;
+        }
+
+        .nav-folder[aria-expanded="true"] > .nav-row > .nav-chevron {
+            transform: rotate(90deg);
+        }
+
+        /* Folder Label */
+        .nav-folder > .nav-row .nav-label {
+            font-weight: 600;
+            text-transform: uppercase;
+            font-size: var(--text-xs);
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+        }
+
+        .nav-folder:hover > .nav-row .nav-label,
+        .nav-folder[aria-expanded="true"] > .nav-row .nav-label {
+            color: var(--text-secondary);
+        }
+
+        /* Depth-based indentation */
+        .nav-item[data-depth="1"] > .nav-row,
+        .nav-item[data-depth="1"] > .nav-link {
+            padding-left: calc(var(--sp-4) + 16px);
+        }
+
+        .nav-item[data-depth="2"] > .nav-row,
+        .nav-item[data-depth="2"] > .nav-link {
+            padding-left: calc(var(--sp-4) + 32px);
+        }
+
+        .nav-item[data-depth="3"] > .nav-row,
+        .nav-item[data-depth="3"] > .nav-link {
+            padding-left: calc(var(--sp-4) + 48px);
+        }
+
+        /* Focus states for accessibility */
+        .nav-row:focus-visible,
+        .nav-link:focus-visible {
+            outline: 2px solid var(--accent);
+            outline-offset: -2px;
+            border-radius: 4px;
+        }
+
+        /* Search highlight */
+        .nav-label mark {
+            background: color-mix(in srgb, var(--accent) 25%, transparent);
+            color: inherit;
+            padding: 1px 2px;
+            border-radius: 2px;
+        }
+
+        /* No results message */
+        .nav-no-results {
+            padding: var(--sp-6) var(--sp-4);
+            text-align: center;
+            color: var(--text-muted);
+            font-size: var(--text-sm);
+        }
+
+        /* Hidden items during search */
+        .nav-item.search-hidden {
+            display: none;
+        }
+
+        /* Expand all folders during search */
+        .nav-tree.searching .nav-folder {
+            aria-expanded: true;
+        }
+        .nav-tree.searching .nav-children {
+            grid-template-rows: 1fr;
+        }
+
+        /* ========================================
+           Main Content Area
+           ======================================== */
+        .docs-main {
+            padding: var(--sp-10) var(--sp-12);
+            min-width: 0;
+            /* Page scrolls naturally - sidebars are fixed */
+        }
+
+        @media (max-width: 768px) {
+            .docs-main {
+                padding: var(--sp-6) var(--sp-4);
+            }
+        }
+
+        .doc-content {
+            max-width: 65ch;
+            font-family: var(--font-sans);
+            font-size: var(--text-base);
+            line-height: 1.625;
+            color: var(--text-primary);
+        }
+
+        /* Headings */
+        .doc-content h1 {
+            font-size: var(--text-4xl);
+            font-weight: 700;
+            line-height: 1.2;
+            margin: 0 0 var(--sp-6) 0;
+            letter-spacing: -0.025em;
+            color: var(--text-primary);
+        }
+
+        .doc-content h2 {
+            font-size: var(--text-2xl);
+            font-weight: 600;
+            margin: var(--sp-12) 0 var(--sp-4) 0;
+            padding-bottom: var(--sp-3);
+            border-bottom: 1px solid var(--border);
+            scroll-margin-top: 80px;
+        }
+
+        .doc-content h3 {
+            font-size: var(--text-xl);
+            font-weight: 600;
+            margin: var(--sp-8) 0 var(--sp-3) 0;
+            scroll-margin-top: 80px;
+        }
+
+        .doc-content h4 {
+            font-size: var(--text-lg);
+            font-weight: 600;
+            margin: var(--sp-6) 0 var(--sp-2) 0;
+            scroll-margin-top: 80px;
+        }
+
+        /* Lead paragraph */
+        .doc-content > p:first-of-type {
+            font-size: var(--text-lg);
+            color: var(--text-secondary);
+            line-height: 1.7;
+        }
+
+        /* Paragraphs */
+        .doc-content p {
+            margin: 0 0 var(--sp-4) 0;
+        }
+
+        /* Links */
+        .doc-content a {
+            color: var(--accent);
+            text-decoration: none;
+            font-weight: 500;
+        }
+
+        .doc-content a:hover {
+            text-decoration: underline;
+            text-underline-offset: 2px;
+        }
+
+        /* Inline code */
+        .doc-content code {
+            font-family: var(--font-mono);
+            font-size: 0.875em;
+            padding: 2px 6px;
+            background: var(--code-bg);
+            border-radius: 4px;
+        }
+
+        /* Code blocks */
+        .doc-content pre {
+            margin: var(--sp-6) 0;
+            padding: var(--sp-4);
+            background: var(--gray-900);
+            border-radius: 8px;
+            overflow-x: auto;
+        }
+
+        .doc-content pre code {
+            padding: 0;
+            background: none;
+            font-size: var(--text-sm);
+            line-height: 1.7;
+            color: var(--gray-100);
+        }
+
+        /* Lists */
+        .doc-content ul, .doc-content ol {
+            margin: 0 0 var(--sp-4) 0;
+            padding-left: var(--sp-6);
+        }
+
+        .doc-content li {
+            margin: var(--sp-2) 0;
+        }
+
+        .doc-content li::marker {
+            color: var(--text-muted);
+        }
+
+        /* Blockquotes */
+        .doc-content blockquote {
+            margin: var(--sp-6) 0;
+            padding: var(--sp-4) var(--sp-5);
+            background: var(--bg-hover);
+            border-left: 3px solid var(--accent);
+            border-radius: 0 6px 6px 0;
+        }
+
+        .doc-content blockquote p:last-child {
+            margin-bottom: 0;
+        }
+
+        /* Tables */
+        .doc-content table {
+            width: 100%;
+            margin: var(--sp-6) 0;
+            border-collapse: collapse;
+            font-size: var(--text-sm);
+        }
+
+        .doc-content th {
+            text-align: left;
+            padding: var(--sp-3) var(--sp-4);
+            background: var(--bg-hover);
+            font-weight: 600;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .doc-content td {
+            padding: var(--sp-3) var(--sp-4);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .doc-content tr:last-child td {
+            border-bottom: none;
+        }
+
+        /* Images */
+        .doc-content img {
+            max-width: 100%;
+            border-radius: 8px;
+            margin: var(--sp-6) 0;
+        }
+
+        /* Horizontal rule */
+        .doc-content hr {
+            border: none;
+            height: 1px;
+            background: var(--border);
+            margin: var(--sp-8) 0;
+        }
+
+        /* ========================================
+           Right TOC - FIXED positioning
+           ======================================== */
+        .docs-toc {
+            position: fixed;
+            top: 40px; /* Below header (no nav bar) */
+            right: 0;
+            width: 200px;
+            height: calc(100vh - 40px);
+            padding: 15px var(--sp-4) var(--sp-6) var(--sp-4);
+            overflow-y: auto;
+            z-index: 50;
+            background: var(--bg-page);
+        }
+
+        .toc-header {
+            font-size: var(--text-xs);
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-muted);
+            margin-bottom: var(--sp-3);
+        }
+
+        .toc-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .toc-list li {
+            margin: var(--sp-1) 0;
+        }
+
+        .toc-link {
+            display: block;
+            padding: var(--sp-1) var(--sp-2);
+            font-size: var(--text-xs);
+            color: var(--text-secondary);
+            text-decoration: none;
+            border-left: 2px solid transparent;
+            line-height: 1.5;
+            transition: all 0.15s ease;
+        }
+
+        .toc-link:hover {
+            color: var(--text-primary);
+        }
+
+        .toc-link.active {
+            color: var(--accent);
+            border-left-color: var(--accent);
+        }
+
+        /* Level-based indentation */
+        .toc-link[data-level="2"] { padding-left: var(--sp-2); }
+        .toc-link[data-level="3"] { padding-left: var(--sp-4); }
+        .toc-link[data-level="4"] { padding-left: var(--sp-6); }
+
+        /* ========================================
+           Print Styles
+           ======================================== */
+        @media print {
+            .docs-sidebar, .docs-toc {
+                display: none;
+            }
+            .docs-layout {
+                display: block;
+            }
+            .docs-main {
+                padding: 0;
+            }
+            .doc-content {
+                max-width: 100%;
+            }
+        }
+    </style>"##.to_string()
+}
+
+/// Generate JavaScript for the project documentation pages.
+fn get_project_docs_js() -> String {
+    r##"
+    <script>
+    (function() {
+        'use strict';
+
+        // === Storage Keys ===
+        const STORAGE_KEY = 'structurizr-docs-nav-state';
+
+        // === State Management ===
+        const NavState = {
+            expanded: new Set(),
+
+            load() {
+                try {
+                    const stored = localStorage.getItem(STORAGE_KEY);
+                    if (stored) {
+                        const data = JSON.parse(stored);
+                        this.expanded = new Set(data.expanded || []);
+                    }
+                } catch (e) {
+                    console.warn('Failed to load nav state:', e);
+                }
+            },
+
+            save() {
+                try {
+                    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+                        expanded: Array.from(this.expanded)
+                    }));
+                } catch (e) {
+                    console.warn('Failed to save nav state:', e);
+                }
+            },
+
+            toggle(path) {
+                if (this.expanded.has(path)) {
+                    this.expanded.delete(path);
+                } else {
+                    this.expanded.add(path);
+                }
+                this.save();
+            },
+
+            expandTo(path) {
+                // Expand all parent folders to show active item
+                const parts = path.split('/');
+                let current = '';
+                for (let i = 0; i < parts.length - 1; i++) {
+                    current = current ? current + '/' + parts[i] : parts[i];
+                    this.expanded.add(current);
+                }
+                this.save();
+            }
+        };
+
+        // === Search Functionality ===
+        const Search = {
+            input: null,
+            items: [],
+            noResultsEl: null,
+
+            init() {
+                this.input = document.getElementById('docs-search-input');
+                if (!this.input) return;
+
+                // Collect all leaf nav items for search
+                document.querySelectorAll('.nav-leaf').forEach(item => {
+                    const label = item.querySelector('.nav-label');
+                    const link = item.querySelector('.nav-link');
+                    if (label && link) {
+                        this.items.push({
+                            element: item,
+                            text: label.textContent.toLowerCase(),
+                            original: label.innerHTML,
+                            href: link.getAttribute('href')
+                        });
+                    }
+                });
+
+                this.input.addEventListener('input', (e) => this.filter(e.target.value));
+
+                // Keyboard shortcut (Cmd/Ctrl + K)
+                document.addEventListener('keydown', (e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+                        e.preventDefault();
+                        this.input.focus();
+                        this.input.select();
+                    }
+                    if (e.key === 'Escape' && document.activeElement === this.input) {
+                        this.input.value = '';
+                        this.filter('');
+                        this.input.blur();
+                    }
+                });
+            },
+
+            filter(query) {
+                const q = query.toLowerCase().trim();
+                const navTree = document.querySelector('.nav-tree');
+                let visibleCount = 0;
+
+                // Toggle searching mode
+                if (q) {
+                    navTree?.classList.add('searching');
+                } else {
+                    navTree?.classList.remove('searching');
+                }
+
+                this.items.forEach(item => {
+                    if (!q) {
+                        // Reset to original state
+                        item.element.classList.remove('search-hidden');
+                        const label = item.element.querySelector('.nav-label');
+                        if (label) label.innerHTML = item.original;
+                        return;
+                    }
+
+                    const match = item.text.includes(q);
+                    item.element.classList.toggle('search-hidden', !match);
+
+                    if (match) {
+                        visibleCount++;
+                        // Highlight match
+                        const label = item.element.querySelector('.nav-label');
+                        if (label) {
+                            const regex = new RegExp('(' + q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + ')', 'gi');
+                            label.innerHTML = item.original.replace(regex, '<mark>$1</mark>');
+                        }
+                        // Expand parent folders to show result
+                        let parent = item.element.parentElement?.closest('.nav-folder');
+                        while (parent) {
+                            parent.setAttribute('aria-expanded', 'true');
+                            parent = parent.parentElement?.closest('.nav-folder');
+                        }
+                    }
+                });
+
+                // Show/hide no results message
+                if (q && visibleCount === 0) {
+                    if (!this.noResultsEl) {
+                        this.noResultsEl = document.createElement('div');
+                        this.noResultsEl.className = 'nav-no-results';
+                        this.noResultsEl.textContent = 'No results found';
+                        document.querySelector('.nav-tree-container')?.appendChild(this.noResultsEl);
+                    }
+                    this.noResultsEl.style.display = '';
+                } else if (this.noResultsEl) {
+                    this.noResultsEl.style.display = 'none';
+                }
+
+                // If search cleared, restore persisted state
+                if (!q) {
+                    applyPersistedState();
+                }
+            }
+        };
+
+        // === Keyboard Navigation ===
+        const Keyboard = {
+            init() {
+                const navTree = document.querySelector('.nav-tree');
+                if (!navTree) return;
+
+                navTree.addEventListener('keydown', (e) => {
+                    const focusable = Array.from(navTree.querySelectorAll('.nav-row, .nav-link'))
+                        .filter(el => {
+                            const item = el.closest('.nav-item');
+                            return item && !item.classList.contains('search-hidden') && el.offsetParent !== null;
+                        });
+
+                    const current = document.activeElement;
+                    const index = focusable.indexOf(current);
+
+                    switch(e.key) {
+                        case 'ArrowDown':
+                            e.preventDefault();
+                            if (index < focusable.length - 1) {
+                                focusable[index + 1].focus();
+                            }
+                            break;
+                        case 'ArrowUp':
+                            e.preventDefault();
+                            if (index > 0) {
+                                focusable[index - 1].focus();
+                            }
+                            break;
+                        case 'ArrowRight':
+                            e.preventDefault();
+                            const folder = current.closest('.nav-folder');
+                            if (folder && folder.getAttribute('aria-expanded') !== 'true') {
+                                toggleFolder(current);
+                            }
+                            break;
+                        case 'ArrowLeft':
+                            e.preventDefault();
+                            const parentFolder = current.closest('.nav-folder');
+                            if (parentFolder && parentFolder.getAttribute('aria-expanded') === 'true') {
+                                toggleFolder(current);
+                            } else {
+                                // Move to parent folder
+                                const grandParent = parentFolder?.parentElement?.closest('.nav-folder');
+                                grandParent?.querySelector('.nav-row')?.focus();
+                            }
+                            break;
+                        case 'Home':
+                            e.preventDefault();
+                            focusable[0]?.focus();
+                            break;
+                        case 'End':
+                            e.preventDefault();
+                            focusable[focusable.length - 1]?.focus();
+                            break;
+                    }
+                });
+            }
+        };
+
+        // === Folder Toggle ===
+        function toggleFolder(button) {
+            const folder = button.closest('.nav-folder');
+            if (!folder) return;
+
+            const path = folder.dataset.path;
+            const isExpanded = folder.getAttribute('aria-expanded') === 'true';
+
+            folder.setAttribute('aria-expanded', !isExpanded);
+            if (path) {
+                NavState.toggle(path);
+            }
+        }
+
+        // === Apply Persisted State ===
+        function applyPersistedState() {
+            document.querySelectorAll('.nav-folder').forEach(folder => {
+                const path = folder.dataset.path;
+                if (path) {
+                    const shouldExpand = NavState.expanded.has(path);
+                    folder.setAttribute('aria-expanded', shouldExpand);
+                }
+            });
+        }
+
+        // === Expand to Active Item ===
+        function expandToActive() {
+            const active = document.querySelector('.nav-link.active');
+            if (active) {
+                const href = active.getAttribute('href');
+                if (href) {
+                    // Extract path from href (remove /docs/ prefix)
+                    const path = href.replace('/docs/', '').replace(/\.md$/, '');
+                    NavState.expandTo(path);
+                }
+                // Also expand all parent folders via DOM traversal
+                let parent = active.closest('.nav-folder');
+                while (parent) {
+                    parent.setAttribute('aria-expanded', 'true');
+                    const path = parent.dataset.path;
+                    if (path) NavState.expanded.add(path);
+                    parent = parent.parentElement?.closest('.nav-folder');
+                }
+                NavState.save();
+            }
+        }
+
+        // === Auto-scroll Active into View ===
+        function scrollActiveIntoView() {
+            const active = document.querySelector('.nav-link.active');
+            if (active) {
+                // Small delay to allow expansion animation
+                setTimeout(() => {
+                    active.scrollIntoView({ block: 'center', behavior: 'smooth' });
+                }, 250);
+            }
+        }
+
+        // === Scroll Spy for TOC ===
+        function initScrollSpy() {
+            const headings = document.querySelectorAll('.doc-content h2[id], .doc-content h3[id], .doc-content h4[id]');
+            const tocLinks = document.querySelectorAll('.docs-toc .toc-link');
+
+            if (headings.length === 0 || tocLinks.length === 0) return;
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        const id = entry.target.id;
+                        tocLinks.forEach(link => {
+                            link.classList.toggle('active', link.getAttribute('href') === '#' + id);
+                        });
+                    }
+                });
+            }, { rootMargin: '-80px 0px -80% 0px' });
+
+            headings.forEach(heading => observer.observe(heading));
+        }
+
+        // === Initialize ===
+        document.addEventListener('DOMContentLoaded', function() {
+            // Initialize Lucide icons
+            lucide.createIcons();
+
+            // Load persisted nav state
+            NavState.load();
+
+            // Expand to show active item
+            expandToActive();
+
+            // Apply persisted expansion state
+            applyPersistedState();
+
+            // Initialize search
+            Search.init();
+
+            // Initialize keyboard navigation
+            Keyboard.init();
+
+            // Attach toggle handlers to folder buttons
+            document.querySelectorAll('.nav-folder > .nav-row').forEach(btn => {
+                btn.addEventListener('click', () => toggleFolder(btn));
+            });
+
+            // Scroll active item into view
+            scrollActiveIntoView();
+
+            // Initialize scroll spy for TOC
+            initScrollSpy();
+
+            // Smooth scroll on TOC link click
+            document.querySelectorAll('.docs-toc .toc-link').forEach(link => {
+                link.addEventListener('click', function(e) {
+                    e.preventDefault();
+                    const targetId = this.getAttribute('href').slice(1);
+                    const target = document.getElementById(targetId);
+                    if (target) {
+                        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                        history.pushState(null, null, '#' + targetId);
+                    }
+                });
+            });
+        });
+
+        // Expose toggle function globally (for any onclick handlers)
+        window.toggleDocNav = toggleFolder;
+    })();
+    </script>
+    "##.to_string()
+}
+
+/// Generate project documentation HTML with navigation sidebar.
+fn generate_project_documentation_html(
+    docs_dir: &std::path::Path,
+    current_file: Option<&str>,
+    content: &str,
+) -> Result<String> {
+    // 1. Scan docs directory for sidebar
+    let doc_tree = scan_docs_directory(docs_dir)?;
+
+    // 2. Render markdown with heading extraction
+    let result = render_markdown_with_heading_ids(content, 0);
+
+    // 3. Build sidebar navigation from doc_tree
+    let sidebar_html = render_docs_sidebar(&doc_tree, current_file);
+
+    // 4. Build heading tree for current document ("On This Page" nav)
+    let heading_tree = build_heading_tree(result.headings);
+    let toc_links_html = render_toc_links(&heading_tree, 2);
+
+    // 5. Rewrite relative .md links to /docs/* routes
+    let html_with_fixed_links = result.html
+        .replace(r#"href="features/"#, r#"href="/docs/features/"#)
+        .replace(r#"href="development/"#, r#"href="/docs/development/"#)
+        .replace(r#".md""#, r#"""#)
+        .replace(r#".md#"#, r#"#"#);
+
+    // 6. Build "On This Page" section for right aside
+    let toc_html = if !toc_links_html.is_empty() {
+        format!(
+            r#"<aside class="docs-toc" role="complementary" aria-label="Table of contents">
+                <div class="toc-header">On This Page</div>
+                <ul class="toc-list">{}</ul>
+            </aside>"#,
+            toc_links_html
+        )
+    } else {
+        String::new()
+    };
+
+    // 7. Build page title from current file
+    let title = current_file
+        .map(|f| {
+            let name = std::path::Path::new(f)
+                .file_stem()
+                .map(|s| s.to_string_lossy().to_string())
+                .unwrap_or_else(|| "Documentation".to_string());
+            format!("{} - Documentation", format_doc_name(&name))
+        })
+        .unwrap_or_else(|| "Documentation".to_string());
+
+    // 8. Use layout system - hide nav bar for project docs
+    let layout_config = LayoutConfig {
+        title: &title,
+        workspace_name: None,
+        workspace_id: None,
+        base_path: "",
+        active_nav: NavItem::None,
+        content_type: ContentType::Standard,
+        extra_head: &get_project_docs_css(),
+        extra_body_end: &get_project_docs_js(),
+        header_title: Some("Documentation"),
+        show_nav: false,
+    };
+
+    // 9. Build content HTML with three-column layout
+    let content_html = format!(
+        r#"<div class="docs-layout">
+            <nav class="docs-sidebar" role="navigation" aria-label="Documentation sections">
+                {sidebar_html}
+            </nav>
+            <main class="docs-main">
+                <article class="doc-content">
+                    {rendered_content}
+                </article>
+            </main>
+            {toc_html}
+        </div>"#,
+        sidebar_html = sidebar_html,
+        rendered_content = html_with_fixed_links,
+        toc_html = toc_html
+    );
+
+    Ok(generate_page_layout(&layout_config, &content_html))
+}
+
+/// Serve the project documentation index page.
+pub async fn project_docs_index(State(_state): State<AppState>) -> Result<Html<String>> {
+    let docs_dir = get_project_docs_dir()?;
+    let index_path = docs_dir.join("index.md");
+
+    let content = tokio::fs::read_to_string(&index_path).await
+        .map_err(|e| Error::DocNotFound(format!("Documentation index not found: {}", e)))?;
+
+    let html = generate_project_documentation_html(&docs_dir, Some("index.md"), &content)?;
+    Ok(Html(html))
+}
+
+/// Serve a specific project documentation page.
+pub async fn project_docs_page(
+    State(_state): State<AppState>,
+    Path(path): Path<String>,
+) -> Result<Html<String>> {
+    let docs_dir = get_project_docs_dir()?;
+
+    // Add .md extension if not present
+    let file_path = if path.ends_with(".md") {
+        docs_dir.join(&path)
+    } else {
+        docs_dir.join(format!("{}.md", path))
+    };
+
+    // Security: ensure path doesn't escape docs directory
+    let canonical = file_path.canonicalize()
+        .map_err(|_| Error::DocNotFound(format!("Documentation not found: {}", path)))?;
+
+    let docs_canonical = docs_dir.canonicalize()
+        .map_err(|e| Error::DocNotFound(format!("Failed to canonicalize docs dir: {}", e)))?;
+
+    if !canonical.starts_with(&docs_canonical) {
+        return Err(Error::DocNotFound("Invalid documentation path".into()));
+    }
+
+    let content = tokio::fs::read_to_string(&canonical).await
+        .map_err(|e| Error::DocNotFound(format!("Documentation not found: {} - {}", path, e)))?;
+
+    // Use the path with .md extension for current file tracking
+    let current_file = if path.ends_with(".md") {
+        path.clone()
+    } else {
+        format!("{}.md", path)
+    };
+
+    let html = generate_project_documentation_html(&docs_dir, Some(&current_file), &content)?;
+    Ok(Html(html))
 }
 
 // ============================================================================
