@@ -9,6 +9,8 @@ members = [
     "crates/structurizr-scripting",
     "crates/structurizr-mcp",
     "crates/structurizr-config",
+    "crates/structurizr-github",
+    "crates/structurizr-analysis",
 ]
 
 [workspace.package]
@@ -90,6 +92,17 @@ structurizr-web = { path = "crates/structurizr-web" }
 structurizr-scripting = { path = "crates/structurizr-scripting" }
 structurizr-mcp = { path = "crates/structurizr-mcp" }
 structurizr-config = { path = "crates/structurizr-config" }
+structurizr-github = { path = "crates/structurizr-github" }
+structurizr-analysis = { path = "crates/structurizr-analysis" }
+
+# GitHub API client
+octocrab = "0.41"
+
+# SQLite for caching
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Secure secret storage
+secrecy = "0.10"
 
 [package]
 name = "structurizr-rs"

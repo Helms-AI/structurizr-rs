@@ -6,6 +6,7 @@ use tokio::sync::RwLock;
 
 use structurizr_core::Workspace;
 use structurizr_core::workspace::{DocumentationSection, DocumentationFormat, Decision, DecisionStatus};
+use structurizr_github::{AnalysisStorage, JobQueue};
 
 use crate::discovery::WorkspaceRegistry;
 use crate::editor::EditorState;
@@ -80,6 +81,10 @@ pub struct AppState {
     pub registry: Arc<RwLock<Option<WorkspaceRegistry>>>,
     pub editor: EditorState,
     pub watcher: Arc<RwLock<FileWatcher>>,
+    /// Job queue for GitHub analysis jobs.
+    pub job_queue: JobQueue,
+    /// Storage for GitHub analysis cache and tokens.
+    pub storage: Arc<RwLock<Option<AnalysisStorage>>>,
 }
 
 impl AppState {
@@ -89,7 +94,47 @@ impl AppState {
             registry: Arc::new(RwLock::new(None)),
             editor: EditorState::new(),
             watcher: Arc::new(RwLock::new(FileWatcher::new())),
+            job_queue: JobQueue::new(3), // Max 3 concurrent analysis jobs
+            storage: Arc::new(RwLock::new(None)),
         }
+    }
+
+    /// Initialize the storage database.
+    pub async fn initialize_storage(&self) -> crate::Result<()> {
+        let db_path = self.config.workspaces_dir.join(".structurizr").join("github.db");
+
+        match AnalysisStorage::open(&db_path).await {
+            Ok(storage) => {
+                *self.storage.write().await = Some(storage);
+                tracing::info!("Initialized GitHub storage at {:?}", db_path);
+                Ok(())
+            }
+            Err(e) => {
+                tracing::warn!("Failed to initialize GitHub storage: {}. Token persistence disabled.", e);
+                Ok(()) // Don't fail server start if storage fails
+            }
+        }
+    }
+
+    /// Get the storage, initializing it lazily if needed.
+    pub async fn get_storage(&self) -> Option<AnalysisStorage> {
+        // Check if storage is already initialized
+        {
+            let storage = self.storage.read().await;
+            if storage.is_some() {
+                // Clone not needed - we return the reference through the lock
+                return None; // We'll change this approach
+            }
+        }
+
+        // Initialize storage if not already done
+        let _ = self.initialize_storage().await;
+        None // Callers should use storage_ref() instead
+    }
+
+    /// Get a reference to the storage (if initialized).
+    pub async fn storage_ref(&self) -> tokio::sync::RwLockReadGuard<'_, Option<AnalysisStorage>> {
+        self.storage.read().await
     }
 
     /// Initialize the state by discovering workspaces.

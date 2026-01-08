@@ -9,6 +9,12 @@ pub enum Error {
     #[error("Server error: {0}")]
     Server(String),
 
+    #[error("Bad request: {0}")]
+    BadRequest(String),
+
+    #[error("Not found: {0}")]
+    NotFound(String),
+
     #[error("Workspace not found: {0}")]
     WorkspaceNotFound(String),
 
@@ -38,15 +44,20 @@ pub enum Error {
 
     #[error("File watcher error: {0}")]
     Watcher(#[from] notify::Error),
+
+    #[error("GitHub error: {0}")]
+    GitHub(String),
 }
 
 impl IntoResponse for Error {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
-            Error::WorkspaceNotFound(_) | Error::ViewNotFound(_) | Error::DocNotFound(_) => {
+            Error::NotFound(_) | Error::WorkspaceNotFound(_) | Error::ViewNotFound(_) | Error::DocNotFound(_) => {
                 (StatusCode::NOT_FOUND, self.to_string())
             }
-            Error::Parse(_) | Error::Dsl(_) => (StatusCode::BAD_REQUEST, self.to_string()),
+            Error::BadRequest(_) | Error::Parse(_) | Error::Dsl(_) | Error::GitHub(_) => {
+                (StatusCode::BAD_REQUEST, self.to_string())
+            }
             _ => (StatusCode::INTERNAL_SERVER_ERROR, self.to_string()),
         };
 

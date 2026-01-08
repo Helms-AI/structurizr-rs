@@ -1153,6 +1153,32 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
             width: 18px;
             height: 18px;
         }}
+        .github-btn {{
+            position: absolute;
+            top: 0;
+            right: 170px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            color: white;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
+            cursor: pointer;
+        }}
+        .github-btn:hover {{
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.4);
+            transform: translateY(-1px);
+        }}
+        .github-btn svg {{
+            width: 18px;
+            height: 18px;
+        }}
         .container {{
             max-width: 1400px;
             margin: 0 auto;
@@ -1891,11 +1917,314 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
             color: #4b5563;
             border: 1px solid #e5e7eb;
         }}
+
+        /* GitHub Import Modal */
+        .github-modal {{
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0, 0, 0, 0.75);
+            z-index: 1000;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(4px);
+        }}
+        .github-modal.open {{
+            display: flex;
+        }}
+        .github-modal-content {{
+            background: white;
+            border-radius: 16px;
+            width: 95%;
+            max-width: 520px;
+            max-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+        }}
+        .github-modal-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 20px 24px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border-radius: 16px 16px 0 0;
+        }}
+        .github-modal-header h2 {{
+            margin: 0;
+            font-size: 20px;
+            font-weight: 600;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }}
+        .github-close-btn {{
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            border-radius: 8px;
+            width: 36px;
+            height: 36px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            color: white;
+            transition: all 0.2s;
+        }}
+        .github-close-btn:hover {{
+            background: rgba(255, 255, 255, 0.2);
+        }}
+        .github-stored-token-info {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 16px;
+            background: linear-gradient(135deg, #d4f4dd 0%, #b8e9c2 100%);
+            border: 1px solid #a8d5b0;
+            border-radius: 8px;
+            margin-bottom: 12px;
+            color: #1a5f2c;
+        }}
+        .github-stored-token-info i {{
+            flex-shrink: 0;
+            color: #2a9d47;
+        }}
+        .github-stored-token-info span {{
+            flex: 1;
+            font-size: 14px;
+        }}
+        .github-stored-token-info small {{
+            color: #4a7a55;
+            font-size: 12px;
+        }}
+        .github-forget-token-btn {{
+            padding: 4px 12px;
+            background: transparent;
+            border: 1px solid #4a7a55;
+            border-radius: 4px;
+            color: #4a7a55;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .github-forget-token-btn:hover {{
+            background: rgba(0, 0, 0, 0.05);
+            border-color: #1a5f2c;
+            color: #1a5f2c;
+        }}
+        .github-modal-body {{
+            padding: 24px;
+            overflow-y: auto;
+        }}
+        .github-form-section {{
+            margin-bottom: 24px;
+        }}
+        .github-form-section h3 {{
+            margin: 0 0 12px 0;
+            font-size: 14px;
+            font-weight: 600;
+            color: #1a1a2e;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+        .github-form-hint {{
+            font-size: 13px;
+            color: #666;
+            margin: 0 0 12px 0;
+            line-height: 1.5;
+        }}
+        .github-form-hint code {{
+            background: #f5f5f5;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 12px;
+        }}
+        .github-form-group {{
+            margin-bottom: 16px;
+        }}
+        .github-form-group label {{
+            display: block;
+            font-size: 14px;
+            font-weight: 500;
+            color: #333;
+            margin-bottom: 6px;
+        }}
+        .github-form-group input[type="text"],
+        .github-form-group input[type="password"] {{
+            width: 100%;
+            padding: 10px 14px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: all 0.2s;
+            box-sizing: border-box;
+        }}
+        .github-form-group input:focus {{
+            outline: none;
+            border-color: #0066cc;
+            box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+        }}
+        .github-input-wrapper {{
+            position: relative;
+        }}
+        .github-input-wrapper input {{
+            padding-right: 44px;
+        }}
+        .github-toggle-btn {{
+            position: absolute;
+            right: 8px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            cursor: pointer;
+            color: #666;
+            padding: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+        .github-toggle-btn:hover {{
+            color: #333;
+        }}
+        .github-help-link {{
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            font-size: 13px;
+            color: #0066cc;
+            text-decoration: none;
+            margin-top: 8px;
+        }}
+        .github-help-link:hover {{
+            text-decoration: underline;
+        }}
+        .github-help-link svg {{
+            width: 14px;
+            height: 14px;
+        }}
+        .github-checkbox-group label {{
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+            font-weight: normal;
+        }}
+        .github-checkbox-group input[type="checkbox"] {{
+            width: 18px;
+            height: 18px;
+            accent-color: #0066cc;
+        }}
+        .github-form-info {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: #f0f9ff;
+            border: 1px solid #bae6fd;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #0369a1;
+            margin-bottom: 20px;
+        }}
+        .github-form-info svg {{
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }}
+        .github-form-info code {{
+            background: rgba(255,255,255,0.5);
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+        }}
+        .github-form-error {{
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            background: #fef2f2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            font-size: 13px;
+            color: #dc2626;
+            margin-bottom: 20px;
+        }}
+        .github-form-error svg {{
+            width: 18px;
+            height: 18px;
+            flex-shrink: 0;
+        }}
+        .github-form-actions {{
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+        }}
+        .github-cancel-btn {{
+            padding: 10px 20px;
+            background: #f5f5f5;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            color: #666;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .github-cancel-btn:hover {{
+            background: #eee;
+            color: #333;
+        }}
+        .github-submit-btn {{
+            padding: 10px 24px;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            border: none;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }}
+        .github-submit-btn:hover {{
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(26, 26, 46, 0.3);
+        }}
+        .github-submit-btn:disabled {{
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }}
+        .github-submit-btn .btn-spinner {{
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top-color: white;
+            border-radius: 50%;
+            animation: github-spin 0.6s linear infinite;
+        }}
+        @keyframes github-spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
     </style>
 </head>
 <body>
     <div class="header">
         <div class="header-content">
+            <button class="github-btn" onclick="openGitHubModal()">
+                <svg viewBox="0 0 16 16" fill="currentColor">
+                    <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                </svg>
+                Import from GitHub
+            </button>
             <a href="/docs" class="docs-btn">
                 <i data-lucide="book-open"></i>
                 Docs
@@ -1928,6 +2257,96 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
             </div>
             <div class="mcp-tab-content" id="mcp-tab-content">
                 <!-- Content rendered by JavaScript -->
+            </div>
+        </div>
+    </div>
+
+    <!-- GitHub Import Modal -->
+    <div class="github-modal" id="github-modal" onclick="if(event.target===this)closeGitHubModal()">
+        <div class="github-modal-content">
+            <div class="github-modal-header">
+                <h2>
+                    <svg viewBox="0 0 16 16" width="24" height="24" fill="currentColor">
+                        <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+                    </svg>
+                    Import from GitHub
+                </h2>
+                <button class="github-close-btn" onclick="closeGitHubModal()">
+                    <i data-lucide="x"></i>
+                </button>
+            </div>
+            <div class="github-modal-body">
+                <form id="github-import-form" onsubmit="handleGitHubImport(event)">
+                    <div class="github-form-section">
+                        <h3>Authentication</h3>
+                        <div id="github-stored-token-info" class="github-stored-token-info" style="display: none;">
+                            <i data-lucide="check-circle"></i>
+                            <span>Using saved token <small id="github-token-last-used"></small></span>
+                            <button type="button" class="github-forget-token-btn" onclick="forgetGitHubToken()">Forget</button>
+                        </div>
+                        <div id="github-token-input-section">
+                            <p class="github-form-hint">Enter your GitHub Personal Access Token with <code>repo</code> scope to access private repositories.</p>
+                            <div class="github-form-group">
+                                <label for="github-token">Personal Access Token</label>
+                                <div class="github-input-wrapper">
+                                    <input type="password" id="github-token" name="token" placeholder="ghp_xxxxxxxxxxxx" autocomplete="off">
+                                    <button type="button" class="github-toggle-btn" onclick="toggleGitHubToken()">
+                                        <i data-lucide="eye"></i>
+                                    </button>
+                                </div>
+                                <a href="https://github.com/settings/tokens/new?scopes=repo,read:org" target="_blank" rel="noopener" class="github-help-link">
+                                    Create a new token <i data-lucide="external-link"></i>
+                                </a>
+                            </div>
+                            <div class="github-form-group github-checkbox-group">
+                                <label>
+                                    <input type="checkbox" name="save_token" id="github-save-token" checked>
+                                    Save token for future imports
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="github-form-section">
+                        <h3>Repository</h3>
+                        <div class="github-form-group">
+                            <label for="github-repo-url">Repository URL</label>
+                            <input type="text" id="github-repo-url" name="repo_url" placeholder="https://github.com/owner/repo or owner/repo" required>
+                        </div>
+                        <div class="github-form-group">
+                            <label for="github-branch">Branch</label>
+                            <input type="text" id="github-branch" name="branch" placeholder="main" value="main">
+                        </div>
+                    </div>
+
+                    <div class="github-form-section">
+                        <h3>Analysis Options</h3>
+                        <div class="github-form-group github-checkbox-group">
+                            <label>
+                                <input type="checkbox" name="include_tests" id="github-include-tests">
+                                Include test files in analysis
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="github-form-info">
+                        <i data-lucide="info"></i>
+                        <span>The workspace will be created at <code id="github-workspace-path">workspaces/owner/repo</code></span>
+                    </div>
+
+                    <div class="github-form-error" id="github-form-error" style="display: none;">
+                        <i data-lucide="alert-circle"></i>
+                        <span id="github-error-message"></span>
+                    </div>
+
+                    <div class="github-form-actions">
+                        <button type="button" class="github-cancel-btn" onclick="closeGitHubModal()">Cancel</button>
+                        <button type="submit" class="github-submit-btn" id="github-submit-btn">
+                            <span class="btn-text">Analyze Repository</span>
+                            <span class="btn-spinner" style="display: none;"></span>
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
     </div>
@@ -2408,6 +2827,212 @@ pub async fn workspaces_index(State(state): State<AppState>) -> Result<Html<Stri
 
     function closeMcpModal() {{
         document.getElementById('mcp-modal').classList.remove('open');
+    }}
+
+    // GitHub Import Modal Functions
+    let hasStoredToken = false;
+
+    async function checkStoredToken() {{
+        try {{
+            const response = await fetch('/api/github/token');
+            if (response.ok) {{
+                const data = await response.json();
+                hasStoredToken = data.has_token;
+
+                const storedTokenInfo = document.getElementById('github-stored-token-info');
+                const tokenInputSection = document.getElementById('github-token-input-section');
+                const lastUsedEl = document.getElementById('github-token-last-used');
+
+                if (data.has_token) {{
+                    storedTokenInfo.style.display = 'flex';
+                    tokenInputSection.style.display = 'none';
+
+                    // Show when last used
+                    if (data.token_info && data.token_info.last_used_at) {{
+                        const lastUsed = new Date(data.token_info.last_used_at);
+                        const now = new Date();
+                        const diffMs = now - lastUsed;
+                        const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+                        const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
+                        const diffMins = Math.floor(diffMs / (1000 * 60));
+
+                        let timeAgo = '';
+                        if (diffDays > 0) {{
+                            timeAgo = `(last used ${{diffDays}} day${{diffDays > 1 ? 's' : ''}} ago)`;
+                        }} else if (diffHours > 0) {{
+                            timeAgo = `(last used ${{diffHours}} hour${{diffHours > 1 ? 's' : ''}} ago)`;
+                        }} else if (diffMins > 0) {{
+                            timeAgo = `(last used ${{diffMins}} min${{diffMins > 1 ? 's' : ''}} ago)`;
+                        }} else {{
+                            timeAgo = '(used just now)';
+                        }}
+                        lastUsedEl.textContent = timeAgo;
+                    }} else {{
+                        lastUsedEl.textContent = '';
+                    }}
+                }} else {{
+                    storedTokenInfo.style.display = 'none';
+                    tokenInputSection.style.display = 'block';
+                }}
+                lucide.createIcons();
+            }}
+        }} catch (e) {{
+            console.warn('Failed to check for stored token:', e);
+        }}
+    }}
+
+    async function forgetGitHubToken() {{
+        try {{
+            const response = await fetch('/api/github/token', {{ method: 'DELETE' }});
+            if (response.ok) {{
+                hasStoredToken = false;
+                document.getElementById('github-stored-token-info').style.display = 'none';
+                document.getElementById('github-token-input-section').style.display = 'block';
+                lucide.createIcons();
+            }}
+        }} catch (e) {{
+            console.warn('Failed to delete token:', e);
+        }}
+    }}
+
+    function openGitHubModal() {{
+        document.getElementById('github-modal').classList.add('open');
+        document.getElementById('github-form-error').style.display = 'none';
+        // Check for stored token
+        checkStoredToken();
+        lucide.createIcons();
+    }}
+
+    function closeGitHubModal() {{
+        document.getElementById('github-modal').classList.remove('open');
+        document.getElementById('github-import-form').reset();
+        document.getElementById('github-form-error').style.display = 'none';
+        const btn = document.getElementById('github-submit-btn');
+        btn.disabled = false;
+        btn.querySelector('.btn-text').style.display = 'block';
+        btn.querySelector('.btn-spinner').style.display = 'none';
+        // Reset token display (will be refreshed on next open)
+        document.getElementById('github-stored-token-info').style.display = 'none';
+        document.getElementById('github-token-input-section').style.display = 'block';
+    }}
+
+    function toggleGitHubToken() {{
+        const input = document.getElementById('github-token');
+        const icon = document.querySelector('.github-toggle-btn i');
+        if (input.type === 'password') {{
+            input.type = 'text';
+            icon.setAttribute('data-lucide', 'eye-off');
+        }} else {{
+            input.type = 'password';
+            icon.setAttribute('data-lucide', 'eye');
+        }}
+        lucide.createIcons();
+    }}
+
+    // Update workspace path preview when repo URL changes
+    document.getElementById('github-repo-url')?.addEventListener('input', function(e) {{
+        const url = e.target.value.trim();
+        const pathEl = document.getElementById('github-workspace-path');
+
+        // Parse owner/repo from URL
+        let owner = 'owner', repo = 'repo';
+
+        // Try different URL formats
+        if (url.includes('github.com/')) {{
+            const match = url.match(/github\.com\/([^\/]+)\/([^\/\s.]+)/);
+            if (match) {{
+                owner = match[1];
+                repo = match[2].replace(/\.git$/, '');
+            }}
+        }} else if (url.includes('/')) {{
+            const parts = url.split('/');
+            if (parts.length >= 2) {{
+                owner = parts[0];
+                repo = parts[1].replace(/\.git$/, '');
+            }}
+        }}
+
+        pathEl.textContent = `workspaces/${{owner}}/${{repo}}`;
+    }});
+
+    async function handleGitHubImport(event) {{
+        event.preventDefault();
+
+        const form = event.target;
+        const btn = document.getElementById('github-submit-btn');
+        const errorDiv = document.getElementById('github-form-error');
+        const errorMsg = document.getElementById('github-error-message');
+
+        // Get form data
+        const token = form.token.value.trim();
+        const repoUrl = form.repo_url.value.trim();
+        const branch = form.branch.value.trim() || 'main';
+        const includeTests = form.include_tests.checked;
+        const saveTokenEl = document.getElementById('github-save-token');
+        const saveToken = saveTokenEl ? saveTokenEl.checked : true;
+
+        // Basic validation
+        if (!repoUrl) {{
+            errorMsg.textContent = 'Please enter a repository URL';
+            errorDiv.style.display = 'flex';
+            lucide.createIcons();
+            return;
+        }}
+
+        // Show loading state
+        btn.disabled = true;
+        btn.querySelector('.btn-text').style.display = 'none';
+        btn.querySelector('.btn-spinner').style.display = 'block';
+        errorDiv.style.display = 'none';
+
+        try {{
+            // Build request body
+            const requestBody = {{
+                repo_url: repoUrl,
+                branch: branch,
+                include_tests: includeTests,
+                use_stored_token: hasStoredToken && !token
+            }};
+
+            // Only include token if provided (otherwise use stored token)
+            if (token) {{
+                requestBody.token = token;
+                requestBody.save_token = saveToken;
+            }}
+
+            const response = await fetch('/api/github/analyze', {{
+                method: 'POST',
+                headers: {{ 'Content-Type': 'application/json' }},
+                body: JSON.stringify(requestBody)
+            }});
+
+            const result = await response.json();
+
+            if (response.ok) {{
+                // Success - redirect to the job status page or workspace
+                if (result.job_id) {{
+                    window.location.href = `/github/jobs/${{result.job_id}}`;
+                }} else if (result.workspace_id) {{
+                    window.location.href = `/w/${{result.workspace_id}}`;
+                }} else {{
+                    closeGitHubModal();
+                    location.reload();
+                }}
+            }} else {{
+                // Show error
+                errorMsg.textContent = result.error || 'Failed to start analysis';
+                errorDiv.style.display = 'flex';
+                lucide.createIcons();
+            }}
+        }} catch (error) {{
+            errorMsg.textContent = 'Network error. Please try again.';
+            errorDiv.style.display = 'flex';
+            lucide.createIcons();
+        }} finally {{
+            btn.disabled = false;
+            btn.querySelector('.btn-text').style.display = 'block';
+            btn.querySelector('.btn-spinner').style.display = 'none';
+        }}
     }}
 
     function switchMcpTab(tabName) {{
@@ -10194,6 +10819,831 @@ pub async fn project_docs_page(
 
     let html = generate_project_documentation_html(&docs_dir, Some(&current_file), &content)?;
     Ok(Html(html))
+}
+
+// ============================================================================
+// GitHub Integration Handlers
+// ============================================================================
+
+/// Request body for GitHub analysis.
+#[derive(Debug, serde::Deserialize)]
+pub struct GitHubAnalyzeRequest {
+    /// GitHub repository URL (e.g., "https://github.com/owner/repo")
+    pub repo_url: String,
+    /// Optional GitHub token for private repos (if not provided, uses stored token)
+    pub token: Option<String>,
+    /// Optional branch (default: repo's default branch)
+    pub branch: Option<String>,
+    /// Whether to save the token for future imports (default: true if token is provided)
+    #[serde(default)]
+    pub save_token: Option<bool>,
+    /// Whether to use the stored token if no token is provided (default: true)
+    #[serde(default = "default_use_stored_token")]
+    pub use_stored_token: bool,
+}
+
+fn default_use_stored_token() -> bool {
+    true
+}
+
+/// Response from GitHub analysis endpoint.
+#[derive(Debug, serde::Serialize)]
+pub struct GitHubAnalyzeResponse {
+    /// Job ID for tracking progress
+    pub job_id: String,
+    /// Status message
+    pub message: String,
+    /// Workspace ID where result will be stored
+    pub workspace_id: String,
+}
+
+/// Response for job status.
+#[derive(Debug, serde::Serialize)]
+pub struct GitHubJobStatusResponse {
+    /// Job ID
+    pub job_id: String,
+    /// Current status
+    pub status: String,
+    /// Progress (0.0 to 1.0) if running
+    pub progress: Option<f32>,
+    /// Status message
+    pub message: Option<String>,
+    /// Workspace ID if completed
+    pub workspace_id: Option<String>,
+    /// Error message if failed
+    pub error: Option<String>,
+}
+
+/// Start GitHub repository analysis.
+pub async fn github_analyze(
+    State(state): State<AppState>,
+    Json(request): Json<GitHubAnalyzeRequest>,
+) -> Result<Json<GitHubAnalyzeResponse>> {
+    use secrecy::SecretString;
+    use structurizr_github::{
+        GitHubClient, GitHubConfig, AnalysisJob, RepositoryAnalyzer,
+        jobs::AnalysisOptions,
+    };
+
+    // Parse the GitHub URL
+    let (owner, repo) = GitHubClient::parse_github_url(&request.repo_url)
+        .map_err(|e| Error::BadRequest(format!("Invalid GitHub URL: {}", e)))?;
+
+    // Create workspace ID from org/repo
+    let workspace_id = format!("{}/{}", owner, repo);
+
+    // Determine which token to use
+    let token_to_use: Option<String> = if let Some(ref token) = request.token {
+        // Token provided in request - use it
+        Some(token.clone())
+    } else if request.use_stored_token {
+        // Try to use stored token
+        let storage = state.storage.read().await;
+        if let Some(ref storage) = *storage {
+            match storage.get_github_token().await {
+                Ok(Some(secret)) => {
+                    use secrecy::ExposeSecret;
+                    tracing::info!("Using stored GitHub token for authentication");
+                    // Touch the token to update last_used_at
+                    let _ = storage.touch_github_token().await;
+                    Some(secret.expose_secret().to_string())
+                }
+                Ok(None) => {
+                    tracing::debug!("No stored GitHub token found");
+                    None
+                }
+                Err(e) => {
+                    tracing::warn!("Failed to retrieve stored token: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        }
+    } else {
+        None
+    };
+
+    // Save token if requested (default: true when token is provided)
+    let should_save = request.save_token.unwrap_or(request.token.is_some());
+    if should_save {
+        if let Some(ref token) = request.token {
+            let storage = state.storage.read().await;
+            if let Some(ref storage) = *storage {
+                let secret = SecretString::from(token.clone());
+                if let Err(e) = storage.save_github_token(&secret, Some("Saved during import")).await {
+                    tracing::warn!("Failed to save GitHub token: {}", e);
+                } else {
+                    tracing::info!("Saved GitHub token for future imports");
+                }
+            }
+        }
+    }
+
+    // Create the GitHub config
+    let config = if let Some(ref token) = token_to_use {
+        GitHubConfig::with_token(token)
+    } else {
+        GitHubConfig::default()
+    };
+
+    // Create the client and verify the repository exists
+    let client = GitHubClient::new(config.clone()).await
+        .map_err(|e| Error::BadRequest(format!("Failed to create GitHub client: {}", e)))?;
+
+    let repo_info = client.get_repository(&owner, &repo).await
+        .map_err(|e| Error::BadRequest(format!("Failed to access repository: {}", e)))?;
+
+    // Create analysis job
+    let mut options = AnalysisOptions::default();
+    if let Some(branch) = request.branch {
+        options.branch = Some(branch);
+    } else {
+        options.branch = Some(repo_info.default_branch.clone());
+    }
+
+    let job = AnalysisJob::new(&owner, &repo, options);
+    let job_id = job.id.to_string();
+
+    tracing::info!(
+        "GitHub analysis requested for {}/{} (workspace: {}, job: {})",
+        owner, repo, workspace_id, job_id
+    );
+
+    // Enqueue the job
+    let job_id_clone = state.job_queue.enqueue(job.clone()).await;
+
+    // Spawn background task to run the analysis
+    let workspaces_dir = state.config.workspaces_dir.clone();
+    let state_clone = state.clone();
+
+    tokio::spawn(async move {
+        // Create a new client for the background task
+        let client = match GitHubClient::new(config).await {
+            Ok(c) => c,
+            Err(e) => {
+                tracing::error!("Failed to create GitHub client for analysis: {}", e);
+                let _ = state_clone.job_queue.update(
+                    job_id_clone,
+                    structurizr_github::JobStatus::Failed {
+                        error: e.to_string(),
+                        failed_at: chrono::Utc::now(),
+                    },
+                ).await;
+                return;
+            }
+        };
+
+        // Create the analyzer
+        let analyzer = RepositoryAnalyzer::new(client, &workspaces_dir);
+
+        // Get the job from the queue and run analysis
+        if let Some(mut job) = state_clone.job_queue.dequeue().await {
+            match analyzer.analyze(&mut job).await {
+                Ok(workspace_path) => {
+                    tracing::info!(
+                        "Analysis complete for {}: {}",
+                        job.workspace_id,
+                        workspace_path.display()
+                    );
+
+                    // Refresh workspace registry to pick up the new workspace
+                    if let Err(e) = state_clone.initialize().await {
+                        tracing::warn!("Failed to refresh workspace registry: {}", e);
+                    }
+
+                    // Update job status (already done by analyzer.analyze)
+                    let _ = state_clone.job_queue.update(
+                        job_id_clone,
+                        structurizr_github::JobStatus::Completed {
+                            workspace_id: job.workspace_id.clone(),
+                            completed_at: chrono::Utc::now(),
+                        },
+                    ).await;
+                }
+                Err(e) => {
+                    tracing::error!("Analysis failed for {}: {}", job.workspace_id, e);
+                    let _ = state_clone.job_queue.update(
+                        job_id_clone,
+                        structurizr_github::JobStatus::Failed {
+                            error: e.to_string(),
+                            failed_at: chrono::Utc::now(),
+                        },
+                    ).await;
+                }
+            }
+        }
+    });
+
+    Ok(Json(GitHubAnalyzeResponse {
+        job_id: job_id.clone(),
+        message: format!(
+            "Analysis started for {}/{}. Workspace will be created at workspaces/{}/{}",
+            owner, repo, owner, repo
+        ),
+        workspace_id,
+    }))
+}
+
+/// Get the status of a GitHub analysis job.
+pub async fn github_job_status(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<Json<GitHubJobStatusResponse>> {
+    use structurizr_github::jobs::JobId;
+
+    // Parse the job_id as a JobId
+    let id: JobId = job_id.parse()
+        .map_err(|_| Error::NotFound(format!("Invalid job ID: {}", job_id)))?;
+
+    // Get the job from the queue
+    let job = state.job_queue.get(id).await
+        .ok_or_else(|| Error::NotFound(format!("Job not found: {}", job_id)))?;
+
+    // Convert JobStatus to response format
+    let (status, progress, message, workspace_id, error) = match &job.status {
+        structurizr_github::JobStatus::Queued => {
+            ("queued".to_string(), Some(0.0), Some("Job queued, waiting to start".to_string()), None, None)
+        }
+        structurizr_github::JobStatus::Running { progress, message } => {
+            ("running".to_string(), Some(*progress), message.clone(), None, None)
+        }
+        structurizr_github::JobStatus::Completed { workspace_id, .. } => {
+            ("completed".to_string(), Some(1.0), Some("Analysis complete".to_string()), Some(workspace_id.clone()), None)
+        }
+        structurizr_github::JobStatus::Failed { error, .. } => {
+            ("failed".to_string(), None, None, None, Some(error.clone()))
+        }
+        structurizr_github::JobStatus::Cancelled { .. } => {
+            ("cancelled".to_string(), None, Some("Job was cancelled".to_string()), None, None)
+        }
+    };
+
+    Ok(Json(GitHubJobStatusResponse {
+        job_id,
+        status,
+        progress,
+        message,
+        workspace_id,
+        error,
+    }))
+}
+
+/// List all GitHub analysis jobs.
+pub async fn github_list_jobs(
+    State(state): State<AppState>,
+) -> Result<Json<Vec<GitHubJobStatusResponse>>> {
+    // Get all jobs from the queue
+    let jobs = state.job_queue.list(None).await;
+
+    // Convert to response format
+    let responses: Vec<GitHubJobStatusResponse> = jobs.iter().map(|job| {
+        let (status, progress, message, workspace_id, error) = match &job.status {
+            structurizr_github::JobStatus::Queued => {
+                ("queued".to_string(), Some(0.0), Some("Job queued, waiting to start".to_string()), None, None)
+            }
+            structurizr_github::JobStatus::Running { progress, message } => {
+                ("running".to_string(), Some(*progress), message.clone(), None, None)
+            }
+            structurizr_github::JobStatus::Completed { workspace_id, .. } => {
+                ("completed".to_string(), Some(1.0), Some("Analysis complete".to_string()), Some(workspace_id.clone()), None)
+            }
+            structurizr_github::JobStatus::Failed { error, .. } => {
+                ("failed".to_string(), None, None, None, Some(error.clone()))
+            }
+            structurizr_github::JobStatus::Cancelled { .. } => {
+                ("cancelled".to_string(), None, Some("Job was cancelled".to_string()), None, None)
+            }
+        };
+
+        GitHubJobStatusResponse {
+            job_id: job.id.to_string(),
+            status,
+            progress,
+            message,
+            workspace_id,
+            error,
+        }
+    }).collect();
+
+    Ok(Json(responses))
+}
+
+/// Display the job status page with live progress updates.
+pub async fn github_job_page(
+    State(state): State<AppState>,
+    Path(job_id): Path<String>,
+) -> Result<Html<String>> {
+    use structurizr_github::jobs::JobId;
+
+    // Parse the job_id as a JobId
+    let id: JobId = job_id.parse()
+        .map_err(|_| Error::NotFound(format!("Invalid job ID: {}", job_id)))?;
+
+    // Get the job from the queue
+    let job = state.job_queue.get(id).await
+        .ok_or_else(|| Error::NotFound(format!("Job not found: {}", job_id)))?;
+
+    let html = format!(
+        r##"<!DOCTYPE html>
+<html>
+<head>
+    <title>GitHub Analysis - {repo_name}</title>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        * {{ box-sizing: border-box; }}
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f5f5f5;
+            min-height: 100vh;
+        }}
+        .header {{
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            color: white;
+            padding: 40px 20px;
+            text-align: center;
+        }}
+        .header h1 {{
+            margin: 0 0 10px 0;
+            font-size: 2rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+        }}
+        .header h1 svg {{
+            width: 32px;
+            height: 32px;
+        }}
+        .header p {{
+            margin: 0;
+            opacity: 0.8;
+            font-size: 1.1rem;
+        }}
+        .container {{
+            max-width: 600px;
+            margin: 40px auto;
+            padding: 0 20px;
+        }}
+        .status-card {{
+            background: white;
+            border-radius: 16px;
+            padding: 32px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+        }}
+        .status-header {{
+            display: flex;
+            align-items: center;
+            gap: 16px;
+            margin-bottom: 24px;
+        }}
+        .status-icon {{
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }}
+        .status-icon.queued {{ background: #fef3c7; color: #f59e0b; }}
+        .status-icon.running {{ background: #dbeafe; color: #3b82f6; }}
+        .status-icon.completed {{ background: #dcfce7; color: #22c55e; }}
+        .status-icon.failed {{ background: #fee2e2; color: #ef4444; }}
+        .status-icon.cancelled {{ background: #f3f4f6; color: #6b7280; }}
+        .status-icon svg {{
+            width: 24px;
+            height: 24px;
+        }}
+        .status-title h2 {{
+            margin: 0 0 4px 0;
+            font-size: 1.25rem;
+            color: #1a1a2e;
+        }}
+        .status-title p {{
+            margin: 0;
+            color: #666;
+            font-size: 0.9rem;
+        }}
+        .progress-container {{
+            margin-bottom: 24px;
+        }}
+        .progress-bar {{
+            height: 8px;
+            background: #e5e7eb;
+            border-radius: 4px;
+            overflow: hidden;
+        }}
+        .progress-fill {{
+            height: 100%;
+            background: linear-gradient(90deg, #3b82f6, #60a5fa);
+            border-radius: 4px;
+            transition: width 0.3s ease;
+        }}
+        .progress-text {{
+            display: flex;
+            justify-content: space-between;
+            margin-top: 8px;
+            font-size: 0.85rem;
+            color: #666;
+        }}
+        .job-details {{
+            background: #f9fafb;
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 24px;
+        }}
+        .job-detail {{
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px solid #e5e7eb;
+        }}
+        .job-detail:last-child {{
+            border-bottom: none;
+        }}
+        .job-detail-label {{
+            color: #666;
+            font-size: 0.9rem;
+        }}
+        .job-detail-value {{
+            color: #1a1a2e;
+            font-weight: 500;
+            font-size: 0.9rem;
+        }}
+        .job-detail-value code {{
+            background: #e5e7eb;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.85rem;
+        }}
+        .actions {{
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }}
+        .btn {{
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 12px 24px;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            text-decoration: none;
+            cursor: pointer;
+            transition: all 0.2s;
+        }}
+        .btn-primary {{
+            background: #3b82f6;
+            color: white;
+            border: none;
+        }}
+        .btn-primary:hover {{
+            background: #2563eb;
+        }}
+        .btn-secondary {{
+            background: white;
+            color: #1a1a2e;
+            border: 1px solid #d1d5db;
+        }}
+        .btn-secondary:hover {{
+            background: #f9fafb;
+        }}
+        .error-message {{
+            background: #fee2e2;
+            border: 1px solid #fecaca;
+            border-radius: 8px;
+            padding: 16px;
+            color: #991b1b;
+            margin-bottom: 24px;
+        }}
+        .spinner {{
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            border: 2px solid #e5e7eb;
+            border-top-color: #3b82f6;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }}
+        @keyframes spin {{
+            to {{ transform: rotate(360deg); }}
+        }}
+        .back-link {{
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            color: rgba(255,255,255,0.8);
+            text-decoration: none;
+            font-size: 0.9rem;
+            margin-bottom: 16px;
+        }}
+        .back-link:hover {{
+            color: white;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <a href="/" class="back-link">
+            <i data-lucide="arrow-left"></i> Back to workspaces
+        </a>
+        <h1>
+            <svg viewBox="0 0 16 16" fill="currentColor">
+                <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/>
+            </svg>
+            GitHub Analysis
+        </h1>
+        <p>Analyzing {owner}/{repo}</p>
+    </div>
+
+    <div class="container">
+        <div class="status-card">
+            <div class="status-header">
+                <div class="status-icon" id="status-icon">
+                    <i data-lucide="clock" id="status-lucide-icon"></i>
+                </div>
+                <div class="status-title">
+                    <h2 id="status-title">Initializing...</h2>
+                    <p id="status-message">Preparing analysis...</p>
+                </div>
+            </div>
+
+            <div class="progress-container" id="progress-container">
+                <div class="progress-bar">
+                    <div class="progress-fill" id="progress-fill" style="width: 0%"></div>
+                </div>
+                <div class="progress-text">
+                    <span id="progress-message">Starting...</span>
+                    <span id="progress-percent">0%</span>
+                </div>
+            </div>
+
+            <div class="job-details">
+                <div class="job-detail">
+                    <span class="job-detail-label">Repository</span>
+                    <span class="job-detail-value"><code>{owner}/{repo}</code></span>
+                </div>
+                <div class="job-detail">
+                    <span class="job-detail-label">Job ID</span>
+                    <span class="job-detail-value"><code>{job_id}</code></span>
+                </div>
+                <div class="job-detail">
+                    <span class="job-detail-label">Workspace</span>
+                    <span class="job-detail-value"><code>{workspace_id}</code></span>
+                </div>
+            </div>
+
+            <div class="error-message" id="error-message" style="display: none;"></div>
+
+            <div class="actions" id="actions">
+                <a href="/" class="btn btn-secondary">
+                    <i data-lucide="x"></i> Cancel
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const JOB_ID = '{job_id}';
+        const WORKSPACE_ID = '{workspace_id}';
+        let pollInterval = null;
+
+        function updateUI(data) {{
+            const statusIcon = document.getElementById('status-icon');
+            const statusLucideIcon = document.getElementById('status-lucide-icon');
+            const statusTitle = document.getElementById('status-title');
+            const statusMessage = document.getElementById('status-message');
+            const progressContainer = document.getElementById('progress-container');
+            const progressFill = document.getElementById('progress-fill');
+            const progressMessage = document.getElementById('progress-message');
+            const progressPercent = document.getElementById('progress-percent');
+            const errorMessage = document.getElementById('error-message');
+            const actions = document.getElementById('actions');
+
+            // Update status icon and class
+            statusIcon.className = 'status-icon ' + data.status;
+
+            switch(data.status) {{
+                case 'queued':
+                    statusLucideIcon.setAttribute('data-lucide', 'clock');
+                    statusTitle.textContent = 'Queued';
+                    statusMessage.textContent = 'Waiting to start analysis...';
+                    progressContainer.style.display = 'block';
+                    progressFill.style.width = '0%';
+                    progressMessage.textContent = 'Waiting in queue...';
+                    progressPercent.textContent = '0%';
+                    break;
+
+                case 'running':
+                    statusLucideIcon.setAttribute('data-lucide', 'loader');
+                    statusTitle.textContent = 'Analyzing';
+                    statusMessage.textContent = data.message || 'Analysis in progress...';
+                    progressContainer.style.display = 'block';
+                    const percent = Math.round((data.progress || 0) * 100);
+                    progressFill.style.width = percent + '%';
+                    progressMessage.textContent = data.message || 'Processing...';
+                    progressPercent.textContent = percent + '%';
+                    break;
+
+                case 'completed':
+                    statusLucideIcon.setAttribute('data-lucide', 'check-circle');
+                    statusTitle.textContent = 'Complete!';
+                    statusMessage.textContent = 'Architecture model generated successfully';
+                    progressContainer.style.display = 'none';
+                    actions.innerHTML = `
+                        <a href="/w/${{WORKSPACE_ID}}" class="btn btn-primary">
+                            <i data-lucide="layout-dashboard"></i> View Workspace
+                        </a>
+                        <a href="/" class="btn btn-secondary">
+                            <i data-lucide="home"></i> Back to Home
+                        </a>
+                    `;
+                    clearInterval(pollInterval);
+                    break;
+
+                case 'failed':
+                    statusLucideIcon.setAttribute('data-lucide', 'x-circle');
+                    statusTitle.textContent = 'Failed';
+                    statusMessage.textContent = 'Analysis encountered an error';
+                    progressContainer.style.display = 'none';
+                    errorMessage.style.display = 'block';
+                    errorMessage.textContent = data.error || 'Unknown error occurred';
+                    actions.innerHTML = `
+                        <a href="/" class="btn btn-primary">
+                            <i data-lucide="refresh-cw"></i> Try Again
+                        </a>
+                    `;
+                    clearInterval(pollInterval);
+                    break;
+
+                case 'cancelled':
+                    statusLucideIcon.setAttribute('data-lucide', 'ban');
+                    statusTitle.textContent = 'Cancelled';
+                    statusMessage.textContent = 'Analysis was cancelled';
+                    progressContainer.style.display = 'none';
+                    actions.innerHTML = `
+                        <a href="/" class="btn btn-primary">
+                            <i data-lucide="home"></i> Back to Home
+                        </a>
+                    `;
+                    clearInterval(pollInterval);
+                    break;
+            }}
+
+            lucide.createIcons();
+        }}
+
+        async function pollStatus() {{
+            try {{
+                const response = await fetch(`/api/github/jobs/${{JOB_ID}}`);
+                if (!response.ok) {{
+                    console.error('Failed to fetch job status');
+                    return;
+                }}
+                const data = await response.json();
+                updateUI(data);
+            }} catch (error) {{
+                console.error('Error polling job status:', error);
+            }}
+        }}
+
+        // Initial poll
+        pollStatus();
+
+        // Poll every 2 seconds
+        pollInterval = setInterval(pollStatus, 2000);
+
+        // Initialize Lucide icons
+        lucide.createIcons();
+    </script>
+</body>
+</html>"##,
+        repo_name = format!("{}/{}", job.owner, job.repo),
+        owner = job.owner,
+        repo = job.repo,
+        job_id = job_id,
+        workspace_id = job.workspace_id,
+    );
+
+    Ok(Html(html))
+}
+
+/// Response for token status check.
+#[derive(Debug, serde::Serialize)]
+pub struct GitHubTokenStatusResponse {
+    /// Whether a token is stored
+    pub has_token: bool,
+    /// Token metadata (without the actual token value)
+    pub token_info: Option<TokenInfoResponse>,
+}
+
+/// Token info without the actual token value.
+#[derive(Debug, serde::Serialize)]
+pub struct TokenInfoResponse {
+    pub description: Option<String>,
+    pub created_at: Option<String>,
+    pub last_used_at: Option<String>,
+}
+
+/// Check if a GitHub token is stored.
+pub async fn github_token_status(
+    State(state): State<AppState>,
+) -> Result<Json<GitHubTokenStatusResponse>> {
+    let storage = state.storage.read().await;
+
+    if let Some(ref storage) = *storage {
+        let has_token = storage.has_github_token().await.unwrap_or(false);
+
+        let token_info = if has_token {
+            storage.get_github_token_info().await.ok().flatten().map(|info| {
+                TokenInfoResponse {
+                    description: info.description,
+                    created_at: info.created_at.map(|dt| dt.to_rfc3339()),
+                    last_used_at: info.last_used_at.map(|dt| dt.to_rfc3339()),
+                }
+            })
+        } else {
+            None
+        };
+
+        Ok(Json(GitHubTokenStatusResponse {
+            has_token,
+            token_info,
+        }))
+    } else {
+        Ok(Json(GitHubTokenStatusResponse {
+            has_token: false,
+            token_info: None,
+        }))
+    }
+}
+
+/// Request body for saving a GitHub token.
+#[derive(Debug, serde::Deserialize)]
+pub struct SaveGitHubTokenRequest {
+    /// The GitHub personal access token
+    pub token: String,
+    /// Optional description for the token
+    pub description: Option<String>,
+}
+
+/// Save a GitHub token.
+pub async fn github_token_save(
+    State(state): State<AppState>,
+    Json(request): Json<SaveGitHubTokenRequest>,
+) -> Result<Json<GitHubTokenStatusResponse>> {
+    use secrecy::SecretString;
+
+    let storage = state.storage.read().await;
+
+    if let Some(ref storage) = *storage {
+        let secret = SecretString::from(request.token);
+        let description = request.description.as_deref().unwrap_or("Saved manually");
+
+        storage.save_github_token(&secret, Some(description)).await
+            .map_err(|e| Error::Server(format!("Failed to save token: {}", e)))?;
+
+        // Return updated status
+        let has_token = true;
+        let token_info = storage.get_github_token_info().await.ok().flatten().map(|info| {
+            TokenInfoResponse {
+                description: info.description,
+                created_at: info.created_at.map(|dt| dt.to_rfc3339()),
+                last_used_at: info.last_used_at.map(|dt| dt.to_rfc3339()),
+            }
+        });
+
+        Ok(Json(GitHubTokenStatusResponse {
+            has_token,
+            token_info,
+        }))
+    } else {
+        Err(Error::Server("Storage not initialized".to_string()))
+    }
+}
+
+/// Delete the stored GitHub token.
+pub async fn github_token_delete(
+    State(state): State<AppState>,
+) -> Result<Json<GitHubTokenStatusResponse>> {
+    let storage = state.storage.read().await;
+
+    if let Some(ref storage) = *storage {
+        storage.delete_github_token().await
+            .map_err(|e| Error::Server(format!("Failed to delete token: {}", e)))?;
+
+        Ok(Json(GitHubTokenStatusResponse {
+            has_token: false,
+            token_info: None,
+        }))
+    } else {
+        Err(Error::Server("Storage not initialized".to_string()))
+    }
 }
 
 // ============================================================================

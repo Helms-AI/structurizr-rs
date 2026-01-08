@@ -1,0 +1,54 @@
+[package]
+name = "structurizr-github"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "GitHub integration for Structurizr - analyze repositories and generate C4 models"
+
+[features]
+default = []
+
+[dependencies]
+# Core dependencies
+structurizr-core.workspace = true
+structurizr-dsl.workspace = true
+structurizr-analysis.workspace = true
+
+# Async runtime
+tokio.workspace = true
+
+# Serialization
+serde.workspace = true
+serde_json.workspace = true
+
+# Error handling
+thiserror.workspace = true
+anyhow.workspace = true
+
+# Logging
+tracing.workspace = true
+
+# Date/time
+chrono.workspace = true
+
+# UUID for job IDs
+uuid.workspace = true
+
+# HTTP client for GitHub API
+reqwest = { version = "0.11", features = ["json", "stream"] }
+
+# GitHub API client
+octocrab = "0.41"
+
+# SQLite for caching analysis results
+rusqlite = { version = "0.32", features = ["bundled"] }
+
+# Secure secret storage
+secrecy = "0.10"
+
+# File path handling
+tempfile = "3"
+
+[dev-dependencies]
+pretty_assertions.workspace = true
+tokio = { workspace = true, features = ["test-util", "macros"] }

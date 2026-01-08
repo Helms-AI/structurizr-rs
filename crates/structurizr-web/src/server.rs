@@ -38,6 +38,7 @@ impl Server {
         state: AppState,
         #[cfg(feature = "mcp-proxy")] mcp_proxy: Option<std::sync::Arc<crate::mcp_proxy::McpProxyState>>,
     ) -> Router {
+        #[allow(unused_mut)] // Mutability needed when mcp-proxy feature is enabled
         let mut app = Router::new()
             // Workspaces index
             .route("/", get(handlers::workspaces_index))
@@ -54,7 +55,20 @@ impl Server {
             // The dispatcher parses the path to extract workspace_id and remaining segments
             .route("/w/*path", get(handlers::workspace_dispatch))
             .route("/w/*path", put(handlers::workspace_dispatch_put))
-            .route("/w/*path", post(handlers::workspace_dispatch_post));
+            .route("/w/*path", post(handlers::workspace_dispatch_post))
+
+            // GitHub API endpoints
+            .route("/api/github/analyze", post(handlers::github_analyze))
+            .route("/api/github/jobs/:job_id", get(handlers::github_job_status))
+            .route("/api/github/jobs", get(handlers::github_list_jobs))
+
+            // GitHub token management
+            .route("/api/github/token", get(handlers::github_token_status))
+            .route("/api/github/token", post(handlers::github_token_save))
+            .route("/api/github/token", axum::routing::delete(handlers::github_token_delete))
+
+            // GitHub job status page (HTML)
+            .route("/github/jobs/:job_id", get(handlers::github_job_page));
 
         // Add MCP proxy routes if enabled
         #[cfg(feature = "mcp-proxy")]
@@ -91,6 +105,11 @@ impl Server {
         } else {
             let count = state.list_workspaces().await.len();
             info!("Discovered {} workspace(s)", count);
+        }
+
+        // Initialize GitHub storage (for token persistence)
+        if let Err(e) = state.initialize_storage().await {
+            tracing::warn!("Failed to initialize GitHub storage: {}. Token persistence disabled.", e);
         }
 
         // Start file watcher for auto-reload
