@@ -1,0 +1,10 @@
+{
+  "analyzed_at": "2026-01-08T02:21:33.029426+00:00",
+  "default_branch": "master",
+  "description": "Strongly typed YAML library for Rust",
+  "full_name": "dtolnay/serde-yaml",
+  "html_url": "https://github.com/dtolnay/serde-yaml",
+  "language": "Rust",
+  "owner": "dtolnay",
+  "repo": "serde-yaml"
+}

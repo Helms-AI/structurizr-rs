@@ -1,0 +1,10 @@
+{
+  "analyzed_at": "2026-01-08T01:55:07.764891+00:00",
+  "default_branch": "master",
+  "description": "Rust language bindings for TensorFlow",
+  "full_name": "tensorflow/rust",
+  "html_url": "https://github.com/tensorflow/rust",
+  "language": "Rust",
+  "owner": "tensorflow",
+  "repo": "rust"
+}
