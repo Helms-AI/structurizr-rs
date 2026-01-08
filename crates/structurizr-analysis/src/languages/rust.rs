@@ -37,7 +37,8 @@ struct ImportInfo {
     source_module: String,
     /// The imported path (e.g., "crate::services::UserService")
     imported_path: String,
-    /// Whether this is a crate-local import
+    /// Whether this is a crate-local import (reserved for future filtering)
+    #[allow(dead_code)]
     is_local: bool,
 }
 
@@ -48,7 +49,8 @@ struct ImplInfo {
     target_type: String,
     /// The trait being implemented, if any (e.g., "Repository")
     trait_name: Option<String>,
-    /// The module path where this impl is defined
+    /// The module path where this impl is defined (reserved for future scoping)
+    #[allow(dead_code)]
     module_path: String,
 }
 
@@ -184,8 +186,8 @@ impl RustAnalyzer {
     ) -> Vec<InferredRelationship> {
         let mut relationships = Vec::new();
 
-        // Build a set of component IDs for matching
-        let component_ids: HashSet<&str> = components.iter().map(|c| c.id.as_str()).collect();
+        // Build a set of component IDs for matching (reserved for future optimization)
+        let _component_ids: HashSet<&str> = components.iter().map(|c| c.id.as_str()).collect();
 
         // Process imports to create relationships
         for import in imports {
